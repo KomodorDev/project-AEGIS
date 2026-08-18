@@ -599,6 +599,8 @@ Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
   return Result<FixedPoint>::success(canonical(coefficient.value(), result_scale));
 }
 
+// Header entry points have already normalized source integer width and sign; validated helpers
+// still own the semantic maximum scale and rounding-mode checks shared by every caller.
 Result<FixedPoint> FixedPoint::rescale_validated(std::uint64_t target_scale,
                                                  RoundingMode rounding) const {
   // Validate policy and scale before narrowing the public input to the stored scale type.

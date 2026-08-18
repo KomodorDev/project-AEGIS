@@ -158,6 +158,8 @@ Result<Quantity> InstrumentMetadata::quantize_quantity(Quantity quantity,
   return remap_numeric_error(quantity.quantize(params_.quantity_step, rounding), "quantity");
 }
 
+// The public constrained overload has normalized scale signedness and width; this helper keeps
+// quantity alignment, arithmetic, and error remapping in one non-templated implementation path.
 Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts,
                                                               std::uint64_t target_scale,
                                                               RoundingMode rounding) const {

@@ -37,6 +37,8 @@ public:
   // preserve exactness and canonicalize redundant fractional zeros.
   // Interesting syntax: the constrained overload plus a deleted floating-point overload makes
   // binary-float construction ill-formed instead of permitting an implicit lossy conversion.
+  // Deducing both inputs preserves their width and signedness for range checks; conversion to the
+  // kernel's fixed-width representation happens only after both checks pass.
   template <detail::CheckedIntegerInput Coefficient, detail::CheckedIntegerInput Scale>
   [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient, Scale scale) {
     if (!std::in_range<std::int64_t>(coefficient)) {
@@ -64,6 +66,9 @@ public:
   // to provide a target scale and explicit rounding policy.
   [[nodiscard]] Result<FixedPoint> checked_add(FixedPoint other) const;
   [[nodiscard]] Result<FixedPoint> checked_subtract(FixedPoint other) const;
+
+  // Keep a signed target scale in its source type until in_range rejects negatives; only normalized
+  // uint64_t values cross into the out-of-line arithmetic implementation.
   template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<FixedPoint> rescale(Scale target_scale, RoundingMode rounding) const {
     if (!std::in_range<std::uint64_t>(target_scale)) {
@@ -119,6 +124,8 @@ private:
   explicit constexpr FixedPoint(std::int64_t coefficient, std::uint8_t scale) noexcept
       : coefficient_{coefficient}, scale_{scale} {}
 
+  // Public templates normalize source types; these fixed-width helpers enforce decimal-scale and
+  // rounding semantics without multiplying implementation overloads for every integer type.
   [[nodiscard]] static FixedPoint canonical(std::int64_t coefficient, std::uint8_t scale) noexcept;
   [[nodiscard]] static Result<FixedPoint> from_validated_scaled(std::int64_t coefficient,
                                                                 std::uint64_t scale);
@@ -192,6 +199,8 @@ public:
     return wrap(value_.checked_subtract(other.value_));
   }
 
+  // Forward the original integral scale type so the kernel, rather than an implicit conversion in
+  // the nominal wrapper, owns negative and out-of-range rejection.
   template <CheckedIntegerInput Scale>
   [[nodiscard]] Result<DecimalValue> rescale(Scale target_scale, RoundingMode rounding) const {
     return wrap(value_.rescale(target_scale, rounding));

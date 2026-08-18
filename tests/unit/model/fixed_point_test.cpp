@@ -38,6 +38,7 @@ template <typename Scale>
 concept HasScaledDivide =
     requires(FixedPoint value, Scale scale) { value.divide(value, scale, RoundingMode::Exact); };
 
+// Model a legacy unscoped enum that would otherwise convert implicitly to an integer scale.
 enum LegacyScale { LegacyScaleZero = 0 };
 
 // Price, Quantity, and Notional are compile-time domains rather than aliases of one interchangeable
@@ -56,6 +57,9 @@ static_assert(!HasFromScaled<Price, double, int>);
 static_assert(!HasFromScaled<Quantity, int, float>);
 static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
+
+// Boolean coefficients/scales and legacy enums are not numeric domain inputs; ordinary signed and
+// wide unsigned integers remain callable and are checked at runtime.
 static_assert(!HasFromScaled<FixedPoint, bool, int>);
 static_assert(!HasFromScaled<Price, bool, int>);
 static_assert(!HasFromScaled<FixedPoint, char, int>);
@@ -71,7 +75,8 @@ static_assert(!HasRescale<FixedPoint, bool>);
 static_assert(!HasRescale<Price, LegacyScale>);
 static_assert(!HasRescale<FixedPoint, char>);
 
-// The product and quotient scale firewalls must reject floating inputs independently.
+// Product and quotient target scales independently enforce the same non-domain-input firewall used
+// by construction and rescaling, rather than accepting implicit bool, enum, or float conversions.
 static_assert(!HasScaledMultiply<float>);
 static_assert(!HasScaledDivide<long double>);
 static_assert(!HasScaledMultiply<bool>);
@@ -142,6 +147,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   REQUIRE_FALSE(invalid_scale);
   CHECK(invalid_scale.error().code == DomainErrorCode::InvalidScale);
 
+  // Preserve the signed scale until validation so -1 reports InvalidScale instead of unsigned wrap.
   const auto negative_scale = FixedPoint::from_scaled(1, -1);
   REQUIRE_FALSE(negative_scale);
   CHECK(negative_scale.error().code == DomainErrorCode::InvalidScale);
@@ -316,6 +322,8 @@ TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-poi
     CHECK(result.error().code == DomainErrorCode::InvalidScale);
   }
 
+  // Rescaling also preserves a signed target until validation, so -1 cannot wrap to an unsigned
+  // scale before the domain error is selected.
   const auto negative_scale = decimal("1").rescale(-1, RoundingMode::Exact);
   REQUIRE_FALSE(negative_scale);
   CHECK(negative_scale.error() ==

@@ -17,11 +17,15 @@ concept HasContractValue = requires(InstrumentMetadata metadata, Quantity quanti
   metadata.contract_value(quantity, scale, RoundingMode::Exact);
 };
 
+// Model a legacy unscoped enum that would otherwise convert implicitly to an integer scale.
 enum LegacyScale { LegacyScaleZero = 0 };
 
 // Contract conversion has the same compile-time floating-point precision firewall as FixedPoint.
 static_assert(!HasContractValue<double>);
 static_assert(!HasContractValue<long double>);
+
+// Bool and legacy enums remain non-invocable, while a signed integer reaches checked runtime
+// validation so negative scales can return a domain error.
 static_assert(!HasContractValue<bool>);
 static_assert(!HasContractValue<LegacyScale>);
 static_assert(!HasContractValue<char>);
@@ -89,6 +93,7 @@ TEST_CASE("the reference inverse metadata is a revisioned fixture with declared 
   REQUIRE_FALSE(fractional);
   CHECK(fractional.error().code == DomainErrorCode::MisalignedQuantity);
 
+  // Retaining the signed input through the public gate prevents unsigned wrap before validation.
   const auto negative_scale =
       metadata.value().contract_value(parsed<Quantity>("1"), -1, RoundingMode::Exact);
   REQUIRE_FALSE(negative_scale);

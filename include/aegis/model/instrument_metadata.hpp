@@ -101,6 +101,8 @@ public:
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
   // Interesting syntax: the deleted floating-point overload makes a lossy target scale fail during
   // overload resolution, while wide integers remain available for checked validation.
+  // The deduced scale retains its sign through in_range, so negative values become InvalidScale
+  // instead of wrapping into a large unsigned target.
   template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<Notional> contract_value(Quantity contracts, Scale target_scale,
                                                 RoundingMode rounding) const {
@@ -116,6 +118,7 @@ public:
   [[nodiscard]] std::string_view contract_value_currency() const noexcept;
 
 private:
+  // The constrained public gate normalizes scale width before this stable implementation boundary.
   [[nodiscard]] Result<Notional> contract_value_validated(Quantity contracts,
                                                           std::uint64_t target_scale,
                                                           RoundingMode rounding) const;
