@@ -180,7 +180,11 @@ def main() -> int:
     raw_context = raw.get("context")
     require(isinstance(raw_context, dict), "raw benchmark context must be an object")
     assert isinstance(raw_context, dict)
-    require(raw_context.get("library_build_type") == "release", "raw library build is not release")
+    library_build_type = raw_context.get("library_build_type")
+    require(
+        isinstance(library_build_type, str) and library_build_type.lower() == "release",
+        "raw library build is not release",
+    )
     require(
         raw_context.get("library_version") == manifest["google_benchmark_library_version"],
         "Google Benchmark library version mismatch",
