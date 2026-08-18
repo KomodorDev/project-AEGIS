@@ -5,9 +5,11 @@
 #include "aegis/model/result.hpp"
 
 #include <compare>
+#include <concepts>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace aegis::model {
@@ -28,7 +30,12 @@ class FixedPoint {
 public:
   static constexpr std::uint8_t maximum_scale = 18U;
 
-  [[nodiscard]] static Result<FixedPoint> from_scaled(std::int64_t coefficient, std::uint8_t scale);
+  [[nodiscard]] static Result<FixedPoint> from_scaled(std::int64_t coefficient,
+                                                      std::uint64_t scale);
+  template <typename Coefficient, typename Scale>
+    requires(std::floating_point<std::remove_cvref_t<Coefficient>> ||
+             std::floating_point<std::remove_cvref_t<Scale>>)
+  [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient, Scale) = delete;
   [[nodiscard]] static Result<FixedPoint> parse_ascii(std::string_view text);
 
   [[nodiscard]] constexpr std::int64_t coefficient() const noexcept { return coefficient_; }
@@ -37,11 +44,20 @@ public:
 
   [[nodiscard]] Result<FixedPoint> checked_add(FixedPoint other) const;
   [[nodiscard]] Result<FixedPoint> checked_subtract(FixedPoint other) const;
-  [[nodiscard]] Result<FixedPoint> rescale(std::uint8_t target_scale, RoundingMode rounding) const;
-  [[nodiscard]] Result<FixedPoint> multiply(FixedPoint other, std::uint8_t target_scale,
+  [[nodiscard]] Result<FixedPoint> rescale(std::uint64_t target_scale, RoundingMode rounding) const;
+  [[nodiscard]] Result<FixedPoint> multiply(FixedPoint other, std::uint64_t target_scale,
                                             RoundingMode rounding) const;
-  [[nodiscard]] Result<FixedPoint> divide(FixedPoint divisor, std::uint8_t target_scale,
+  [[nodiscard]] Result<FixedPoint> divide(FixedPoint divisor, std::uint64_t target_scale,
                                           RoundingMode rounding) const;
+  template <typename Scale>
+    requires std::floating_point<std::remove_cvref_t<Scale>>
+  [[nodiscard]] Result<FixedPoint> rescale(Scale, RoundingMode) const = delete;
+  template <typename Scale>
+    requires std::floating_point<std::remove_cvref_t<Scale>>
+  [[nodiscard]] Result<FixedPoint> multiply(FixedPoint, Scale, RoundingMode) const = delete;
+  template <typename Scale>
+    requires std::floating_point<std::remove_cvref_t<Scale>>
+  [[nodiscard]] Result<FixedPoint> divide(FixedPoint, Scale, RoundingMode) const = delete;
   [[nodiscard]] Result<bool> is_multiple_of(FixedPoint increment) const;
   [[nodiscard]] Result<FixedPoint> quantize(FixedPoint increment, RoundingMode rounding) const;
 
@@ -73,7 +89,7 @@ struct NotionalTag {
 template <typename Tag> class DecimalValue {
 public:
   [[nodiscard]] static Result<DecimalValue> from_scaled(std::int64_t coefficient,
-                                                        std::uint8_t scale) {
+                                                        std::uint64_t scale) {
     auto value = FixedPoint::from_scaled(coefficient, scale);
     if (!value) {
       auto error = value.error();
@@ -82,6 +98,11 @@ public:
     }
     return Result<DecimalValue>::success(DecimalValue{value.value()});
   }
+
+  template <typename Coefficient, typename Scale>
+    requires(std::floating_point<std::remove_cvref_t<Coefficient>> ||
+             std::floating_point<std::remove_cvref_t<Scale>>)
+  [[nodiscard]] static Result<DecimalValue> from_scaled(Coefficient, Scale) = delete;
 
   [[nodiscard]] static Result<DecimalValue> parse_ascii(std::string_view text) {
     auto value = FixedPoint::parse_ascii(text);
@@ -105,10 +126,14 @@ public:
     return wrap(value_.checked_subtract(other.value_));
   }
 
-  [[nodiscard]] Result<DecimalValue> rescale(std::uint8_t target_scale,
+  [[nodiscard]] Result<DecimalValue> rescale(std::uint64_t target_scale,
                                              RoundingMode rounding) const {
     return wrap(value_.rescale(target_scale, rounding));
   }
+
+  template <typename Scale>
+    requires std::floating_point<std::remove_cvref_t<Scale>>
+  [[nodiscard]] Result<DecimalValue> rescale(Scale, RoundingMode) const = delete;
 
   [[nodiscard]] Result<bool> is_multiple_of(DecimalValue increment) const {
     auto result = value_.is_multiple_of(increment.value_);

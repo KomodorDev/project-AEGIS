@@ -150,6 +150,29 @@ void remove_decimal_zero(DecimalDigits& value) noexcept {
   }
 }
 
+void append_decimal_digit(DecimalDigits& value, std::uint8_t digit) noexcept {
+  for (std::size_t index = value.size; index > 0U; --index) {
+    value.values[index] = value.values[index - 1U];
+  }
+  value.values[0U] = digit;
+  ++value.size;
+  normalize(value);
+}
+
+void increment_magnitude(DecimalDigits& value) noexcept {
+  std::size_t index = 0U;
+  while (index < value.size && value.values[index] == 9U) {
+    value.values[index] = 0U;
+    ++index;
+  }
+  if (index == value.size) {
+    value.values[index] = 1U;
+    ++value.size;
+    return;
+  }
+  ++value.values[index];
+}
+
 [[nodiscard]] Result<std::uint64_t> digits_to_magnitude(const DecimalDigits& value,
                                                         std::uint64_t limit) {
   std::uint64_t result = 0U;
@@ -198,6 +221,34 @@ void remove_decimal_zero(DecimalDigits& value) noexcept {
 
 enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
 
+[[nodiscard]] Result<bool> rounding_increment(bool negative, FractionRelation fraction,
+                                              bool truncated_is_odd, RoundingMode rounding) {
+  if (fraction == FractionRelation::Zero) {
+    return Result<bool>::success(false);
+  }
+  if (rounding == RoundingMode::Exact) {
+    return Result<bool>::failure(
+        DomainError::at_field(DomainErrorCode::PrecisionLoss, "fixed_point"));
+  }
+
+  switch (rounding) {
+  case RoundingMode::Exact:
+  case RoundingMode::TowardZero:
+    return Result<bool>::success(false);
+  case RoundingMode::AwayFromZero:
+    return Result<bool>::success(true);
+  case RoundingMode::Floor:
+    return Result<bool>::success(negative);
+  case RoundingMode::Ceiling:
+    return Result<bool>::success(!negative);
+  case RoundingMode::NearestTiesToEven:
+    return Result<bool>::success(fraction == FractionRelation::GreaterThanHalf ||
+                                 (fraction == FractionRelation::Half && truncated_is_odd));
+  }
+  return Result<bool>::failure(
+      DomainError::at_field(DomainErrorCode::InvalidValue, "rounding_mode"));
+}
+
 [[nodiscard]] FractionRelation decimal_fraction(const DecimalDigits& value,
                                                 std::size_t discarded_digits) noexcept {
   if (discarded_digits == 0U) {
@@ -226,35 +277,11 @@ enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
 [[nodiscard]] Result<std::uint64_t> round_magnitude(std::uint64_t truncated, std::uint64_t limit,
                                                     bool negative, FractionRelation fraction,
                                                     RoundingMode rounding) {
-  if (fraction == FractionRelation::Zero) {
-    return Result<std::uint64_t>::success(truncated);
+  auto increment = rounding_increment(negative, fraction, (truncated % 2U) != 0U, rounding);
+  if (!increment) {
+    return Result<std::uint64_t>::failure(increment.error());
   }
-  if (rounding == RoundingMode::Exact) {
-    return Result<std::uint64_t>::failure(
-        DomainError::at_field(DomainErrorCode::PrecisionLoss, "fixed_point"));
-  }
-
-  bool increment = false;
-  switch (rounding) {
-  case RoundingMode::Exact:
-    break;
-  case RoundingMode::TowardZero:
-    break;
-  case RoundingMode::AwayFromZero:
-    increment = true;
-    break;
-  case RoundingMode::Floor:
-    increment = negative;
-    break;
-  case RoundingMode::Ceiling:
-    increment = !negative;
-    break;
-  case RoundingMode::NearestTiesToEven:
-    increment = fraction == FractionRelation::GreaterThanHalf ||
-                (fraction == FractionRelation::Half && (truncated % 2U) != 0U);
-    break;
-  }
-  if (increment) {
+  if (increment.value()) {
     if (truncated == limit) {
       return Result<std::uint64_t>::failure(
           DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
@@ -333,11 +360,11 @@ FixedPoint FixedPoint::canonical(std::int64_t coefficient, std::uint8_t scale) n
   return FixedPoint{coefficient, scale};
 }
 
-Result<FixedPoint> FixedPoint::from_scaled(std::int64_t coefficient, std::uint8_t scale) {
+Result<FixedPoint> FixedPoint::from_scaled(std::int64_t coefficient, std::uint64_t scale) {
   if (scale > maximum_scale) {
     return Result<FixedPoint>::failure(invalid_scale_error());
   }
-  return Result<FixedPoint>::success(canonical(coefficient, scale));
+  return Result<FixedPoint>::success(canonical(coefficient, static_cast<std::uint8_t>(scale)));
 }
 
 Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
@@ -357,16 +384,9 @@ Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
         DomainError::at_field(DomainErrorCode::InvalidDecimal, "fixed_point"));
   }
 
-  std::uint64_t parsed = 0U;
+  const auto integer_start = position;
   std::size_t integer_digits = 0U;
-  const auto limit = negative ? negative_limit : positive_limit;
   while (position < text.size() && text[position] >= '0' && text[position] <= '9') {
-    const auto digit = static_cast<std::uint64_t>(text[position] - '0');
-    if (parsed > (limit - digit) / 10U) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
-    }
-    parsed = (parsed * 10U) + digit;
     ++position;
     ++integer_digits;
   }
@@ -375,32 +395,49 @@ Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
         DomainError::at_field(DomainErrorCode::InvalidDecimal, "fixed_point"));
   }
 
-  std::uint8_t scale = 0U;
+  const auto integer_end = position;
+  auto fraction_start = position;
+  auto fraction_end = position;
   if (position < text.size() && text[position] == '.') {
     ++position;
-    const auto fraction_start = position;
+    fraction_start = position;
     while (position < text.size() && text[position] >= '0' && text[position] <= '9') {
-      if (scale == maximum_scale) {
+      if ((position - fraction_start) == maximum_scale) {
         return Result<FixedPoint>::failure(
             DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
       }
-      const auto digit = static_cast<std::uint64_t>(text[position] - '0');
-      if (parsed > (limit - digit) / 10U) {
-        return Result<FixedPoint>::failure(
-            DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
-      }
-      parsed = (parsed * 10U) + digit;
       ++position;
-      ++scale;
     }
     if (position == fraction_start) {
       return Result<FixedPoint>::failure(
           DomainError::at_field(DomainErrorCode::InvalidDecimal, "fixed_point"));
     }
+    fraction_end = position;
   }
   if (position != text.size()) {
     return Result<FixedPoint>::failure(
         DomainError::at_field(DomainErrorCode::InvalidDecimal, "fixed_point"));
+  }
+
+  while (fraction_end > fraction_start && text[fraction_end - 1U] == '0') {
+    --fraction_end;
+  }
+  const auto scale = static_cast<std::uint8_t>(fraction_end - fraction_start);
+  const auto limit = negative ? negative_limit : positive_limit;
+  std::uint64_t parsed = 0U;
+  const auto append_digits = [&](std::size_t begin, std::size_t end) -> bool {
+    for (auto index = begin; index < end; ++index) {
+      const auto digit = static_cast<std::uint64_t>(text[index] - '0');
+      if (parsed > (limit - digit) / 10U) {
+        return false;
+      }
+      parsed = (parsed * 10U) + digit;
+    }
+    return true;
+  };
+  if (!append_digits(integer_start, integer_end) || !append_digits(fraction_start, fraction_end)) {
+    return Result<FixedPoint>::failure(
+        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
   }
 
   auto coefficient = signed_coefficient(parsed, negative, "fixed_point");
@@ -519,18 +556,19 @@ Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
   return Result<FixedPoint>::success(canonical(coefficient.value(), result_scale));
 }
 
-Result<FixedPoint> FixedPoint::rescale(std::uint8_t target_scale, RoundingMode rounding) const {
+Result<FixedPoint> FixedPoint::rescale(std::uint64_t target_scale, RoundingMode rounding) const {
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
   if (target_scale > maximum_scale) {
     return Result<FixedPoint>::failure(invalid_scale_error());
   }
-  if (target_scale >= scale_) {
+  const auto validated_scale = static_cast<std::uint8_t>(target_scale);
+  if (validated_scale >= scale_) {
     return Result<FixedPoint>::success(*this);
   }
 
-  const auto divisor = powers_of_ten[static_cast<std::size_t>(scale_ - target_scale)];
+  const auto divisor = powers_of_ten[static_cast<std::size_t>(scale_ - validated_scale)];
   const auto absolute = magnitude(coefficient_);
   const auto truncated = absolute / divisor;
   const auto remainder = absolute % divisor;
@@ -545,10 +583,10 @@ Result<FixedPoint> FixedPoint::rescale(std::uint8_t target_scale, RoundingMode r
   if (!coefficient) {
     return Result<FixedPoint>::failure(coefficient.error());
   }
-  return Result<FixedPoint>::success(canonical(coefficient.value(), target_scale));
+  return Result<FixedPoint>::success(canonical(coefficient.value(), validated_scale));
 }
 
-Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint8_t target_scale,
+Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint64_t target_scale,
                                         RoundingMode rounding) const {
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
@@ -556,6 +594,7 @@ Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint8_t target_sc
   if (target_scale > maximum_scale) {
     return Result<FixedPoint>::failure(invalid_scale_error());
   }
+  const auto validated_scale = static_cast<std::uint8_t>(target_scale);
   const bool negative = (coefficient_ < 0) != (other.coefficient_ < 0);
   const auto product = multiply_magnitudes(magnitude(coefficient_), magnitude(other.coefficient_));
   if (product.size == 1U && product.values[0U] == 0U) {
@@ -563,15 +602,13 @@ Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint8_t target_sc
   }
 
   const auto source_scale = static_cast<int>(scale_) + static_cast<int>(other.scale_);
-  const auto shift = static_cast<int>(target_scale) - source_scale;
+  const auto shift = static_cast<int>(validated_scale) - source_scale;
+  auto result_scale = validated_scale;
   FractionRelation fraction = FractionRelation::Zero;
   DecimalDigits retained;
   if (shift >= 0) {
-    const auto decimal_shift = static_cast<std::size_t>(shift);
-    retained.size = product.size + decimal_shift;
-    for (std::size_t index = 0U; index < product.size; ++index) {
-      retained.values[index + decimal_shift] = product.values[index];
-    }
+    retained = product;
+    result_scale = static_cast<std::uint8_t>(source_scale);
   } else {
     const auto discarded = static_cast<std::size_t>(-shift);
     fraction = decimal_fraction(product, discarded);
@@ -586,23 +623,33 @@ Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint8_t target_sc
     }
   }
 
+  auto increment =
+      rounding_increment(negative, fraction, (retained.values[0U] % 2U) != 0U, rounding);
+  if (!increment) {
+    return Result<FixedPoint>::failure(increment.error());
+  }
+  if (increment.value()) {
+    increment_magnitude(retained);
+  }
+  while (result_scale > 0U && retained.values[0U] == 0U) {
+    remove_decimal_zero(retained);
+    --result_scale;
+  }
+  normalize(retained);
+
   const auto limit = negative ? negative_limit : positive_limit;
   auto truncated = digits_to_magnitude(retained, limit);
   if (!truncated) {
     return Result<FixedPoint>::failure(truncated.error());
   }
-  auto rounded = round_magnitude(truncated.value(), limit, negative, fraction, rounding);
-  if (!rounded) {
-    return Result<FixedPoint>::failure(rounded.error());
-  }
-  auto coefficient = signed_coefficient(rounded.value(), negative, "fixed_point");
+  auto coefficient = signed_coefficient(truncated.value(), negative, "fixed_point");
   if (!coefficient) {
     return Result<FixedPoint>::failure(coefficient.error());
   }
-  return Result<FixedPoint>::success(canonical(coefficient.value(), target_scale));
+  return Result<FixedPoint>::success(canonical(coefficient.value(), result_scale));
 }
 
-Result<FixedPoint> FixedPoint::divide(FixedPoint divisor, std::uint8_t target_scale,
+Result<FixedPoint> FixedPoint::divide(FixedPoint divisor, std::uint64_t target_scale,
                                       RoundingMode rounding) const {
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
@@ -610,6 +657,7 @@ Result<FixedPoint> FixedPoint::divide(FixedPoint divisor, std::uint8_t target_sc
   if (target_scale > maximum_scale) {
     return Result<FixedPoint>::failure(invalid_scale_error());
   }
+  const auto validated_scale = static_cast<std::uint8_t>(target_scale);
   if (divisor.coefficient_ == 0) {
     return Result<FixedPoint>::failure(
         DomainError::at_field(DomainErrorCode::DivisionByZero, "fixed_point"));
@@ -624,25 +672,38 @@ Result<FixedPoint> FixedPoint::divide(FixedPoint divisor, std::uint8_t target_sc
   const auto denominator = magnitude(divisor.coefficient_);
   auto truncated = numerator / denominator;
   auto remainder = numerator % denominator;
-  const auto exponent =
-      static_cast<int>(target_scale) + static_cast<int>(divisor.scale_) - static_cast<int>(scale_);
+  const auto exponent = static_cast<int>(validated_scale) + static_cast<int>(divisor.scale_) -
+                        static_cast<int>(scale_);
+  auto result_scale = validated_scale;
   FractionRelation fraction = FractionRelation::Zero;
 
   if (exponent >= 0) {
+    auto retained = digits_from(truncated);
     for (int index = 0; index < exponent; ++index) {
       const auto step = next_decimal_digit(remainder, denominator);
-      if (truncated > (limit - static_cast<std::uint64_t>(step.digit)) / 10U) {
-        return Result<FixedPoint>::failure(
-            DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
-      }
-      truncated = (truncated * 10U) + static_cast<std::uint64_t>(step.digit);
+      append_decimal_digit(retained, step.digit);
       remainder = step.remainder;
     }
-    if (truncated > limit) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
-    }
     fraction = binary_fraction(remainder, denominator);
+    auto increment =
+        rounding_increment(negative, fraction, (retained.values[0U] % 2U) != 0U, rounding);
+    if (!increment) {
+      return Result<FixedPoint>::failure(increment.error());
+    }
+    if (increment.value()) {
+      increment_magnitude(retained);
+    }
+    while (result_scale > 0U && retained.values[0U] == 0U) {
+      remove_decimal_zero(retained);
+      --result_scale;
+    }
+    normalize(retained);
+    auto converted = digits_to_magnitude(retained, limit);
+    if (!converted) {
+      return Result<FixedPoint>::failure(converted.error());
+    }
+    truncated = converted.value();
+    fraction = FractionRelation::Zero;
   } else {
     const auto discarded = static_cast<std::size_t>(-exponent);
     std::uint8_t leading = 0U;
@@ -679,7 +740,7 @@ Result<FixedPoint> FixedPoint::divide(FixedPoint divisor, std::uint8_t target_sc
   if (!coefficient) {
     return Result<FixedPoint>::failure(coefficient.error());
   }
-  return Result<FixedPoint>::success(canonical(coefficient.value(), target_scale));
+  return Result<FixedPoint>::success(canonical(coefficient.value(), result_scale));
 }
 
 Result<bool> FixedPoint::is_multiple_of(FixedPoint increment) const {

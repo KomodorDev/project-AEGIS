@@ -38,8 +38,8 @@ struct InstrumentMetadataParams {
   ContractStyle contract_style;
   QuantityUnit quantity_unit;
   ContractMultiplierUnit contract_multiplier_unit;
-  std::uint8_t price_scale;
-  std::uint8_t quantity_scale;
+  std::uint64_t price_scale;
+  std::uint64_t quantity_scale;
   Price tick_size;
   Quantity quantity_step;
   Quantity minimum_quantity;
@@ -66,8 +66,12 @@ public:
   [[nodiscard]] ContractMultiplierUnit contract_multiplier_unit() const noexcept {
     return params_.contract_multiplier_unit;
   }
-  [[nodiscard]] std::uint8_t price_scale() const noexcept { return params_.price_scale; }
-  [[nodiscard]] std::uint8_t quantity_scale() const noexcept { return params_.quantity_scale; }
+  [[nodiscard]] std::uint8_t price_scale() const noexcept {
+    return static_cast<std::uint8_t>(params_.price_scale);
+  }
+  [[nodiscard]] std::uint8_t quantity_scale() const noexcept {
+    return static_cast<std::uint8_t>(params_.quantity_scale);
+  }
   [[nodiscard]] Price tick_size() const noexcept { return params_.tick_size; }
   [[nodiscard]] Quantity quantity_step() const noexcept { return params_.quantity_step; }
   [[nodiscard]] Quantity minimum_quantity() const noexcept { return params_.minimum_quantity; }
@@ -82,8 +86,11 @@ public:
 
   // Converts declared contracts to the multiplier's declared currency. It deliberately takes no
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
-  [[nodiscard]] Result<Notional> contract_value(Quantity contracts, std::uint8_t target_scale,
+  [[nodiscard]] Result<Notional> contract_value(Quantity contracts, std::uint64_t target_scale,
                                                 RoundingMode rounding) const;
+  template <typename Scale>
+    requires std::floating_point<std::remove_cvref_t<Scale>>
+  [[nodiscard]] Result<Notional> contract_value(Quantity, Scale, RoundingMode) const = delete;
   [[nodiscard]] std::string_view contract_value_currency() const noexcept;
 
 private:

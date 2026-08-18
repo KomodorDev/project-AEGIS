@@ -15,11 +15,27 @@ using namespace aegis::model;
 template <typename Left, typename Right>
 concept HasProductOperator = requires(Left left, Right right) { left* right; };
 
+template <typename Value, typename Coefficient, typename Scale>
+concept HasFromScaled =
+    requires(Coefficient coefficient, Scale scale) { Value::from_scaled(coefficient, scale); };
+
+template <typename Value, typename Scale>
+concept HasRescale =
+    requires(Value value, Scale scale) { value.rescale(scale, RoundingMode::Exact); };
+
 static_assert(!std::is_same_v<Price, Quantity>);
 static_assert(!std::is_same_v<Quantity, Notional>);
 static_assert(!std::is_convertible_v<Price, Quantity>);
 static_assert(!std::is_constructible_v<Price, double>);
 static_assert(!std::is_constructible_v<Quantity, float>);
+static_assert(!HasFromScaled<FixedPoint, double, int>);
+static_assert(!HasFromScaled<FixedPoint, int, double>);
+static_assert(!HasFromScaled<Price, double, int>);
+static_assert(!HasFromScaled<Quantity, int, float>);
+static_assert(!HasFromScaled<Notional, double, double>);
+static_assert(!HasFromScaled<Price, long double, int>);
+static_assert(!HasRescale<FixedPoint, double>);
+static_assert(!HasRescale<Price, long double>);
 static_assert(!HasProductOperator<Price, Quantity>);
 
 [[nodiscard]] FixedPoint decimal(std::string_view text) {
@@ -57,6 +73,8 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
 
   CHECK(decimal("9223372036854775807").coefficient() == std::numeric_limits<std::int64_t>::max());
   CHECK(decimal("-9223372036854775808").coefficient() == std::numeric_limits<std::int64_t>::min());
+  CHECK(decimal("9223372036854775807.0") == decimal("9223372036854775807"));
+  CHECK(decimal("-9223372036854775808.000") == decimal("-9223372036854775808"));
 
   for (const auto text : {"9223372036854775808", "-9223372036854775809"}) {
     const auto result = FixedPoint::parse_ascii(text);
@@ -66,6 +84,10 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto invalid_scale = FixedPoint::from_scaled(1, 19U);
   REQUIRE_FALSE(invalid_scale);
   CHECK(invalid_scale.error().code == DomainErrorCode::InvalidScale);
+
+  const auto formerly_wrapped_scale = FixedPoint::from_scaled(1, std::uint64_t{256U});
+  REQUIRE_FALSE(formerly_wrapped_scale);
+  CHECK(formerly_wrapped_scale.error().code == DomainErrorCode::InvalidScale);
 }
 
 TEST_CASE("addition and subtraction preserve exact cross-scale values and fail on overflow",
@@ -118,6 +140,11 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   REQUIRE_FALSE(product_overflow);
   CHECK(product_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
 
+  const auto maximum_product =
+      decimal("9223372036854775807").multiply(decimal("1"), 18U, RoundingMode::Exact);
+  REQUIRE(maximum_product);
+  CHECK(maximum_product.value() == decimal("9223372036854775807"));
+
   const auto quotient = decimal("1").divide(decimal("8"), 3U, RoundingMode::Exact);
   REQUIRE(quotient);
   CHECK(quotient.value() == decimal("0.125"));
@@ -128,6 +155,11 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   CHECK(decimal("1").divide(decimal("3"), 2U, RoundingMode::TowardZero).value() == decimal("0.33"));
   CHECK(decimal("-1").divide(decimal("3"), 2U, RoundingMode::Floor).value() == decimal("-0.34"));
   CHECK(decimal("-1").divide(decimal("3"), 2U, RoundingMode::Ceiling).value() == decimal("-0.33"));
+
+  const auto maximum_quotient =
+      decimal("9223372036854775807").divide(decimal("1"), 18U, RoundingMode::Exact);
+  REQUIRE(maximum_quotient);
+  CHECK(maximum_quotient.value() == decimal("9223372036854775807"));
 
   const auto division_by_zero = decimal("1").divide(decimal("0"), 2U, RoundingMode::Exact);
   REQUIRE_FALSE(division_by_zero);
@@ -153,13 +185,24 @@ TEST_CASE("unassigned rounding modes fail instead of selecting an implicit polic
           "[model][fixed-point]") {
   const auto invalid = static_cast<RoundingMode>(255U);
 
-  for (const auto& result : {decimal("1.25").rescale(1U, invalid),
-                             decimal("1").multiply(decimal("2"), 0U, invalid),
-                             decimal("1").divide(decimal("2"), 1U, invalid),
-                             decimal("1.25").quantize(decimal("0.5"), invalid)}) {
+  for (const auto& result :
+       {decimal("1.25").rescale(1U, invalid), decimal("1").multiply(decimal("2"), 0U, invalid),
+        decimal("1").divide(decimal("2"), 1U, invalid),
+        decimal("1.25").quantize(decimal("0.5"), invalid)}) {
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::InvalidValue);
     CHECK(result.error().context.field == "rounding_mode");
+  }
+}
+
+TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-point]") {
+  constexpr auto invalid_scale = std::uint64_t{256U};
+  for (const auto& result :
+       {decimal("1").rescale(invalid_scale, RoundingMode::Exact),
+        decimal("1").multiply(decimal("1"), invalid_scale, RoundingMode::Exact),
+        decimal("1").divide(decimal("1"), invalid_scale, RoundingMode::Exact)}) {
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == DomainErrorCode::InvalidScale);
   }
 }
 

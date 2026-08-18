@@ -109,6 +109,12 @@ TEST_CASE("metadata rejects corrupt fields in canonical order", "[model][metadat
   CHECK(bad_inverse_unit.error().context.field == "instrument.contract_multiplier_unit");
 
   params = reference_params();
+  params.price_scale = std::uint64_t{256U};
+  const auto wrapped_price_scale = InstrumentMetadata::create(params);
+  REQUIRE_FALSE(wrapped_price_scale);
+  CHECK(wrapped_price_scale.error().context.field == "instrument.price_scale");
+
+  params = reference_params();
   params.price_scale = 0U;
   const auto bad_tick_scale = InstrumentMetadata::create(params);
   REQUIRE_FALSE(bad_tick_scale);
