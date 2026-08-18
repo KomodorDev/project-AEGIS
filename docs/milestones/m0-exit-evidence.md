@@ -9,6 +9,12 @@
 Gate IDs beginning with `M0-S` identify delivered scope; IDs beginning with `M0-E` identify the exit
 conditions that must be evidenced before M0 can close.
 
+## How to read this record
+
+The scope table identifies the artifact that delivered each M0 promise. The exit-gate table then
+separates locally reproducible proof from remote CI or operating-contract evidence, so a local pass
+cannot accidentally be reported as platform-wide or integration proof.
+
 ## Scope evidence
 
 | Gate | Evidence |
