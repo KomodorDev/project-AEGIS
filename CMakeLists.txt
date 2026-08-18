@@ -39,6 +39,7 @@ add_library(
   src/aegis/model/fixed_point.cpp
   # Identifier grammar is compiled; its Result and error primitives remain header-only.
   src/aegis/model/identifier.cpp
+  # Metadata validation owns unit coherence, increments, and contract face-value conversion.
   src/aegis/model/instrument_metadata.cpp
   # Clock and order-ID providers own stateful behavior; their typed values remain in public headers.
   src/aegis/model/order_id.cpp

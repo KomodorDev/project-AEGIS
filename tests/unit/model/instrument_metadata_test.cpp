@@ -25,12 +25,16 @@ static_assert(!HasContractValue<char>);
 static_assert(!HasContractValue<char16_t>);
 static_assert(HasContractValue<int>);
 
+// Route fixture literals through nominal production parsers so invalid test data fails at its
+// source.
 template <typename Value> [[nodiscard]] Value parsed(std::string_view text) {
   auto result = Value::parse_ascii(text);
   REQUIRE(result);
   return result.value();
 }
 
+// Model the reference inverse BTC contract once; rejection tests mutate one field of this
+// known-valid snapshot so the reported failure cannot be attributed to unrelated fixture drift.
 [[nodiscard]] InstrumentMetadataParams reference_params() {
   return InstrumentMetadataParams{
       VenueId::parse("deribit").value(),
@@ -52,6 +56,8 @@ template <typename Value> [[nodiscard]] Value parsed(std::string_view text) {
   };
 }
 
+// The reference fixture proves revision ownership, declared units, price-free inverse face value,
+// and quantity-step enforcement through one validated metadata object.
 TEST_CASE("the reference inverse metadata is a revisioned fixture with declared units",
           "[model][metadata]") {
   const auto metadata = InstrumentMetadata::create(reference_params());
@@ -87,6 +93,7 @@ TEST_CASE("the reference inverse metadata is a revisioned fixture with declared 
         DomainError::at_field(DomainErrorCode::InvalidScale, "contract_value"));
 }
 
+// Alignment and quantization must consistently use the metadata-owned tick and contract step.
 TEST_CASE("metadata validates exact tick and contract-step alignment", "[model][metadata]") {
   const auto metadata = InstrumentMetadata::create(reference_params()).value();
 
@@ -108,6 +115,8 @@ TEST_CASE("metadata validates exact tick and contract-step alignment", "[model][
         parsed<Quantity>("1"));
 }
 
+// Multiple corrupt fields prove that create() preserves its canonical first-failure compatibility
+// contract rather than returning whichever validation happens to run first after a refactor.
 TEST_CASE("metadata rejects corrupt fields in canonical order", "[model][metadata]") {
   auto params = reference_params();
   params.base_currency = "btc";
@@ -155,6 +164,8 @@ TEST_CASE("metadata rejects corrupt fields in canonical order", "[model][metadat
   CHECK(bad_settlement.error().context.field == "instrument.settlement_currency");
 }
 
+// Linear and inverse styles bind different multiplier currencies and cannot borrow each other's
+// unit combinations.
 TEST_CASE("linear and inverse multiplier units cannot be crossed", "[model][metadata]") {
   auto params = reference_params();
   params.contract_style = ContractStyle::Linear;

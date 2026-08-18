@@ -16,6 +16,8 @@
 
 namespace aegis::model {
 
+// Contract style and unit enums make economic meaning explicit; create() validates their permitted
+// combinations rather than relying on conventions at conversion call sites.
 enum class ContractStyle : std::uint8_t {
   Linear = 1,
   Inverse = 2,
@@ -30,6 +32,8 @@ enum class ContractMultiplierUnit : std::uint8_t {
   QuoteCurrencyPerContract = 2,
 };
 
+// Carry the complete untrusted configuration snapshot into a single validation boundary. No field
+// becomes observable through InstrumentMetadata until the aggregate passes together.
 struct InstrumentMetadataParams {
   VenueId venue_id;
   InstrumentId instrument_id;
@@ -49,10 +53,13 @@ struct InstrumentMetadataParams {
   Notional contract_multiplier;
 };
 
+// A successfully created instance owns the revisioned identifiers, currencies, scales, increments,
+// and multiplier contract used by every downstream alignment and conversion decision.
 class InstrumentMetadata {
 public:
   [[nodiscard]] static Result<InstrumentMetadata> create(InstrumentMetadataParams params);
 
+  // Accessors expose only fields from the already validated snapshot.
   [[nodiscard]] const VenueId& venue_id() const noexcept { return params_.venue_id; }
   [[nodiscard]] const InstrumentId& instrument_id() const noexcept { return params_.instrument_id; }
   [[nodiscard]] const VenueInstrumentId& venue_instrument_id() const noexcept {
@@ -82,12 +89,14 @@ public:
     return params_.contract_multiplier;
   }
 
+  // Price and quantity decisions use the metadata-owned tick and step; quantization carries an
+  // explicit rounding policy and reports errors in the corresponding public domain.
   [[nodiscard]] Result<void> validate_price_alignment(Price price) const;
   [[nodiscard]] Result<void> validate_quantity_alignment(Quantity quantity) const;
   [[nodiscard]] Result<Price> quantize_price(Price price, RoundingMode rounding) const;
   [[nodiscard]] Result<Quantity> quantize_quantity(Quantity quantity, RoundingMode rounding) const;
 
-  // Converts declared contracts to the multiplier's declared currency. It deliberately takes no
+  // Convert declared contracts to the multiplier's declared currency. The API deliberately takes no
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
   template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<Notional> contract_value(Quantity contracts, Scale target_scale,
@@ -108,6 +117,8 @@ private:
                                                           std::uint64_t target_scale,
                                                           RoundingMode rounding) const;
 
+  // Construction is private so callers cannot bypass the aggregate validation performed by
+  // create().
   explicit InstrumentMetadata(InstrumentMetadataParams params) : params_{std::move(params)} {}
 
   InstrumentMetadataParams params_;
