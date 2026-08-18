@@ -42,6 +42,7 @@ add_library(
   src/aegis/model/sha256.cpp
   src/aegis/model/time.cpp
   src/aegis/organization/organization.cpp
+  src/aegis/trace/trace.cpp
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
 

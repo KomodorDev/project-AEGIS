@@ -20,6 +20,7 @@ add_executable(
   unit/model/sha256_test.cpp
   unit/model/time_test.cpp
   unit/organization/organization_test.cpp
+  unit/trace/trace_test.cpp
   unit/version_test.cpp)
 target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
 
@@ -29,3 +30,11 @@ aegis_configure_owned_target(aegis_unit_tests)
 # Catch2's helper asks the built test executable for its cases and registers each with CTest.
 include(Catch)
 catch_discover_tests(aegis_unit_tests PROPERTIES LABELS unit)
+
+# Keep the milestone replay visible as its own gate rather than hiding it among unit cases.
+add_executable(aegis_m1_reference_scenario_tests
+               deterministic_scenarios/m1_reference_scenario_test.cpp)
+target_link_libraries(aegis_m1_reference_scenario_tests PRIVATE aegis_test_support
+                                                                Catch2::Catch2WithMain)
+aegis_configure_owned_target(aegis_m1_reference_scenario_tests)
+catch_discover_tests(aegis_m1_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)
