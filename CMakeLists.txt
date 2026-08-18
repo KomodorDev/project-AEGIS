@@ -33,6 +33,7 @@ add_library(
   aegis
   src/aegis/model/identifier.cpp
   src/aegis/model/order_id.cpp
+  src/aegis/model/sha256.cpp
   src/aegis/model/time.cpp
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
