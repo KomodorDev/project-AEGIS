@@ -174,7 +174,7 @@
     {
       "name": "benchmark",
       "displayName": "Configure, build, and test the release profile",
-      "description": "Prepare a validated optimized build; tools/run_benchmarks.py records the measurements separately.",
+      "description": "Prepare an optimized build; the benchmark runner and evidence validator execute separately.",
       "steps": [
         {
           "type": "configure",

@@ -15,7 +15,7 @@ conditions that must be evidenced before M0 can close.
 |---|---|
 | `M0-S01` Toolchain choices | [ADR-0002](../decisions/0002-delivery-toolchain.md), `CMakeLists.txt`, and `CMakePresets.json` |
 | `M0-S02` CI quality gates | `.github/workflows/ci.yml`: format, warning-clean compiler matrix, unit tests, ASan+UBSan, and TSan |
-| `M0-S03` Benchmark harness | `aegis_benchmarks`, workload `BENCH-M0-HARNESS-001`, raw JSON plus environment-context manifest, and artifact upload |
+| `M0-S03` Benchmark harness | `aegis_benchmarks`, workload `BENCH-M0-HARNESS-001`, raw JSON plus environment-context manifest, independent bundle validation, and artifact upload |
 | `M0-S04` Venue protocol spike | [Deribit BTC perpetual spike](../protocol-spikes/deribit-btc-perpetual.md) |
 | `M0-S05` Reference scenario | [M0 reference scenario](../reference-scenario.md) |
 | `M0-S06` Account assumptions | [ADR-0003](../decisions/0003-dedicated-testnet-account.md) with explicit validation and quarantine rules |
@@ -42,12 +42,14 @@ cmake --workflow --preset verify-asan-ubsan
 cmake --workflow --preset verify-tsan
 cmake --workflow --preset benchmark
 python3 tools/run_benchmarks.py
+python3 tools/validate_benchmark_evidence.py
 ```
 
 The 2026-08-18 local run passed the normal, formatting, ASan+UBSan, TSan, and release workflows with
 AppleClang 16 on arm64 macOS 15.7.4. The benchmark emitted the expected
-`BENCH-M0-HARNESS-001/harness.noop` JSON records and its required context manifest. Its timing is
-calibration only and is not a product latency result.
+`BENCH-M0-HARNESS-001/harness.noop` JSON records and its required context manifest; the independent
+validator confirmed the workload identity, release build, hashes, and repository provenance. Its
+timing is calibration only and is not a product latency result.
 
 The same `verify` command also passed from an uncached temporary source copy using the documented
 minimum CMake 3.25.2 and Ninja 1.13.0, including first-time checksum-verified dependency acquisition.

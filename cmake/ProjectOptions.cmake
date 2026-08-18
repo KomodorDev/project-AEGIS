@@ -93,61 +93,94 @@ endfunction()
 
 # Add non-destructive checking and opt-in rewriting targets for all supplied source paths.
 function(aegis_add_format_targets)
-  # Locate the two pinned formatters in PATH; support Linux's common versioned clang-format name.
-  find_program(AEGIS_CLANG_FORMAT_EXECUTABLE NAMES clang-format clang-format-18)
-  find_program(AEGIS_RUFF_EXECUTABLE NAMES ruff)
-
-  # Probe clang-format itself rather than trusting an executable's filename.
-  set(clang_format_error "clang-format 18.1.8 was not found")
-  set(clang_format_is_supported OFF)
-  if(AEGIS_CLANG_FORMAT_EXECUTABLE)
-    execute_process(
-      COMMAND "${AEGIS_CLANG_FORMAT_EXECUTABLE}" --version
-      RESULT_VARIABLE clang_format_result
-      OUTPUT_VARIABLE clang_format_version
-      ERROR_VARIABLE clang_format_version
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-    if(clang_format_result EQUAL 0 AND clang_format_version MATCHES "version 18\\.1\\.8$")
-      set(clang_format_is_supported ON)
-    else()
-      set(clang_format_error
-          "clang-format 18.1.8 is required; found: ${clang_format_version}")
-    endif()
+  # Split the named arguments into independent language lists and reject accidental extra inputs.
+  cmake_parse_arguments(PARSE_ARGV 0 AEGIS_FORMAT "" "" "CXX_FILES;PYTHON_FILES")
+  if(AEGIS_FORMAT_UNPARSED_ARGUMENTS)
+    message(FATAL_ERROR "Unknown format-target arguments: ${AEGIS_FORMAT_UNPARSED_ARGUMENTS}")
+  endif()
+  if(NOT AEGIS_FORMAT_CXX_FILES OR NOT AEGIS_FORMAT_PYTHON_FILES)
+    message(FATAL_ERROR "Format targets require both CXX_FILES and PYTHON_FILES")
   endif()
 
-  # Probe Ruff independently so configuration can report every missing/mismatched tool together.
+  # Inspect the project virtual environment first, then every supported filename in PATH order. This
+  # avoids rejecting a valid later candidate merely because an incompatible executable appears first.
+  cmake_path(CONVERT "$ENV{PATH}" TO_CMAKE_PATH_LIST formatter_search_paths NORMALIZE)
+  list(PREPEND formatter_search_paths "${PROJECT_SOURCE_DIR}/.venv/bin")
+  list(REMOVE_DUPLICATES formatter_search_paths)
+  set(clang_format_error "clang-format 18.1.8 was not found")
+  set(clang_format_is_supported OFF)
+  set(clang_format_observations "")
+  foreach(search_directory IN LISTS formatter_search_paths)
+    foreach(executable_name IN ITEMS clang-format clang-format-18)
+      set(clang_format_candidate "${search_directory}/${executable_name}")
+      if(EXISTS "${clang_format_candidate}" AND NOT IS_DIRECTORY "${clang_format_candidate}")
+        execute_process(
+          COMMAND "${clang_format_candidate}" --version
+          RESULT_VARIABLE clang_format_result
+          OUTPUT_VARIABLE clang_format_version
+          ERROR_VARIABLE clang_format_version
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+        list(APPEND clang_format_observations "${clang_format_candidate}: ${clang_format_version}")
+
+        if(clang_format_result EQUAL 0 AND clang_format_version MATCHES "version 18\\.1\\.8$")
+          set(AEGIS_CLANG_FORMAT_EXECUTABLE "${clang_format_candidate}")
+          set(clang_format_is_supported ON)
+          break()
+        endif()
+      endif()
+    endforeach()
+    if(clang_format_is_supported)
+      break()
+    endif()
+  endforeach()
+  if(NOT clang_format_is_supported AND clang_format_observations)
+    list(JOIN clang_format_observations ", " observed_clang_formats)
+    set(clang_format_error
+        "clang-format 18.1.8 is required; inspected: ${observed_clang_formats}")
+  endif()
+
+  # Probe every Ruff candidate independently so a wrong early PATH entry cannot hide the pinned tool.
   set(ruff_error "Ruff 0.16.3 was not found")
   set(ruff_is_supported OFF)
-  if(AEGIS_RUFF_EXECUTABLE)
-    execute_process(
-      COMMAND "${AEGIS_RUFF_EXECUTABLE}" --version
-      RESULT_VARIABLE ruff_result
-      OUTPUT_VARIABLE ruff_version
-      ERROR_VARIABLE ruff_version
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set(ruff_observations "")
+  foreach(search_directory IN LISTS formatter_search_paths)
+    set(ruff_candidate "${search_directory}/ruff")
+    if(EXISTS "${ruff_candidate}" AND NOT IS_DIRECTORY "${ruff_candidate}")
+      execute_process(
+        COMMAND "${ruff_candidate}" --version
+        RESULT_VARIABLE ruff_result
+        OUTPUT_VARIABLE ruff_version
+        ERROR_VARIABLE ruff_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      list(APPEND ruff_observations "${ruff_candidate}: ${ruff_version}")
 
-    if(ruff_result EQUAL 0 AND ruff_version MATCHES "^ruff 0\\.16\\.3$")
-      set(ruff_is_supported ON)
-    else()
-      set(ruff_error "Ruff 0.16.3 is required; found: ${ruff_version}")
+      if(ruff_result EQUAL 0 AND ruff_version MATCHES "^ruff 0\\.16\\.3$")
+        set(AEGIS_RUFF_EXECUTABLE "${ruff_candidate}")
+        set(ruff_is_supported ON)
+        break()
+      endif()
     endif()
+  endforeach()
+  if(NOT ruff_is_supported AND ruff_observations)
+    list(JOIN ruff_observations ", " observed_ruff_versions)
+    set(ruff_error "Ruff 0.16.3 is required; inspected: ${observed_ruff_versions}")
   endif()
 
   # When both tools match, create separate CI checking and developer rewriting targets.
   if(clang_format_is_supported AND ruff_is_supported)
     add_custom_target(
       format-check
-      COMMAND "${AEGIS_CLANG_FORMAT_EXECUTABLE}" --dry-run --Werror ${ARGN}
-      COMMAND "${AEGIS_RUFF_EXECUTABLE}" format --check "${PROJECT_SOURCE_DIR}/tools/run_benchmarks.py"
-      COMMAND "${AEGIS_RUFF_EXECUTABLE}" check "${PROJECT_SOURCE_DIR}/tools/run_benchmarks.py"
+      COMMAND "${AEGIS_CLANG_FORMAT_EXECUTABLE}" --dry-run --Werror
+              ${AEGIS_FORMAT_CXX_FILES}
+      COMMAND "${AEGIS_RUFF_EXECUTABLE}" format --check ${AEGIS_FORMAT_PYTHON_FILES}
+      COMMAND "${AEGIS_RUFF_EXECUTABLE}" check ${AEGIS_FORMAT_PYTHON_FILES}
       COMMENT "Checking C++ and Python formatting"
       VERBATIM)
     add_custom_target(
       format
-      COMMAND "${AEGIS_CLANG_FORMAT_EXECUTABLE}" -i ${ARGN}
-      COMMAND "${AEGIS_RUFF_EXECUTABLE}" check --fix "${PROJECT_SOURCE_DIR}/tools/run_benchmarks.py"
-      COMMAND "${AEGIS_RUFF_EXECUTABLE}" format "${PROJECT_SOURCE_DIR}/tools/run_benchmarks.py"
+      COMMAND "${AEGIS_CLANG_FORMAT_EXECUTABLE}" -i ${AEGIS_FORMAT_CXX_FILES}
+      COMMAND "${AEGIS_RUFF_EXECUTABLE}" check --fix ${AEGIS_FORMAT_PYTHON_FILES}
+      COMMAND "${AEGIS_RUFF_EXECUTABLE}" format ${AEGIS_FORMAT_PYTHON_FILES}
       COMMENT "Formatting C++ and Python sources"
       VERBATIM)
   else()

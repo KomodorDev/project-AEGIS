@@ -5,7 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-// Interesting syntax: Catch2 expands TEST_CASE and CHECK into a discoverable, isolated test.
+// Interesting syntax: Catch2 expands TEST_CASE and CHECK into a discoverable test and assertions.
 TEST_CASE("the compiled library reports its project identity", "[baseline]") {
   CHECK(aegis::project_name() == "AEGIS");
   CHECK(aegis::project_version() == "0.1.0");

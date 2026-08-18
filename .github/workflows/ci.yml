@@ -185,6 +185,10 @@ jobs:
       # Produce both raw Google Benchmark JSON and its environment manifest.
       - name: Run the benchmark harness
         run: python tools/run_benchmarks.py
+      # Reject missing fields, mismatched hashes, stale provenance, or a non-Release producer before
+      # an artifact can be mistaken for valid evidence.
+      - name: Validate the benchmark evidence
+        run: python tools/validate_benchmark_evidence.py
       # Preserve every generated JSON file for 90 days. The `*.json` glob
       # selects both result files, while `if-no-files-found: error` prevents a
       # falsely successful run that uploaded no evidence.

@@ -51,7 +51,12 @@ cmake --workflow --preset verify-asan-ubsan
 cmake --workflow --preset verify-tsan
 cmake --workflow --preset benchmark
 python3 tools/run_benchmarks.py
+python3 tools/validate_benchmark_evidence.py
 ```
+
+The benchmark runner first rebuilds its Release target, then writes raw timing output and a context
+manifest. The validator independently checks their workload identity, build mode, hashes, and Git
+provenance; neither command is a claim of production latency.
 
 The default build contains no exchange session, order-transmission capability, credential lookup,
 or production endpoint. The first market and account assumptions are described in

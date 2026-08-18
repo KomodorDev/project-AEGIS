@@ -64,9 +64,9 @@ if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
-# Fetch and register the benchmark harness only when explicitly enabled.
+# Fetch and register the benchmark harness when its option is enabled (ON by default).
 if(AEGIS_BUILD_BENCHMARKS)
-  # Build only the library pieces AEGIS needs; dependency warnings are not AEGIS warnings.
+  # Disable upstream install/self-tests, its GTest bridge, and dependency-owned Werror.
   set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
   set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
   set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
@@ -85,14 +85,20 @@ if(AEGIS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
-# Discover every owned C++ source at configure time and pass that list to the format targets.
+# Discover every owned C++ and Python source at configure time and pass both lists to the format
+# targets. Keeping the Python list automatic prevents a newly added tool from escaping CI linting.
 # Interesting syntax: CONFIGURE_DEPENDS asks CMake to reconfigure when matching files appear/disappear.
 file(
-  GLOB_RECURSE AEGIS_FORMAT_FILES
+  GLOB_RECURSE AEGIS_CXX_FORMAT_FILES
   CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.cpp")
-aegis_add_format_targets(${AEGIS_FORMAT_FILES})
+file(
+  GLOB_RECURSE AEGIS_PYTHON_FORMAT_FILES
+  CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.py")
+aegis_add_format_targets(CXX_FILES ${AEGIS_CXX_FORMAT_FILES} PYTHON_FILES
+                         ${AEGIS_PYTHON_FORMAT_FILES})
