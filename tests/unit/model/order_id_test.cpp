@@ -1,4 +1,5 @@
-// Purpose: prove order identities are deterministic in tests and safe across counter boundaries.
+// Purpose: prove deterministic order identities, checked counter boundaries, and fail-closed
+// production namespace entropy without exposing a weak production fallback.
 
 #include "aegis/model/order_id.hpp"
 
@@ -13,6 +14,8 @@
 
 namespace aegis::model::detail {
 
+// Interesting syntax: the declared friend proxy exposes only the private entropy seam needed to
+// force startup failures; ordinary callers still see only ProductionOrderIdProvider::create().
 struct ProductionOrderIdProviderTestAccess {
   using EntropyFillCallback = bool (*)(OrderNamespace::Bytes&) noexcept;
 
@@ -149,6 +152,8 @@ TEST_CASE("the production provider obtains a supported operating-system namespac
   CHECK(order_id.value().to_hex().size() == OrderId::byte_size * 2U);
 }
 
+// Entropy failure must reject startup even if a source wrote plausible bytes, and a missing
+// callback must fail identically instead of selecting a fallback namespace.
 TEST_CASE("the production provider fails closed when its entropy source is unavailable",
           "[model][order-id]") {
   const auto unavailable = [](OrderNamespace::Bytes& destination) noexcept {

@@ -29,11 +29,15 @@ namespace {
   return result;
 }
 
+// Fill all 128 namespace bits from the strongest supported operating-system primitive. Unsupported,
+// zero-progress, and non-retryable error paths all fail closed.
 [[nodiscard]] bool
 fill_order_namespace_from_operating_system(OrderNamespace::Bytes& destination) noexcept {
 #if defined(__APPLE__)
+  // getentropy is all-or-nothing for this small fixed-size request.
   return ::getentropy(destination.data(), destination.size()) == 0;
 #elif defined(__linux__)
+  // getrandom may return partial data or EINTR, so accumulate until all bytes are initialized.
   std::size_t offset = 0U;
   while (offset < destination.size()) {
     const auto result = ::getrandom(destination.data() + offset, destination.size() - offset, 0U);
@@ -50,6 +54,7 @@ fill_order_namespace_from_operating_system(OrderNamespace::Bytes& destination) n
   }
   return true;
 #else
+  // No unreviewed fallback source is acceptable for a production restart namespace.
   static_cast<void>(destination);
   return false;
 #endif
@@ -132,10 +137,14 @@ Result<OrderId> DeterministicOrderIdProvider::next() {
   return Result<OrderId>::success(order_id);
 }
 
+// Production always selects the real operating-system source; injection remains private test
+// access.
 Result<ProductionOrderIdProvider> ProductionOrderIdProvider::create() {
   return create_with_entropy(fill_order_namespace_from_operating_system);
 }
 
+// Convert the entropy callback's all-bytes-or-failure contract into one stable startup error. Bytes
+// written by a failing callback are discarded rather than treated as usable entropy.
 Result<ProductionOrderIdProvider>
 ProductionOrderIdProvider::create_with_entropy(EntropyFillCallback entropy_fill) {
   OrderNamespace::Bytes bytes{};
@@ -147,6 +156,7 @@ ProductionOrderIdProvider::create_with_entropy(EntropyFillCallback entropy_fill)
       ProductionOrderIdProvider{OrderNamespace{bytes}});
 }
 
+// A successfully randomized namespace always starts its checked sequence at counter one.
 ProductionOrderIdProvider::ProductionOrderIdProvider(OrderNamespace order_namespace) noexcept
     : provider_{order_namespace, 1U} {}
 

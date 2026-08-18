@@ -1,4 +1,5 @@
-// Purpose: generate fixed-size order identities from a restart-specific namespace and counter.
+// Purpose: define fixed-size namespace-plus-counter order identities and their providers;
+// production namespaces come only from fail-closed operating-system entropy.
 
 #pragma once
 
@@ -36,8 +37,10 @@ private:
 };
 
 namespace detail {
+// Interesting syntax: a forward-declared friend lets tests inject entropy outcomes through a narrow
+// proxy without making the production entropy callback part of the public API.
 struct ProductionOrderIdProviderTestAccess;
-}
+} // namespace detail
 
 class DeterministicOrderIdProvider;
 class ProductionOrderIdProvider;
@@ -136,6 +139,8 @@ public:
   [[nodiscard]] Result<OrderId> next() override { return provider_.next(); }
 
 private:
+  // The callback returns success only after filling the entire namespace; null or false is a hard
+  // startup failure with no deterministic or weak-random fallback.
   using EntropyFillCallback = bool (*)(OrderNamespace::Bytes&) noexcept;
 
   [[nodiscard]] static Result<ProductionOrderIdProvider>
