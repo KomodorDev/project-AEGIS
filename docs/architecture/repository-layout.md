@@ -1,9 +1,13 @@
-# Provisional Repository Layout
+# Repository Layout
 
-> **Purpose:** Describe where future AEGIS components and tests should live, what each area owns, and
-> which dependency directions are allowed—without creating empty directories prematurely.
+> **Purpose:** Describe the implemented M1 source and test ownership boundaries, the allowed
+> dependency directions, and where later components should grow without empty scaffolding.
 
-**Status: Proposed.** This document describes intended ownership and dependency boundaries. It does not create source directories, select build targets or make the displayed tree a permanent API. Runtime ownership follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md).
+**Status:** The directories and dependency rules used through M1 are implemented. Areas named for
+later milestones remain **Proposed** until their first real behavior is added. Runtime ownership
+follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md); M1 value and provenance
+boundaries follow [ADR-0004](../decisions/0004-domain-value-contracts.md) and
+[ADR-0005](../decisions/0005-immutable-configuration-provenance.md).
 
 Return to the [architecture overview](../architecture.md).
 
@@ -15,92 +19,115 @@ The source layout should make it easy to answer three questions:
 2. Which code is exchange-native and which code is venue-independent?
 3. Which dependencies point toward stable domain contracts rather than infrastructure details?
 
-Directories should be added only when the first real implementation or test needs them. Empty scaffolding and `.gitkeep` files do not establish useful architecture.
+Directories are added only when the first real implementation or test needs them. Empty scaffolding
+and `.gitkeep` files do not establish useful architecture.
 
-## Proposed Source Shape
+## Implemented M1 Source Shape
 
-The tree is a destination map, not a statement that every listed directory already exists. A
-directory is created only when its first implementation or test is added.
+Headers shared across repository targets live under `include/aegis`; implementations mirror their
+owning area under `src/aegis`. This is a source-build boundary, not a stable installed API or ABI.
 
 ```text
-src/
-└── aegis/
-    ├── model/
-    ├── market_data/
-    ├── strategy/
-    ├── execution/
-    ├── risk/
-    ├── inventory/
-    ├── venues/
-    │   ├── binance/
-    │   └── deribit/
-    └── runtime/
+include/aegis/                 src/aegis/
+├── configuration/            ├── configuration/
+├── execution/                ├── execution/
+├── market_data/              ├── market_data/
+├── model/                    ├── model/
+├── organization/             ├── organization/
+├── trace/                    ├── trace/
+└── version.hpp               └── version.cpp
 ```
 
-| Area | Intended responsibility |
+| Area | Current responsibility |
 |---|---|
-| `model` | Dependency-light identifiers, numeric value types and universally shared primitives. It must not become a miscellaneous dumping ground. |
-| `market_data` | Normalized market events, subscriptions, market-state handling and dispatch. |
-| `strategy` | Strategy contract, configured bot runtime and the bot-bound submission context. |
-| `execution` | Execution-route authorization, normalized order requests, order submission and OMS behavior. |
-| `risk` | Risk modes and budgets, inline checks, reservations and control-plane policy calculation. |
-| `inventory` | Fill-derived immediate positions, exposure attribution and bot/desk/firm aggregation. Durable ledger ownership and P&L calculation placement remain open. |
-| `venues/binance` | Binance-native connectivity, parsing, symbol mapping, authentication and order encoding. |
-| `venues/deribit` | Deribit-native connectivity, parsing, symbol mapping, authentication and order encoding. |
-| `runtime` | Process composition, lifecycle and the serialized data-plane executor; it must not own domain rules. |
+| `model` | Dependency-light identifiers, stable results/errors, checked fixed-point values, typed time/revisions, order-ID providers, instrument metadata, and SHA-256. It must not become a miscellaneous dumping ground. |
+| `organization` | Immutable peer-firm, desk, bot, and derived attribution values. |
+| `market_data` | M1 subscription declarations only. Normalized events, market state, and dispatch begin in M2. |
+| `execution` | M1 execution-route declarations and validation only. Order requests, authorization, risk, OMS, and transmission begin in M3. |
+| `configuration` | Atomic startup validation, canonical `AEGISCFG` encoding, SHA-256 identity, and revision provenance across the M1 sections. |
+| `trace` | Bounded structured M1 records plus canonical `AEGISTRS` encoding and digest; external reporting and persistence are excluded. |
 
-Component-owned types stay with their component. For example, a normalized market event belongs to `market_data`, an order request belongs to `execution`, and a risk mode belongs to `risk`. A type moves to `model` only when it is genuinely neutral and shared.
+Component-owned types stay with their component. A normalized market event will belong to
+`market_data`, an order request will belong to `execution`, and a risk mode will belong to `risk`.
+A type moves to `model` only when it is genuinely neutral and shared.
+
+The expected later areas remain:
+
+| Proposed area | Intended responsibility |
+|---|---|
+| `strategy` | Strategy contract, configured bot runtime, and bot-bound submission context. |
+| `risk` | Risk modes and budgets, inline checks, reservations, and control-plane policy calculation. |
+| `inventory` | Fill-derived positions, exposure attribution, and bot/desk/firm aggregation. Durable ledger ownership and P&L placement remain open. |
+| `venues/<venue>` | Venue-native connectivity, parsing, symbol mapping, authentication, reconciliation, and order encoding. |
+| `runtime` | Process composition, lifecycle, and the serialized data-plane executor; it must not own domain rules. |
 
 ## Dependency Rules
 
-These rules matter more than the physical folder names: they prevent venue details and runtime
-wiring from leaking into reusable domain behavior.
+These rules matter more than the folder names: they prevent venue details and runtime wiring from
+leaking into reusable domain behavior.
 
-- `model` is a leaf: it does not depend on another AEGIS subsystem.
-- Venue-independent code never includes or exposes Binance- or Deribit-native message types.
-- Venue code may implement normalized market-data and execution contracts; those contracts do not depend on venue implementations.
-- Strategies consume normalized events and submit through a bot-bound execution boundary. They do not call adapters, sessions or sockets.
-- `runtime` is the composition root and may depend on subsystem implementations. Subsystems do not depend on `runtime` to find each other.
-- Control-plane and data-plane code exchange immutable values or snapshots. They do not share mutable domain objects.
-- Cross-subsystem state access uses explicit ownership boundaries and stable identifiers, not process-global mutable singletons.
-- The exact dependency direction among execution, risk and inventory will be finalized with the OMS and reservation-lifecycle decision. The layout must not hide a cycle by moving their types into `model`.
+- `model` is a leaf and does not depend on another AEGIS subsystem.
+- `organization` depends only on `model`.
+- M1 `market_data` and `execution` declarations depend on `model` and `organization`, but not on one
+  another. `configuration` composes and cross-validates their immutable values.
+- `trace` depends on `model` and immutable configuration provenance. It performs no file, database,
+  network, or console I/O.
+- Venue-independent code never includes or exposes a venue-native message type.
+- Venue code may later implement normalized market-data and execution contracts; those contracts do
+  not depend on venue implementations.
+- Strategies consume normalized events and submit through a bot-bound execution boundary. They do
+  not call adapters, sessions, or sockets.
+- `runtime` is the future composition root and may depend on subsystem implementations. Subsystems do
+  not depend on `runtime` to find one another.
+- Control-plane and data-plane code exchange immutable values or snapshots. They do not share
+  mutable domain objects.
+- Cross-subsystem state access uses explicit ownership boundaries and stable identifiers, not
+  process-global mutable singletons.
+- The exact dependency direction among execution, risk, and inventory will be finalized with the
+  OMS and reservation-lifecycle decision. The layout must not hide a cycle by moving their types into
+  `model`.
 
-Avoid generic directories such as `common`, `utils` or `core`. A reusable helper should remain with the subsystem that gives it meaning until there is evidence of a genuinely independent abstraction.
+Avoid generic directories such as `common`, `utils`, or `core`. A reusable helper remains with the
+subsystem that gives it meaning until there is evidence of a genuinely independent abstraction.
 
-## Proposed Test Shape
-
-The test areas separate small component checks from venue contracts and full deterministic flows.
+## Implemented M1 Test Shape
 
 ```text
 tests/
+├── support/
 ├── unit/
-├── venue_contract/
-├── integration/
+│   ├── configuration/
+│   ├── execution/
+│   ├── market_data/
+│   ├── model/
+│   ├── organization/
+│   └── trace/
 └── deterministic_scenarios/
 ```
 
-| Area | Intended coverage |
+| Area | Coverage |
 |---|---|
-| `unit` | Deterministic behavior within one subsystem. |
-| `venue_contract` | Binance and Deribit parsing/encoding against sanitized, credential-free fixtures. |
-| `integration` | Boundaries such as normalization-to-strategy and risk-to-OMS admission. |
-| `deterministic_scenarios` | Deterministic end-to-end market, order, fill and risk flows using test clocks and transports. |
+| `support` | Reusable accepted reference and two-firm configuration builders. |
+| `unit` | Deterministic behavior, boundary failures, compile-time type separation, and canonical golden vectors within one M1 area. |
+| `deterministic_scenarios` | The complete reference configuration and its bounded provenance trace, driven without credentials, clocks, transports, or exchange access. |
+| `venue_contract` (**Proposed**) | Future parsing and encoding against sanitized credential-free fixtures. |
+| `integration` (**Proposed**) | Future boundaries such as normalization-to-strategy and risk-to-OMS admission. |
 
-Tests should be grouped by behavior rather than copied mechanically from build targets. No fixture may contain live credentials, and no test may submit a real order without explicit authorization.
+Tests are grouped by behavior rather than copied mechanically from build targets. No fixture may
+contain a live credential, and no test may submit a real order without explicit authorization.
 
 ## Deliberately Open
 
-This section is an explicit reminder that M0 chose only the tools needed now; later milestones must
-make the remaining choices from concrete requirements.
+M0 selected CMake and the test/measurement baseline; M1 added no third-party runtime dependency. The
+following choices still wait for concrete milestone requirements:
 
-M0 selected CMake, a pinned test-dependency approach and the initial testing tools in
-[ADR-0002](../decisions/0002-delivery-toolchain.md). This proposal still does not decide:
-
-- runtime networking, asynchronous-I/O, serialization or persistence libraries;
-- the long-term installed/public API boundary beyond M0's cross-target `include/aegis` headers;
-- library target count, linkage model or C++ modules;
-- executable, service, deployment or UI directory structure;
-- generated code, persistence or migration directories;
+- runtime networking, asynchronous-I/O, external serialization, or persistence libraries;
+- the long-term installed/public API boundary beyond the current cross-target `include/aegis`
+  headers;
+- library target count, linkage model, or C++ modules;
+- executable, service, deployment, or UI directory structure;
+- generated code, persistence, or migration directories;
 - placement and timing of realized and unrealized P&L calculations.
 
-Those choices should follow concrete implementation needs rather than empty scaffolding.
+Canonical M1 configuration and trace bytes are internal deterministic evidence formats; they do not
+select a networking, storage, or general-purpose serialization framework.
