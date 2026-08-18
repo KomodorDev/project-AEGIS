@@ -11,6 +11,13 @@ namespace {
 
 using namespace aegis::model;
 
+template <typename Value>
+concept HasRevisionFactory = requires(Value value) { ConfigurationRevision::from_value(value); };
+
+template <typename Value>
+concept HasClockAdvance =
+    requires(DeterministicClockProvider clock, Value value) { clock.advance(value); };
+
 static_assert(!std::is_same_v<SourceTimestamp, ReceiveTimestamp>);
 static_assert(!std::is_same_v<ReceiveTimestamp, ProcessingTimestamp>);
 static_assert(!std::is_convertible_v<SourceTimestamp, ReceiveTimestamp>);
@@ -20,9 +27,18 @@ static_assert(!std::is_convertible_v<ConfigurationRevision, OrganizationRevision
 static_assert(!std::is_same_v<SessionEpoch, SequenceNumber>);
 static_assert(std::is_constructible_v<SourceTimestamp, std::uint64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, std::int64_t>);
+static_assert(!std::is_constructible_v<SourceTimestamp, char>);
 static_assert(!std::is_constructible_v<SessionEpoch, int>);
+static_assert(!std::is_constructible_v<SessionEpoch, char>);
 static_assert(!std::is_constructible_v<ElapsedNanoseconds, double>);
 static_assert(!std::is_constructible_v<DeterministicClockProvider, int>);
+static_assert(!std::is_constructible_v<DeterministicClockProvider, char>);
+static_assert(!HasRevisionFactory<char>);
+static_assert(!HasRevisionFactory<bool>);
+static_assert(HasRevisionFactory<signed char>);
+static_assert(!HasClockAdvance<char>);
+static_assert(!HasClockAdvance<bool>);
+static_assert(HasClockAdvance<unsigned char>);
 
 TEST_CASE("a deterministic clock returns explicitly advanced monotonic values", "[model][time]") {
   DeterministicClockProvider clock{7U};
@@ -76,6 +92,10 @@ TEST_CASE("installed revisions reject zero and fail on increment overflow", "[mo
   REQUIRE_FALSE(negative);
   CHECK(negative.error() ==
         DomainError::at_field(DomainErrorCode::InvalidRevision, "configuration_revision"));
+
+  const auto narrow_revision = ConfigurationRevision::from_value(static_cast<unsigned char>(2));
+  REQUIRE(narrow_revision);
+  CHECK(narrow_revision.value().value() == 2U);
 
   CHECK(OrganizationRevision::initial().value() == 1U);
 

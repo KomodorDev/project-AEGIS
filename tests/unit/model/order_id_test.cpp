@@ -48,6 +48,8 @@ static_assert(HasOrderProviderFactory<std::uint64_t>);
 static_assert(HasOrderProviderFactory<std::int64_t>);
 static_assert(!HasOrderProviderFactory<double>);
 static_assert(!HasOrderProviderFactory<bool>);
+static_assert(!HasOrderProviderFactory<char>);
+static_assert(HasOrderProviderFactory<signed char>);
 
 TEST_CASE("deterministic order IDs use canonical namespace and big-endian counter bytes",
           "[model][order-id]") {
@@ -104,6 +106,10 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   const auto negative = DeterministicOrderIdProvider::create(sequential_namespace(), -1);
   REQUIRE_FALSE(negative);
   CHECK(negative.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
+
+  auto narrow_counter =
+      DeterministicOrderIdProvider::create(sequential_namespace(), static_cast<unsigned char>(1));
+  REQUIRE(narrow_counter);
 
   auto created = DeterministicOrderIdProvider::create(sequential_namespace(),
                                                       std::numeric_limits<std::uint64_t>::max());

@@ -46,6 +46,8 @@ static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
 static_assert(!HasFromScaled<FixedPoint, bool, int>);
 static_assert(!HasFromScaled<Price, bool, int>);
+static_assert(!HasFromScaled<FixedPoint, char, int>);
+static_assert(!HasFromScaled<Price, int, char>);
 static_assert(!HasFromScaled<FixedPoint, int, bool>);
 static_assert(!HasFromScaled<Price, int, LegacyScale>);
 static_assert(HasFromScaled<FixedPoint, int, int>);
@@ -55,10 +57,13 @@ static_assert(!HasRescale<FixedPoint, double>);
 static_assert(!HasRescale<Price, long double>);
 static_assert(!HasRescale<FixedPoint, bool>);
 static_assert(!HasRescale<Price, LegacyScale>);
+static_assert(!HasRescale<FixedPoint, char>);
 static_assert(!HasScaledMultiply<float>);
 static_assert(!HasScaledDivide<long double>);
 static_assert(!HasScaledMultiply<bool>);
 static_assert(!HasScaledDivide<LegacyScale>);
+static_assert(!HasScaledMultiply<char>);
+static_assert(!HasScaledDivide<wchar_t>);
 static_assert(!HasProductOperator<Price, Quantity>);
 
 [[nodiscard]] FixedPoint decimal(std::string_view text) {
@@ -138,6 +143,11 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   REQUIRE_FALSE(invalid_price);
   CHECK(invalid_price.error() ==
         DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "price"));
+
+  const auto narrow_integers =
+      FixedPoint::from_scaled(static_cast<signed char>(12), static_cast<unsigned char>(1));
+  REQUIRE(narrow_integers);
+  CHECK(narrow_integers.value() == decimal("1.2"));
 }
 
 TEST_CASE("addition and subtraction preserve exact cross-scale values and fail on overflow",

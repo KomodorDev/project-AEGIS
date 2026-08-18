@@ -4,6 +4,7 @@
 
 #include "aegis/model/fixed_point.hpp"
 #include "aegis/model/identifier.hpp"
+#include "aegis/model/integer_input.hpp"
 #include "aegis/model/time.hpp"
 
 #include <concepts>
@@ -88,8 +89,7 @@ public:
 
   // Converts declared contracts to the multiplier's declared currency. It deliberately takes no
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
-  template <std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<Notional> contract_value(Quantity contracts, Scale target_scale,
                                                 RoundingMode rounding) const {
     if (!std::in_range<std::uint64_t>(target_scale)) {

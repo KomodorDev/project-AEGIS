@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "aegis/model/integer_input.hpp"
 #include "aegis/model/result.hpp"
 
 #include <array>
@@ -82,8 +83,7 @@ public:
     return create_validated(order_namespace, 1U);
   }
 
-  template <std::integral Counter>
-    requires(!std::same_as<std::remove_cvref_t<Counter>, bool>)
+  template <detail::CheckedIntegerInput Counter>
   [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace,
                                                                    Counter initial_counter) {
     if (!std::in_range<std::uint64_t>(initial_counter)) {

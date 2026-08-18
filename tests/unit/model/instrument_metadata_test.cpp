@@ -21,6 +21,8 @@ static_assert(!HasContractValue<double>);
 static_assert(!HasContractValue<long double>);
 static_assert(!HasContractValue<bool>);
 static_assert(!HasContractValue<LegacyScale>);
+static_assert(!HasContractValue<char>);
+static_assert(!HasContractValue<char16_t>);
 static_assert(HasContractValue<int>);
 
 template <typename Value> [[nodiscard]] Value parsed(std::string_view text) {

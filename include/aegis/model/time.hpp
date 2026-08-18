@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "aegis/model/integer_input.hpp"
 #include "aegis/model/result.hpp"
 
 #include <chrono>
@@ -23,9 +24,8 @@ struct ProcessingTimestampTag;
 
 template <typename Tag> class Timestamp {
 public:
-  template <std::unsigned_integral Value>
-    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
-             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  template <CheckedUnsignedIntegerInput Value>
+    requires(sizeof(UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr Timestamp(Value nanoseconds) noexcept
       : nanoseconds_{static_cast<std::uint64_t>(nanoseconds)} {}
 
@@ -47,9 +47,8 @@ struct SequenceNumberTag {
 
 template <typename Tag> class CheckedUnsigned {
 public:
-  template <std::unsigned_integral Value>
-    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
-             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  template <CheckedUnsignedIntegerInput Value>
+    requires(sizeof(UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr CheckedUnsigned(Value value) noexcept
       : value_{static_cast<std::uint64_t>(value)} {}
 
@@ -86,8 +85,7 @@ AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 
 template <typename Tag> class Revision {
 public:
-  template <std::integral Value>
-    requires(!std::same_as<std::remove_cvref_t<Value>, bool>)
+  template <CheckedIntegerInput Value>
   [[nodiscard]] static Result<Revision> from_value(Value value) {
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
       return Result<Revision>::failure(
@@ -125,9 +123,8 @@ using ProcessingTimestamp = detail::Timestamp<detail::ProcessingTimestampTag>;
 
 class ElapsedNanoseconds {
 public:
-  template <std::unsigned_integral Value>
-    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
-             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  template <detail::CheckedUnsignedIntegerInput Value>
+    requires(sizeof(detail::UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr ElapsedNanoseconds(Value value) noexcept
       : value_{static_cast<std::uint64_t>(value)} {}
 
@@ -178,14 +175,12 @@ class DeterministicClockProvider final : public ClockProvider {
 public:
   DeterministicClockProvider() noexcept = default;
 
-  template <std::unsigned_integral Value>
-    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
-             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  template <detail::CheckedUnsignedIntegerInput Value>
+    requires(sizeof(detail::UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit DeterministicClockProvider(Value initial_nanoseconds) noexcept
       : current_nanoseconds_{static_cast<std::uint64_t>(initial_nanoseconds)} {}
 
-  template <std::integral Value>
-    requires(!std::same_as<std::remove_cvref_t<Value>, bool>)
+  template <detail::CheckedIntegerInput Value>
   [[nodiscard]] Result<void> advance(Value nanoseconds) {
     if (!std::in_range<std::uint64_t>(nanoseconds)) {
       return Result<void>::failure(

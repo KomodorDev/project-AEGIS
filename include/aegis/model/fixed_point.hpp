@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "aegis/model/integer_input.hpp"
 #include "aegis/model/result.hpp"
 
 #include <compare>
@@ -30,9 +31,7 @@ class FixedPoint {
 public:
   static constexpr std::uint8_t maximum_scale = 18U;
 
-  template <std::integral Coefficient, std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Coefficient>, bool> &&
-             !std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <detail::CheckedIntegerInput Coefficient, detail::CheckedIntegerInput Scale>
   [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient, Scale scale) {
     if (!std::in_range<std::int64_t>(coefficient)) {
       return Result<FixedPoint>::failure(
@@ -57,8 +56,7 @@ public:
 
   [[nodiscard]] Result<FixedPoint> checked_add(FixedPoint other) const;
   [[nodiscard]] Result<FixedPoint> checked_subtract(FixedPoint other) const;
-  template <std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<FixedPoint> rescale(Scale target_scale, RoundingMode rounding) const {
     if (!std::in_range<std::uint64_t>(target_scale)) {
       return Result<FixedPoint>::failure(
@@ -67,8 +65,7 @@ public:
     return rescale_validated(static_cast<std::uint64_t>(target_scale), rounding);
   }
 
-  template <std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<FixedPoint> multiply(FixedPoint other, Scale target_scale,
                                             RoundingMode rounding) const {
     if (!std::in_range<std::uint64_t>(target_scale)) {
@@ -78,8 +75,7 @@ public:
     return multiply_validated(other, static_cast<std::uint64_t>(target_scale), rounding);
   }
 
-  template <std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<FixedPoint> divide(FixedPoint divisor, Scale target_scale,
                                           RoundingMode rounding) const {
     if (!std::in_range<std::uint64_t>(target_scale)) {
@@ -135,9 +131,7 @@ struct NotionalTag {
 
 template <typename Tag> class DecimalValue {
 public:
-  template <std::integral Coefficient, std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Coefficient>, bool> &&
-             !std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <CheckedIntegerInput Coefficient, CheckedIntegerInput Scale>
   [[nodiscard]] static Result<DecimalValue> from_scaled(Coefficient coefficient, Scale scale) {
     auto value = FixedPoint::from_scaled(coefficient, scale);
     if (!value) {
@@ -175,8 +169,7 @@ public:
     return wrap(value_.checked_subtract(other.value_));
   }
 
-  template <std::integral Scale>
-    requires(!std::same_as<std::remove_cvref_t<Scale>, bool>)
+  template <CheckedIntegerInput Scale>
   [[nodiscard]] Result<DecimalValue> rescale(Scale target_scale, RoundingMode rounding) const {
     return wrap(value_.rescale(target_scale, rounding));
   }
