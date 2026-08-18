@@ -28,6 +28,8 @@ template <typename Value, typename Scale>
 concept HasRescale =
     requires(Value value, Scale scale) { value.rescale(scale, RoundingMode::Exact); };
 
+// Multiplication and division have independent scale-taking overload sets, so probe both rather
+// than assuming the rescale constraint protects every precision-changing entry point.
 template <typename Scale>
 concept HasScaledMultiply =
     requires(FixedPoint value, Scale scale) { value.multiply(value, scale, RoundingMode::Exact); };
@@ -68,6 +70,8 @@ static_assert(!HasRescale<Price, long double>);
 static_assert(!HasRescale<FixedPoint, bool>);
 static_assert(!HasRescale<Price, LegacyScale>);
 static_assert(!HasRescale<FixedPoint, char>);
+
+// The product and quotient scale firewalls must reject floating inputs independently.
 static_assert(!HasScaledMultiply<float>);
 static_assert(!HasScaledDivide<long double>);
 static_assert(!HasScaledMultiply<bool>);
@@ -123,6 +127,9 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   // Redundant fractional zeros at either signed limit must canonicalize before range evaluation.
   CHECK(decimal("9223372036854775807.0") == decimal("9223372036854775807"));
   CHECK(decimal("-9223372036854775808.000") == decimal("-9223372036854775808"));
+
+  // Canonicalization must also preserve boundary coefficients when significant fractional digits
+  // remain after the redundant zero is removed.
   CHECK(decimal("922337203685477580.70") == decimal("922337203685477580.7"));
   CHECK(decimal("-922337203685477580.80") == decimal("-922337203685477580.8"));
 
@@ -227,6 +234,7 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   REQUIRE(maximum_product);
   CHECK(maximum_product.value() == decimal("9223372036854775807"));
 
+  // The asymmetric negative coefficient limit remains representable through exact multiplication.
   const auto minimum_product =
       decimal("-9223372036854775808").multiply(decimal("1"), 18U, RoundingMode::Exact);
   REQUIRE(minimum_product);
@@ -249,6 +257,8 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   REQUIRE(maximum_quotient);
   CHECK(maximum_quotient.value() == decimal("9223372036854775807"));
 
+  // Dividing INT64_MIN by one preserves it, while division by negative one correctly rejects the
+  // unrepresentable positive magnitude.
   const auto minimum_quotient =
       decimal("-9223372036854775808").divide(decimal("1"), 18U, RoundingMode::Exact);
   REQUIRE(minimum_quotient);

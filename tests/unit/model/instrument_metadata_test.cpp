@@ -10,6 +10,8 @@ namespace {
 
 using namespace aegis::model;
 
+// Interesting syntax: a requires-expression proves forbidden contract-value scale types are not
+// callable without making the test suite contain a deliberately uncompilable invocation.
 template <typename Scale>
 concept HasContractValue = requires(InstrumentMetadata metadata, Quantity quantity, Scale scale) {
   metadata.contract_value(quantity, scale, RoundingMode::Exact);
@@ -17,6 +19,7 @@ concept HasContractValue = requires(InstrumentMetadata metadata, Quantity quanti
 
 enum LegacyScale { LegacyScaleZero = 0 };
 
+// Contract conversion has the same compile-time floating-point precision firewall as FixedPoint.
 static_assert(!HasContractValue<double>);
 static_assert(!HasContractValue<long double>);
 static_assert(!HasContractValue<bool>);
