@@ -9,6 +9,10 @@
 passed locally on 2026-08-18. Remote CI, review, and integration into `dev` remain pending; M1 is not
 closed or merged.
 
+The code commit named above is the exact implementation snapshot covered by the recorded local
+matrix. Later evidence or documentation-only commits do not move that boundary; any implementation
+change requires a new code-tip reference and a fresh verification record.
+
 Gate IDs beginning with `M1-S` identify delivered scope. IDs beginning with `M1-E` map the roadmap's
 exit conditions.
 
