@@ -12,6 +12,8 @@
 
 namespace aegis::execution {
 
+// Assigned state values and venue/instrument keys are explicit route inputs; neither is inferred
+// from an active market-data subscription.
 enum class ExecutionRouteState : std::uint8_t { Disabled = 0, Enabled = 1 };
 
 using VenueInstrumentPair = std::pair<model::VenueId, model::InstrumentId>;
@@ -25,6 +27,8 @@ struct LogicalAccountVenueBinding {
                          const LogicalAccountVenueBinding&) = default;
 };
 
+// A route is a configured grant only. Selection, order construction, and transmission remain
+// outside this model, and changing state does not create a second semantic route identity.
 struct ExecutionRoute {
   model::RouteId id;
   model::BotId bot_id;
@@ -38,6 +42,8 @@ struct ExecutionRoute {
   friend bool operator==(const ExecutionRoute&, const ExecutionRoute&) = default;
 };
 
+// The factory accepts an empty route section, consumes dependency catalogs for validation, and
+// publishes non-duplicated grants in canonical route-ID order without retaining those catalogs.
 class ExecutionRouteConfiguration {
 public:
   [[nodiscard]] static model::Result<ExecutionRouteConfiguration>

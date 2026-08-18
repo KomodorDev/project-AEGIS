@@ -12,6 +12,8 @@
 
 namespace aegis::market_data {
 
+// A subscription is an explicit bot/venue/instrument/channel observation grant. Its assigned
+// channel vocabulary and dependency key cannot confer execution authority.
 enum class SubscriptionChannel : std::uint8_t { OrderBook = 1 };
 
 using VenueInstrumentPair = std::pair<model::VenueId, model::InstrumentId>;
@@ -26,6 +28,8 @@ struct Subscription {
   friend bool operator==(const Subscription&, const Subscription&) = default;
 };
 
+// The factory accepts an empty section, consumes the known instrument catalog for validation, and
+// publishes ID- and semantic-key-unique grants in canonical subscription-ID order.
 class SubscriptionConfiguration {
 public:
   [[nodiscard]] static model::Result<SubscriptionConfiguration>

@@ -33,6 +33,7 @@ add_library(
   aegis
   src/aegis/configuration/configuration_provenance.cpp
   src/aegis/configuration/startup_configuration.cpp
+  # Data subscriptions and execution routes remain separate compiled permission boundaries.
   src/aegis/execution/execution_route.cpp
   src/aegis/market_data/subscription.cpp
   # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.

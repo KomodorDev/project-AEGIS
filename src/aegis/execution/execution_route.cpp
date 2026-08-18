@@ -35,6 +35,8 @@ template <typename Value>
   return std::binary_search(values.begin(), values.end(), value);
 }
 
+// Staged existence checks distinguish an unknown venue or instrument from a known but forbidden
+// venue/instrument relationship, preserving precise deterministic errors.
 [[nodiscard]] bool contains_venue(const std::vector<VenueInstrumentPair>& pairs,
                                   const model::VenueId& venue_id) noexcept {
   return std::any_of(pairs.begin(), pairs.end(),
@@ -91,6 +93,7 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
   if (!account_binding_duplicates) {
     return model::Result<ExecutionRouteConfiguration>::failure(account_binding_duplicates.error());
   }
+  // Canonical route order makes duplicate positions and the published snapshot input-order neutral.
   std::sort(routes.begin(), routes.end(),
             [](const ExecutionRoute& lhs, const ExecutionRoute& rhs) { return lhs.id < rhs.id; });
 
@@ -101,6 +104,7 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
     }
   }
 
+  // Validate every dependency and assigned state before rejecting duplicate authorization meaning.
   using SemanticKey =
       std::tuple<model::BotId, model::VenueId, model::LogicalAccountId, model::InstrumentId>;
   std::set<SemanticKey> semantic_keys;
@@ -155,6 +159,7 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
       ExecutionRouteConfiguration{revision, std::move(routes)});
 }
 
+// Factory canonicalization makes lower_bound sufficient without a mutable secondary index.
 const ExecutionRoute* ExecutionRouteConfiguration::find(const model::RouteId& id) const noexcept {
   const auto found = std::lower_bound(
       routes_.begin(), routes_.end(), id,

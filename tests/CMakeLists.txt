@@ -10,6 +10,7 @@ aegis_configure_owned_target(aegis_test_support)
 add_executable(
   aegis_unit_tests
   unit/configuration/startup_configuration_test.cpp
+  # These tests prove an observation grant never synthesizes or enables execution permission.
   unit/execution/execution_route_test.cpp
   unit/market_data/subscription_test.cpp
   # These primitive tests pin stable Result/error contracts and nominal identifier grammar.

@@ -1,4 +1,5 @@
-// Purpose: prove explicit route grants remain separate from market-data subscriptions.
+// Purpose: prove execution grants are canonical, dependency-checked, and independent of market-data
+// subscriptions without selecting or transmitting orders.
 
 #include "aegis/execution/execution_route.hpp"
 #include "aegis/market_data/subscription.hpp"
@@ -14,6 +15,7 @@ namespace {
 
 using namespace aegis;
 
+// Invalid literals fail fast because they indicate a broken typed test fixture, not a domain case.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view value) {
   auto parsed = Identifier::parse(value);
   if (!parsed) {
@@ -22,6 +24,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   return std::move(parsed).value();
 }
 
+// The base fixtures describe one valid disabled route and its complete dependency catalogs.
 [[nodiscard]] organization::Organization reference_organization() {
   auto result = organization::Organization::create(
       model::OrganizationRevision::initial(),
@@ -76,6 +79,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
            id<model::FirmId>("firm.aegis-lab"), id<model::VenueId>("deribit")}};
 }
 
+// Accepted cases lock canonical publication and prove subscriptions cannot create route authority.
 TEST_CASE("the reference route is explicit, canonical, and disabled by default",
           "[execution][route]") {
   const auto organization = reference_organization();
@@ -118,6 +122,7 @@ TEST_CASE("a subscription never creates or enables an execution route", "[execut
   CHECK(routes.value().routes().empty());
 }
 
+// Route IDs and authorization meaning are independently unique; state cannot duplicate a grant.
 TEST_CASE("route IDs and semantic keys must both be unique", "[execution][route]") {
   const auto organization = reference_organization();
   const auto existing = route("route.a");
@@ -174,6 +179,8 @@ TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
                                      "routes.known_account_bindings", 2U));
 }
 
+// Reference, relationship, and enum failures remain distinct so configuration defects are
+// actionable.
 TEST_CASE("execution routes reject every dangling reference", "[execution][route]") {
   const auto organization = reference_organization();
 

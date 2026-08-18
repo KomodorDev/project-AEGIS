@@ -35,6 +35,8 @@ template <typename Value>
   return std::binary_search(values.begin(), values.end(), value);
 }
 
+// Staged existence checks distinguish unknown components from a known but ungranted pair, keeping
+// dangling-reference and invalid-relationship failures semantically distinct.
 [[nodiscard]] bool contains_venue(const std::vector<VenueInstrumentPair>& pairs,
                                   const model::VenueId& venue_id) noexcept {
   return std::any_of(pairs.begin(), pairs.end(),
@@ -59,6 +61,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
   if (!dependency_duplicates) {
     return model::Result<SubscriptionConfiguration>::failure(dependency_duplicates.error());
   }
+  // Canonical subscription order stabilizes both duplicate positions and the published snapshot.
   std::sort(subscriptions.begin(), subscriptions.end(),
             [](const Subscription& lhs, const Subscription& rhs) { return lhs.id < rhs.id; });
 
@@ -69,6 +72,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
     }
   }
 
+  // Resolve dependencies and the assigned channel before enforcing uniqueness of grant meaning.
   using SemanticKey =
       std::tuple<model::BotId, model::VenueId, model::InstrumentId, SubscriptionChannel>;
   std::set<SemanticKey> semantic_keys;
@@ -109,6 +113,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
       SubscriptionConfiguration{revision, std::move(subscriptions)});
 }
 
+// Factory canonicalization makes lower_bound sufficient without a mutable secondary index.
 const Subscription*
 SubscriptionConfiguration::find(const model::SubscriptionId& id) const noexcept {
   const auto found =

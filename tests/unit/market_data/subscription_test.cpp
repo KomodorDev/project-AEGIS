@@ -13,6 +13,7 @@ namespace {
 
 using namespace aegis;
 
+// Invalid literals fail fast because they indicate a broken typed test fixture, not a domain case.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view value) {
   auto parsed = Identifier::parse(value);
   if (!parsed) {
@@ -21,6 +22,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   return std::move(parsed).value();
 }
 
+// The base fixtures describe one valid observation grant and its complete dependency catalog.
 [[nodiscard]] organization::Organization reference_organization() {
   auto result = organization::Organization::create(
       model::OrganizationRevision::initial(),
@@ -47,6 +49,8 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   return {{id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")}};
 }
 
+// Accepted cases lock canonical grants while preserving the deliberate validity of an empty
+// section.
 TEST_CASE("subscriptions are sorted by ID and preserve explicit order-book grants",
           "[market_data][subscription]") {
   const auto organization = reference_organization();
@@ -77,6 +81,7 @@ TEST_CASE("an empty subscription section is valid", "[market_data][subscription]
   CHECK(result.value().subscriptions().empty());
 }
 
+// Subscription IDs and observation meaning are independent uniqueness contracts.
 TEST_CASE("subscription IDs and semantic keys must both be unique", "[market_data][subscription]") {
   const auto organization = reference_organization();
   const auto existing = subscription("subscription.a-book");
@@ -117,6 +122,7 @@ TEST_CASE("subscription dependency pairs reject duplicates after canonical sorti
                                                        2U));
 }
 
+// Reference, relationship, and channel failures remain distinct for actionable startup diagnostics.
 TEST_CASE("subscriptions reject every dangling reference", "[market_data][subscription]") {
   const auto organization = reference_organization();
   const auto pairs = venue_instruments();
