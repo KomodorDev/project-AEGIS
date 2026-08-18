@@ -9,6 +9,8 @@
 
 namespace aegis::model {
 
+// Fixed-size byte and character arrays make digest width part of the type contract. Sha256Hex has
+// no terminator, so callers cannot mistake it for an owning C string.
 inline constexpr std::size_t sha256_digest_size = 32U;
 inline constexpr std::size_t sha256_hex_size = sha256_digest_size * 2U;
 
@@ -28,6 +30,8 @@ public:
 private:
   static constexpr std::size_t block_size = 64U;
 
+  // Interesting syntax: a fixed-extent span makes partial-block compression unrepresentable at the
+  // call boundary while borrowing the caller's storage without allocation.
   void compress(std::span<const std::byte, block_size> block) noexcept;
 
   std::array<std::uint32_t, 8U> state_{};
@@ -36,6 +40,7 @@ private:
   std::size_t buffered_bytes_{0U};
 };
 
+// The one-shot helper uses the same streaming implementation, keeping a single hashing contract.
 [[nodiscard]] Sha256Digest sha256(std::span<const std::byte> bytes) noexcept;
 
 // Return exactly 64 lowercase ASCII hexadecimal digits, without a terminator.

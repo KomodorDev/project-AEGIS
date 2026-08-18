@@ -41,6 +41,7 @@ add_library(
   src/aegis/model/instrument_metadata.cpp
   # Clock and order-ID providers own stateful behavior; their typed values remain in public headers.
   src/aegis/model/order_id.cpp
+  # The owned SHA-256 implementation keeps provenance fingerprints portable and dependency-free.
   src/aegis/model/sha256.cpp
   # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp

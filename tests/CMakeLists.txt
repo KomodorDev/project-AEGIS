@@ -20,6 +20,7 @@ add_executable(
   unit/model/instrument_metadata_test.cpp
   # Clock and order-ID tests share deterministic providers to pin replay and boundary behavior.
   unit/model/order_id_test.cpp
+  # SHA-256 tests use published vectors to protect the canonical provenance fingerprint primitive.
   unit/model/sha256_test.cpp
   # Time tests prove nominal clock separation, checked deltas, revisions, and injected progression.
   unit/model/time_test.cpp

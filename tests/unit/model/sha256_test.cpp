@@ -11,6 +11,8 @@
 
 namespace {
 
+// Interesting syntax: std::as_bytes creates a read-only byte view over text without copying or
+// applying an encoding conversion, matching the production hash boundary exactly.
 [[nodiscard]] std::span<const std::byte> as_bytes(std::string_view text) noexcept {
   return std::as_bytes(std::span<const char>{text.data(), text.size()});
 }
@@ -26,22 +28,27 @@ namespace {
 
 } // namespace
 
+// Published short-message vectors pin empty padding and the ordinary single-block transform.
 TEST_CASE("SHA-256 matches the empty input standard vector", "[model][sha256]") {
   CHECK(hash_text("") == "e3b0c44298fc1c149afbf4c8996fb924"
                          "27ae41e4649b934ca495991b7852b855");
 }
 
+// The canonical "abc" vector catches errors in message loading, rounds, and digest serialization.
 TEST_CASE("SHA-256 matches the abc standard vector", "[model][sha256]") {
   CHECK(hash_text("abc") == "ba7816bf8f01cfea414140de5dae2223"
                             "b00361a396177a9cb410ff61f20015ad");
 }
 
+// The million-byte published vector exercises repeated direct-block compression and final padding.
 TEST_CASE("SHA-256 matches the million-a multi-block standard vector", "[model][sha256]") {
   const std::string million_as(1'000'000U, 'a');
   CHECK(hash_text(million_as) == "cdc76e5c9914fb9281a1c7e284d73e67"
                                  "f1809a48a497200e046d39ccc7112cd0");
 }
 
+// Deliberately uneven chunks cross the 64-byte boundary and prove buffering does not affect
+// identity.
 TEST_CASE("incremental SHA-256 is independent of chunk boundaries", "[model][sha256]") {
   constexpr std::string_view input = "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmn"
                                      "hijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
@@ -60,6 +67,7 @@ TEST_CASE("incremental SHA-256 is independent of chunk boundaries", "[model][sha
                                           "0b249b11e8f07a51afac45037afee9d1");
 }
 
+// Provenance rendering is a fixed-width lowercase array, including leading-zero nibbles.
 TEST_CASE("SHA-256 hexadecimal encoding is lowercase and fixed width", "[model][sha256]") {
   aegis::model::Sha256Digest digest{};
   for (std::size_t index = 0U; index < digest.size(); ++index) {
@@ -72,6 +80,7 @@ TEST_CASE("SHA-256 hexadecimal encoding is lowercase and fixed width", "[model][
                                                        "101112131415161718191a1b1c1d1e1f");
 }
 
+// Finalization is an observational snapshot: hashing may continue from the same prefix afterward.
 TEST_CASE("finalizing a SHA-256 prefix does not consume incremental state", "[model][sha256]") {
   aegis::model::Sha256 incremental;
   incremental.update(as_bytes("a"));
