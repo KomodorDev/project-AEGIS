@@ -57,9 +57,14 @@ again. M3 owns the request's supported order vocabulary and economics.
 | M3–M5 | The injected one-shot command requests one fixed fake-backed order intent through the canonical route/risk/OMS path. |
 | M6–M7 | Live public and private testnet facts may be observed, but the constructed runtime has no transmission capability. |
 | M8 | One explicitly armed testnet route may exercise a bounded submit/cancel lifecycle. |
+| M9 | Restart and reconnect qualification re-establishes authoritative orders, positions, and durable audit state before the route can resume. |
+| M10 | The same single-bot scenario runs under its named sustained, burst, backlog, and injected-fault workloads. |
+| M11 | Authorized operators can observe, halt, and explicitly recover this route without widening its account or instrument boundary. |
+| M12 | The unchanged scenario completes the defined testnet shadow/paper qualification period; production remains forbidden. |
 
 No stage silently retries an ambiguous submission. A market-data subscription never implies
-execution permission.
+execution permission. This table fixes externally visible scenario behavior, not the deferred M3–M11
+protocol, state-machine, recovery, or operator-interface designs owned by those milestones.
 
 ## Account boundary
 

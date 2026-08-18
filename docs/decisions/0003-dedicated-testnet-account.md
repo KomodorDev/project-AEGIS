@@ -37,8 +37,16 @@ The required account baseline is:
 - Runtime API keys are created by the dedicated subaccount, not inherited from the main account.
 - Runtime API keys have read-only account access and never receive wallet, Block Trade, Block RFQ,
   custody, account-write, or other unlisted functional permission.
+- The subaccount's enabled Deribit product classes contain only `perpetual`; `futures`, `options`,
+  `future_combos`, `option_combos`, and `spots` are disabled by provisioning.
 - Main-account self-match prevention uses `reject_taker` and is extended across subaccounts. Block
   RFQ self-match prevention is also enabled even though AEGIS has no Block RFQ capability.
+
+Those self-match settings apply to the parent main account and every sibling subaccount. Therefore,
+the preferred topology is a parent testnet main account dedicated to the AEGIS reference environment.
+If the parent has other users or subaccounts, its owner must explicitly approve and record that the
+required account-wide settings are compatible with all of them before AEGIS is armed. The AEGIS
+runtime never changes parent-account settings; a human-controlled provisioning process owns them.
 
 Permissions are staged by capability:
 
@@ -56,14 +64,16 @@ returned by authentication.
 
 An authenticated session must also prove that Deribit reports account type `subaccount` and the
 expected subaccount ID. Main-account keys are not acceptable because their authority can extend
-across subaccounts. A `mainaccount` session, unexpected subaccount, excessive or unrecognized
-functional token scope, or mismatch with the provisioned key record enters quarantine. A separately
-controlled setup credential may configure account settings and inspect maximum key scopes, but it is
-never loaded by the AEGIS runtime.
+across subaccounts. A session reporting account type `main`, an unexpected subaccount, excessive or
+unrecognized functional token scope, or a mismatch with the provisioned key record enters
+quarantine. A separately controlled setup credential may configure account settings and inspect
+maximum key scopes, but it is never loaded by the AEGIS runtime.
 
 Deribit product restrictions operate at a broader product-class level and do not make the credential
-specific to `BTC-PERPETUAL`. The AEGIS route and encoder allowlists enforce the one-instrument boundary;
-reconciliation quarantines any activity outside it.
+specific to `BTC-PERPETUAL`: allowing `perpetual` can still permit other perpetual instruments. The
+AEGIS route and encoder allowlists enforce the exact one-instrument boundary; reconciliation
+quarantines any activity outside it. Venue restriction and application allowlisting are independent
+layers, and neither is documentation-only authority to trade.
 
 Deribit is authoritative for venue facts: accepted exchange orders, order status, trades, balances,
 positions, permissions, and configured margin model. AEGIS is authoritative for local intent,
@@ -93,12 +103,15 @@ it cannot prove that every account order was cancelled and does not replace reco
 
 M7 must validate at startup and after reconnect that the authenticated account is the expected
 subaccount; the effective token scope exactly matches the milestone allowlist; the margin model is
-`segregated_sm`; account-level self-match prevention is enabled with `reject_taker`; and balances,
-collateral, open orders, venue-reported net positions, and instrument scope match this decision. The
-operational preflight must also attest that separate login remains disabled, no unauthorized key
-exists, the runtime key's provisioned maximum scope still matches its record, and Block RFQ self-match
-prevention remains enabled. Deterministic venue contract tests must inject each observable mismatch
-and prove that the account remains quarantined and unable to transmit.
+`segregated_sm`; account-level self-match prevention is enabled with `reject_taker`; the reported
+`trading_products_details` enables only the required product class; and balances, collateral, open
+orders, venue-reported net positions, and instrument scope match this decision. The operational
+preflight must also attest that provisioning set the available `trading_products` allowlist to exactly
+`["perpetual"]` and received a successful result, the parent-account owner approved the account-wide
+settings, separate login remains disabled, no unauthorized key exists, the runtime key's provisioned
+maximum scope still matches its record, and Block RFQ self-match prevention remains enabled.
+Deterministic venue contract tests must inject each observable mismatch and prove that the account
+remains quarantined and unable to transmit.
 
 ## Consequences
 
@@ -115,3 +128,5 @@ and prove that the account remains quarantined and unable to transmit.
 - [Creating API keys and maximum scopes](https://docs.deribit.com/articles/creating-api-key)
 - [Subaccount ownership and isolation](https://support.deribit.com/hc/en-us/articles/25944616386973-Subaccounts)
 - [Account-level self-match prevention](https://support.deribit.com/hc/en-us/articles/25944634289693-Account-settings-page)
+- [Subaccount product-class restrictions](https://docs.deribit.com/api-reference/account-management/private-set_disabled_trading_products)
+- [Observable product availability in account details](https://docs.deribit.com/api-reference/account-management/private-get_account_summary)
