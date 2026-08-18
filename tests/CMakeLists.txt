@@ -6,6 +6,7 @@ add_executable(
   unit/execution/execution_route_test.cpp
   unit/market_data/subscription_test.cpp
   unit/model/domain_error_result_test.cpp
+  unit/model/fixed_point_test.cpp
   unit/model/identifier_test.cpp
   unit/model/order_id_test.cpp
   unit/model/sha256_test.cpp
