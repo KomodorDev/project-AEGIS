@@ -21,6 +21,7 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [Runtime flows](architecture/runtime-flows.md)
 - [Provisional repository layout](architecture/repository-layout.md)
 - [ADR-0001: Serialized data-plane execution and state ownership](decisions/0001-serialized-data-plane-execution.md)
+- [Proposed implementation roadmap](implementation-roadmap.md)
 
 ## System Architecture
 
@@ -252,6 +253,23 @@ The data plane handles:
 - Exchange transmission
 
 For the first implementation, one dedicated thread and serialized executor owns all mutable data-plane state and runs every data-plane handler to completion. This is an accepted v1 ownership decision, not a claim that the engine will always remain single-threaded. See [ADR-0001](decisions/0001-serialized-data-plane-execution.md).
+
+#### In-memory order books
+
+**Status:** In-memory single-owner working state is **Accepted**. The synchronization behavior below is **Proposed**; exact representation, retained depth and historical retention remain **Open**.
+
+For every subscribed venue/instrument that requires order-book data, the normalized market-data core maintains the current working book in memory. A venue adapter normally supplies an initial snapshot followed by ordered incremental updates.
+
+On one serialized executor turn, AEGIS:
+
+1. validates the source session/generation, sequence, instrument-metadata revision and any venue checksum;
+2. applies the complete update to the owner-local book;
+3. transitions the book's readiness state; and
+4. dispatches a normalized event or read-only view only after the update is complete.
+
+A strategy therefore observes either the coherent state before an update or the coherent state after it, never a half-applied book. If a sequence gap, checksum failure, incompatible metadata change or excessive staleness makes the book unreliable, AEGIS marks it non-ready and obtains a fresh snapshot before treating it as tradable again.
+
+The latency-sensitive data plane needs the current working book, not necessarily its entire history. Historical raw messages, normalized events or book snapshots may be copied asynchronously to off-path storage for replay and research. The required depth—top of book, a fixed number of levels or the full venue book—and the long-term retention policy should follow concrete strategy and recovery requirements.
 
 ```mermaid
 flowchart LR
