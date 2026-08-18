@@ -21,6 +21,10 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [Runtime flows](architecture/runtime-flows.md)
 - [Provisional repository layout](architecture/repository-layout.md)
 - [ADR-0001: Serialized data-plane execution and state ownership](decisions/0001-serialized-data-plane-execution.md)
+- [ADR-0002: Initial delivery toolchain](decisions/0002-delivery-toolchain.md)
+- [ADR-0003: Dedicated Deribit testnet account](decisions/0003-dedicated-testnet-account.md)
+- [M0 reference scenario](reference-scenario.md)
+- [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
 
 ## System Architecture
