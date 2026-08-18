@@ -79,11 +79,11 @@ Tests should be grouped by behavior rather than copied mechanically from build t
 
 ## Deliberately Open
 
-This proposal does not decide:
+M0 selected CMake, a pinned test-dependency approach and the initial testing tools in
+[ADR-0002](../decisions/0002-delivery-toolchain.md). This proposal still does not decide:
 
-- build system or dependency manager;
-- networking, serialization or test libraries;
-- co-located headers versus a public `include/aegis` tree;
+- runtime networking, asynchronous-I/O, serialization or persistence libraries;
+- the long-term installed/public API boundary beyond M0's cross-target `include/aegis` headers;
 - library target count, linkage model or C++ modules;
 - executable, service, deployment or UI directory structure;
 - generated code, persistence or migration directories;
