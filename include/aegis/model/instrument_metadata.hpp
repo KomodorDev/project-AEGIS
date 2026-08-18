@@ -32,8 +32,9 @@ enum class ContractMultiplierUnit : std::uint8_t {
   QuoteCurrencyPerContract = 2,
 };
 
-// Carry the complete untrusted configuration snapshot into a single validation boundary. No field
-// becomes observable through InstrumentMetadata until the aggregate passes together.
+// Carry the complete untrusted configuration snapshot into a single validation boundary. Scales
+// stay wide so out-of-range inputs cannot wrap before validation; getters narrow only accepted
+// data.
 struct InstrumentMetadataParams {
   VenueId venue_id;
   InstrumentId instrument_id;
@@ -98,6 +99,8 @@ public:
 
   // Convert declared contracts to the multiplier's declared currency. The API deliberately takes no
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
+  // Interesting syntax: the deleted floating-point overload makes a lossy target scale fail during
+  // overload resolution, while wide integers remain available for checked validation.
   template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<Notional> contract_value(Quantity contracts, Scale target_scale,
                                                 RoundingMode rounding) const {

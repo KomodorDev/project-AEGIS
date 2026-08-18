@@ -35,6 +35,8 @@ public:
 
   // Construction accepts already-scaled integers or strict ordinary decimal text; both paths
   // preserve exactness and canonicalize redundant fractional zeros.
+  // Interesting syntax: the constrained overload plus a deleted floating-point overload makes
+  // binary-float construction ill-formed instead of permitting an implicit lossy conversion.
   template <detail::CheckedIntegerInput Coefficient, detail::CheckedIntegerInput Scale>
   [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient, Scale scale) {
     if (!std::in_range<std::int64_t>(coefficient)) {
@@ -90,6 +92,9 @@ public:
     }
     return divide_validated(divisor, static_cast<std::uint64_t>(target_scale), rounding);
   }
+
+  // Interesting syntax: deleting only floating-point scale overloads provides a compile-time
+  // precision firewall while valid wide integer scales still reach checked runtime validation.
   template <typename Scale>
     requires std::floating_point<std::remove_cvref_t<Scale>>
   [[nodiscard]] Result<FixedPoint> rescale(Scale, RoundingMode) const = delete;
@@ -157,6 +162,8 @@ public:
     return Result<DecimalValue>::success(DecimalValue{value.value()});
   }
 
+  // Repeat the kernel's floating-point firewall at the nominal API boundary so invalid calls cannot
+  // silently shed their Price, Quantity, or Notional context through conversion.
   template <typename Coefficient, typename Scale>
     requires(std::floating_point<std::remove_cvref_t<Coefficient>> ||
              std::floating_point<std::remove_cvref_t<Scale>>)
@@ -190,6 +197,7 @@ public:
     return wrap(value_.rescale(target_scale, rounding));
   }
 
+  // Nominal rescaling rejects binary floating-point targets for the same exactness reason.
   template <typename Scale>
     requires std::floating_point<std::remove_cvref_t<Scale>>
   [[nodiscard]] Result<DecimalValue> rescale(Scale, RoundingMode) const = delete;

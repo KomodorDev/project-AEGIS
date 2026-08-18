@@ -167,6 +167,8 @@ Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts
   if (!aligned) {
     return Result<Notional>::failure(aligned.error());
   }
+  // Keep the target scale wide until the decimal kernel has checked its maximum; narrowing earlier
+  // would let inputs such as 256 wrap into an apparently valid scale.
   auto converted = contracts.fixed_point().multiply(params_.contract_multiplier.fixed_point(),
                                                     target_scale, rounding);
   if (!converted) {

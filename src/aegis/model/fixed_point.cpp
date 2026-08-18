@@ -163,6 +163,7 @@ void remove_decimal_zero(DecimalDigits& value) noexcept {
   }
 }
 
+// Append one long-division digit as value*10+digit in the least-significant-first representation.
 void append_decimal_digit(DecimalDigits& value, std::uint8_t digit) noexcept {
   for (std::size_t index = value.size; index > 0U; --index) {
     value.values[index] = value.values[index - 1U];
@@ -172,6 +173,7 @@ void append_decimal_digit(DecimalDigits& value, std::uint8_t digit) noexcept {
   normalize(value);
 }
 
+// Propagate a rounding carry in scratch storage before any signed-width conversion is attempted.
 void increment_magnitude(DecimalDigits& value) noexcept {
   std::size_t index = 0U;
   while (index < value.size && value.values[index] == 9U) {
@@ -240,6 +242,8 @@ void increment_magnitude(DecimalDigits& value) noexcept {
 // rescaling, multiplication, and division.
 enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
 
+// Decide whether to increment independently of storage width. Exact fails on every nonzero
+// discarded fraction, and ties-to-even depends on the parity of the retained magnitude.
 [[nodiscard]] Result<bool> rounding_increment(bool negative, FractionRelation fraction,
                                               bool truncated_is_odd, RoundingMode rounding) {
   if (fraction == FractionRelation::Zero) {
@@ -653,6 +657,8 @@ Result<FixedPoint> FixedPoint::multiply_validated(FixedPoint other, std::uint64_
   FractionRelation fraction = FractionRelation::Zero;
   DecimalDigits retained;
   if (shift >= 0) {
+    // A wider requested scale adds no significant digits, so preserve the natural canonical scale
+    // instead of appending zeros that could create an artificial coefficient overflow.
     retained = product;
     result_scale = static_cast<std::uint8_t>(source_scale);
   } else {
@@ -735,6 +741,8 @@ Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_
       append_decimal_digit(retained, step.digit);
       remainder = step.remainder;
     }
+    // Round and remove canonical zeros while the quotient is still scratch digits; converting first
+    // would reject boundary coefficients whose redundant zeros make the intermediate look too wide.
     fraction = binary_fraction(remainder, denominator);
     auto increment =
         rounding_increment(negative, fraction, (retained.values[0U] % 2U) != 0U, rounding);

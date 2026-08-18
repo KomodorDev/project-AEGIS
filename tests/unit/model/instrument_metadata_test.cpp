@@ -138,6 +138,8 @@ TEST_CASE("metadata rejects corrupt fields in canonical order", "[model][metadat
   REQUIRE_FALSE(bad_inverse_unit);
   CHECK(bad_inverse_unit.error().context.field == "instrument.contract_multiplier_unit");
 
+  // A scale wider than uint8_t proves create() validates before its narrow public accessor can
+  // wrap.
   params = reference_params();
   params.price_scale = std::uint64_t{256U};
   const auto wrapped_price_scale = InstrumentMetadata::create(params);
