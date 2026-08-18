@@ -99,6 +99,24 @@ TEST_CASE("subscription IDs and semantic keys must both be unique", "[market_dat
                                      "subscriptions.semantic_key", 1U));
 }
 
+TEST_CASE("subscription dependency pairs reject duplicates after canonical sorting",
+          "[market_data][subscription]") {
+  const auto organization = reference_organization();
+  const market_data::VenueInstrumentPair duplicate{id<model::VenueId>("deribit"),
+                                                   id<model::InstrumentId>("ETH-USD-PERPETUAL")};
+
+  const auto result = market_data::SubscriptionConfiguration::create(
+      model::SubscriptionRevision::initial(), {subscription("subscription.a-book")}, organization,
+      {duplicate,
+       {id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")},
+       duplicate});
+
+  REQUIRE_FALSE(result);
+  CHECK(result.error() == model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
+                                                       "subscriptions.known_venue_instruments",
+                                                       2U));
+}
+
 TEST_CASE("subscriptions reject every dangling reference", "[market_data][subscription]") {
   const auto organization = reference_organization();
   const auto pairs = venue_instruments();

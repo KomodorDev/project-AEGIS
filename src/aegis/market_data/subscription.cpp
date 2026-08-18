@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <set>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -15,9 +17,17 @@ namespace {
 using model::DomainError;
 using model::DomainErrorCode;
 
-template <typename Value> void normalize_set(std::vector<Value>& values) {
+template <typename Value>
+[[nodiscard]] model::Result<void> sort_and_reject_duplicates(std::vector<Value>& values,
+                                                             std::string_view field) {
   std::sort(values.begin(), values.end());
-  values.erase(std::unique(values.begin(), values.end()), values.end());
+  for (std::size_t index = 1U; index < values.size(); ++index) {
+    if (values[index - 1U] == values[index]) {
+      return model::Result<void>::failure(
+          DomainError::at_index(DomainErrorCode::DuplicateIdentifier, std::string{field}, index));
+    }
+  }
+  return model::Result<void>::success();
 }
 
 template <typename Value>
@@ -44,7 +54,11 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
                                   std::vector<Subscription> subscriptions,
                                   const organization::Organization& organization,
                                   std::vector<VenueInstrumentPair> known_venue_instruments) {
-  normalize_set(known_venue_instruments);
+  const auto dependency_duplicates =
+      sort_and_reject_duplicates(known_venue_instruments, "subscriptions.known_venue_instruments");
+  if (!dependency_duplicates) {
+    return model::Result<SubscriptionConfiguration>::failure(dependency_duplicates.error());
+  }
   std::sort(subscriptions.begin(), subscriptions.end(),
             [](const Subscription& lhs, const Subscription& rhs) { return lhs.id < rhs.id; });
 

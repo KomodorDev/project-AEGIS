@@ -119,6 +119,37 @@ TEST_CASE("route IDs and semantic keys must both be unique", "[execution][route]
                                      "routes.semantic_key", 1U));
 }
 
+TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
+          "[execution][route]") {
+  const auto organization = reference_organization();
+  const execution::VenueInstrumentPair duplicate_instrument{
+      id<model::VenueId>("deribit"), id<model::InstrumentId>("ETH-USD-PERPETUAL")};
+
+  const auto duplicate_instrument_result = execution::ExecutionRouteConfiguration::create(
+      model::RouteRevision::initial(), {route("route.a")}, organization,
+      {duplicate_instrument,
+       {id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")},
+       duplicate_instrument},
+      account_bindings());
+  REQUIRE_FALSE(duplicate_instrument_result);
+  CHECK(duplicate_instrument_result.error() ==
+        model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
+                                     "routes.known_venue_instruments", 2U));
+
+  const execution::LogicalAccountVenueBinding duplicate_account{
+      id<model::LogicalAccountId>("account.z"), id<model::VenueId>("deribit")};
+  const auto duplicate_account_result = execution::ExecutionRouteConfiguration::create(
+      model::RouteRevision::initial(), {route("route.a")}, organization, venue_instruments(),
+      {duplicate_account,
+       {id<model::LogicalAccountId>("account.deribit-testnet-aegis"),
+        id<model::VenueId>("deribit")},
+       duplicate_account});
+  REQUIRE_FALSE(duplicate_account_result);
+  CHECK(duplicate_account_result.error() ==
+        model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
+                                     "routes.known_account_bindings", 2U));
+}
+
 TEST_CASE("execution routes reject every dangling reference", "[execution][route]") {
   const auto organization = reference_organization();
 

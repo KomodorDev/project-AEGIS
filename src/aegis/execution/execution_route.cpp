@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <set>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -15,9 +17,17 @@ namespace {
 using model::DomainError;
 using model::DomainErrorCode;
 
-template <typename Value> void normalize_set(std::vector<Value>& values) {
+template <typename Value>
+[[nodiscard]] model::Result<void> sort_and_reject_duplicates(std::vector<Value>& values,
+                                                             std::string_view field) {
   std::sort(values.begin(), values.end());
-  values.erase(std::unique(values.begin(), values.end()), values.end());
+  for (std::size_t index = 1U; index < values.size(); ++index) {
+    if (values[index - 1U] == values[index]) {
+      return model::Result<void>::failure(
+          DomainError::at_index(DomainErrorCode::DuplicateIdentifier, std::string{field}, index));
+    }
+  }
+  return model::Result<void>::success();
 }
 
 template <typename Value>
@@ -50,8 +60,16 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
     const organization::Organization& organization,
     std::vector<VenueInstrumentPair> known_venue_instruments,
     std::vector<LogicalAccountVenueBinding> known_account_bindings) {
-  normalize_set(known_venue_instruments);
-  normalize_set(known_account_bindings);
+  const auto venue_instrument_duplicates =
+      sort_and_reject_duplicates(known_venue_instruments, "routes.known_venue_instruments");
+  if (!venue_instrument_duplicates) {
+    return model::Result<ExecutionRouteConfiguration>::failure(venue_instrument_duplicates.error());
+  }
+  const auto account_binding_duplicates =
+      sort_and_reject_duplicates(known_account_bindings, "routes.known_account_bindings");
+  if (!account_binding_duplicates) {
+    return model::Result<ExecutionRouteConfiguration>::failure(account_binding_duplicates.error());
+  }
   std::sort(routes.begin(), routes.end(),
             [](const ExecutionRoute& lhs, const ExecutionRoute& rhs) { return lhs.id < rhs.id; });
 
