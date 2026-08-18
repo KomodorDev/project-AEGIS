@@ -31,6 +31,7 @@ add_executable(
   unit/model/time_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
+  # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
   # Version tests ensure the compiled library reports the configured project identity.
   unit/version_test.cpp)
@@ -43,7 +44,8 @@ aegis_configure_owned_target(aegis_unit_tests)
 include(Catch)
 catch_discover_tests(aegis_unit_tests PROPERTIES LABELS unit)
 
-# Keep the milestone replay visible as its own gate rather than hiding it among unit cases.
+# Keep deterministic replay and accepted-prefix capacity evidence visible as a milestone gate rather
+# than hiding the full reference scenario among isolated unit cases.
 add_executable(aegis_m1_reference_scenario_tests
                deterministic_scenarios/m1_reference_scenario_test.cpp)
 target_link_libraries(aegis_m1_reference_scenario_tests PRIVATE aegis_test_support

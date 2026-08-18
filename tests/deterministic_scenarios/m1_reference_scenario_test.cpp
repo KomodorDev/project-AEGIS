@@ -1,4 +1,5 @@
-// Purpose: prove the accepted M1 reference configuration produces one exact bounded trace.
+// Purpose: prove the accepted M1 reference configuration produces one exact bounded trace and that
+// capacity failure preserves its accepted prefix.
 
 #include "aegis/configuration/startup_configuration.hpp"
 #include "aegis/trace/trace.hpp"
@@ -18,6 +19,7 @@ namespace {
 
 using namespace aegis;
 
+// Assigned channel and route-state values are encoded as one-byte event payloads in schema 1.
 [[nodiscard]] trace::TracePayload one_byte_payload(std::uint8_t value) {
   const std::array bytes{std::byte{value}};
   auto result = trace::TracePayload::copy_from(bytes);
@@ -27,11 +29,14 @@ using namespace aegis;
   return std::move(result).value();
 }
 
+// Replay the accepted rulebook in causal order: seal, derived attribution, observation grant, then
+// execution grant. Any append failure is a broken deterministic fixture, not an expected branch.
 void append_reference_records(trace::TraceSink& sink,
                               const configuration::StartupConfiguration& configuration) {
   const auto& attribution = configuration.organization().bot_attributions().front();
   const auto& subscription = configuration.subscriptions().subscriptions().front();
   const auto& route = configuration.routes().routes().front();
+  // Both instrument-bearing events must cite the revision sealed into configuration provenance.
   const auto* const metadata_revision =
       configuration.provenance().find_instrument_metadata_revision(subscription.venue_id,
                                                                    subscription.instrument_id);
@@ -39,12 +44,14 @@ void append_reference_records(trace::TraceSink& sink,
     throw std::logic_error{"reference metadata revision is absent"};
   }
 
+  // The seal is the subject-free root record and therefore carries no instrument revision.
   auto appended = sink.append(trace::TraceEventKind::ConfigurationSealed, {},
                               trace::TraceProvenance::from(configuration.provenance()));
   if (!appended) {
     throw std::logic_error{"failed to append configuration trace record"};
   }
 
+  // Attribution records copy the complete immutable Firm -> Desk -> Bot -> Strategy chain.
   trace::TraceSubjects bot_subjects;
   bot_subjects.firm_id = attribution.firm_id;
   bot_subjects.desk_id = attribution.desk_id;
@@ -56,6 +63,7 @@ void append_reference_records(trace::TraceSink& sink,
     throw std::logic_error{"failed to append bot-attribution trace record"};
   }
 
+  // Subscription evidence couples the explicit data grant to its metadata and channel value.
   trace::TraceSubjects subscription_subjects;
   subscription_subjects.bot_id = subscription.bot_id;
   subscription_subjects.venue_id = subscription.venue_id;
@@ -69,6 +77,7 @@ void append_reference_records(trace::TraceSink& sink,
     throw std::logic_error{"failed to append subscription trace record"};
   }
 
+  // Route evidence adds logical-account authority and preserves the configured disabled state.
   trace::TraceSubjects route_subjects;
   route_subjects.bot_id = route.bot_id;
   route_subjects.venue_id = route.venue_id;
@@ -84,6 +93,7 @@ void append_reference_records(trace::TraceSink& sink,
   }
 }
 
+// Formatting helpers exist only to make exact canonical byte and digest assertions readable.
 [[nodiscard]] std::string digest_hex(const model::Sha256Digest& digest) {
   const auto encoded = model::sha256_hex(digest);
   return std::string{encoded.begin(), encoded.end()};
@@ -118,8 +128,11 @@ void append_reference_records(trace::TraceSink& sink,
   return params;
 }
 
+// Equivalent authored configurations must produce identical records, provenance, bytes, and digest.
 TEST_CASE("the exact reference configuration produces one deterministic bounded M1 trace",
           "[m1][deterministic_scenario][trace]") {
+  // Build the singleton fixture through its ordinary and deliberate reorder code paths. Reversal is
+  // a no-op today; equality keeps this scenario ready for future multi-value fixture growth.
   const auto first_configuration =
       configuration::StartupConfiguration::create(test_support::reference_configuration_params());
   const auto second_configuration =
@@ -127,11 +140,13 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
   REQUIRE(first_configuration);
   REQUIRE(second_configuration);
 
+  // Replay both accepted snapshots into independently owned bounded sinks.
   trace::TraceSink first_trace{4U};
   trace::TraceSink second_trace{4U};
   append_reference_records(first_trace, first_configuration.value());
   append_reference_records(second_trace, second_configuration.value());
 
+  // Record equality proves stable order, ordinal assignment, and copied section provenance.
   REQUIRE(first_trace.records().size() == 4U);
   REQUIRE(second_trace.records().size() == 4U);
   const auto& configuration_provenance = first_configuration.value().provenance();
@@ -151,6 +166,7 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
     CHECK(record_provenance.route_revision == configuration_provenance.route_revision());
   }
 
+  // Assigned event vocabulary, metadata applicability, and disabled route state remain explicit.
   CHECK(first_trace.records()[0U].kind() == trace::TraceEventKind::ConfigurationSealed);
   CHECK(first_trace.records()[1U].kind() == trace::TraceEventKind::BotAttributed);
   CHECK(first_trace.records()[2U].kind() == trace::TraceEventKind::SubscriptionConfigured);
@@ -165,6 +181,7 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
   CHECK(first_trace.records()[3U].payload().bytes().front() == std::byte{0U});
   CHECK(first_configuration.value().routes().routes().front().is_enabled() == false);
 
+  // Canonical stream identity closes the replay proof across the complete record sequence.
   const auto first_bytes = first_trace.canonical_bytes();
   const auto second_bytes = second_trace.canonical_bytes();
   const auto first_digest = first_trace.digest();
@@ -185,6 +202,8 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
         "242691fdfaa6377bf86b0bd3642ece7a8223e52936d3a67d7a2d5b5731033749");
 }
 
+// A rejected fourth record must not alter the exact bytes or digest of the accepted three-record
+// prefix.
 TEST_CASE("reference trace capacity failure preserves every accepted prefix record",
           "[m1][deterministic_scenario][trace]") {
   const auto configured =

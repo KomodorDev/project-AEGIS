@@ -20,6 +20,8 @@
 
 namespace aegis::trace {
 
+// Both values are serialization contracts: the version identifies field semantics and the payload
+// bound keeps every accepted record's caller-supplied bytes fixed and reviewable.
 inline constexpr std::uint16_t trace_schema_version = 1U;
 inline constexpr std::size_t max_trace_payload_bytes = 64U;
 
@@ -48,6 +50,8 @@ struct TraceSubjects {
   friend bool operator==(const TraceSubjects&, const TraceSubjects&) = default;
 };
 
+// Payloads copy at most the assigned bound into inline storage, so records never retain caller
+// memory and payload acceptance does not require heap allocation.
 class TracePayload final {
 public:
   TracePayload() noexcept = default;
@@ -58,6 +62,7 @@ public:
     return std::span<const std::byte>{bytes_.data(), size_};
   }
 
+  // Unused array tail bytes are storage, not payload meaning, and are deliberately excluded.
   friend bool operator==(const TracePayload& left, const TracePayload& right) noexcept {
     return left.bytes().size() == right.bytes().size() &&
            std::equal(left.bytes().begin(), left.bytes().end(), right.bytes().begin());
@@ -86,6 +91,7 @@ struct TraceProvenance {
   friend bool operator==(const TraceProvenance&, const TraceProvenance&) = default;
 };
 
+// Ordinals are one-based append positions issued only after a record passes validation.
 class TraceOrdinal final {
 public:
   [[nodiscard]] constexpr std::uint64_t value() const noexcept { return value_; }
@@ -94,6 +100,8 @@ public:
   friend constexpr auto operator<=>(TraceOrdinal, TraceOrdinal) = default;
 
 private:
+  // Interesting syntax: the private constructor plus TraceSink friend prevents callers from forging
+  // or skipping positions in an accepted trace prefix.
   friend class TraceSink;
 
   explicit constexpr TraceOrdinal(std::uint64_t value) noexcept : value_{value} {}
@@ -101,6 +109,8 @@ private:
   std::uint64_t value_;
 };
 
+// Only the sink can originate a record's validated field combination and ordinal. Public copy/move
+// operations preserve that already-validated immutable observation without minting new positions.
 class TraceRecord final {
 public:
   TraceRecord(const TraceRecord&) = default;
@@ -134,10 +144,14 @@ private:
   TracePayload payload_;
 };
 
+// This bounded in-memory append authority preserves its accepted prefix on every failure; canonical
+// bytes and the digest are pure projections and perform no external I/O.
 class TraceSink final {
 public:
   explicit TraceSink(std::uint32_t capacity);
 
+  // Interesting syntax: deliberate move-only semantics prevent accidental duplication of append
+  // authority while still allowing ownership of a complete trace to transfer.
   TraceSink(const TraceSink&) = delete;
   TraceSink& operator=(const TraceSink&) = delete;
   TraceSink(TraceSink&&) noexcept = default;

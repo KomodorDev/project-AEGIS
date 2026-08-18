@@ -16,6 +16,7 @@ namespace {
 
 using namespace aegis;
 
+// Invalid typed literals or revisions are fixture defects and therefore fail immediately.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
   auto result = Identifier::parse(text);
   if (!result) {
@@ -32,6 +33,7 @@ template <typename Revision> [[nodiscard]] Revision revision(std::uint64_t value
   return std::move(result).value();
 }
 
+// Sequential fingerprint bytes make field order and byte preservation visible in the golden vector.
 [[nodiscard]] trace::TraceProvenance
 provenance(std::optional<model::InstrumentMetadataRevision> metadata_revision = std::nullopt) {
   model::Sha256Digest fingerprint{};
@@ -49,6 +51,7 @@ provenance(std::optional<model::InstrumentMetadataRevision> metadata_revision = 
   };
 }
 
+// Subject builders mirror the exact accepted schema for each subject-bearing M1 event.
 [[nodiscard]] trace::TraceSubjects bot_subjects() {
   trace::TraceSubjects subjects;
   subjects.firm_id = id<model::FirmId>("firm.aegis-lab");
@@ -77,6 +80,7 @@ provenance(std::optional<model::InstrumentMetadataRevision> metadata_revision = 
   return subjects;
 }
 
+// Payload and hexadecimal helpers keep schema-byte assertions compact without weakening exactness.
 [[nodiscard]] trace::TracePayload one_byte_payload(std::byte value) {
   const std::array bytes{value};
   auto result = trace::TracePayload::copy_from(bytes);
@@ -103,6 +107,8 @@ provenance(std::optional<model::InstrumentMetadataRevision> metadata_revision = 
   return std::string{encoded.begin(), encoded.end()};
 }
 
+// Boundary and event-schema tests prove malformed input is rejected before a record becomes
+// visible.
 TEST_CASE("trace payloads have an exact fixed upper bound", "[trace][unit]") {
   const std::array<std::byte, trace::max_trace_payload_bytes> maximum{};
   const auto accepted = trace::TracePayload::copy_from(maximum);
@@ -147,6 +153,7 @@ TEST_CASE("each M1 event kind enforces its exact subject and payload schema", "[
   CHECK(sink.records().front().ordinal().value() == 1U);
 }
 
+// Capacity failures must preserve the accepted prefix, its ordinals, bytes, and digest atomically.
 TEST_CASE("capacity failure cannot drop records or consume an ordinal", "[trace][unit]") {
   trace::TraceSink zero_capacity{0U};
   const auto empty_bytes = zero_capacity.canonical_bytes();
@@ -186,6 +193,7 @@ TEST_CASE("capacity failure cannot drop records or consume an ordinal", "[trace]
   CHECK(sink.digest().value() == digest_before.value());
 }
 
+// The golden record locks field tags, lengths, optional markers, endian order, and final SHA-256.
 TEST_CASE("one canonical trace record has stable tags lengths and SHA-256", "[trace][golden]") {
   trace::TraceSink sink{1U};
   REQUIRE(sink.append(trace::TraceEventKind::ConfigurationSealed, {}, provenance()));
@@ -195,6 +203,8 @@ TEST_CASE("one canonical trace record has stable tags lengths and SHA-256", "[tr
   REQUIRE(bytes);
   REQUIRE(digest);
 
+  // A complete one-record stream catches layout drift more precisely than field-by-field
+  // assertions.
   const std::string expected_bytes =
       "4145474953545253000100000001000000d8414547495354524300010001000000080000000000"
       "000001000200000002000100100000000100001100000001000012000000010000130000000100"

@@ -52,6 +52,7 @@ add_library(
   src/aegis/model/time.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
+  # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
   src/aegis/trace/trace.cpp
   # Version reporting exposes the configured project identity without adding runtime dependencies.
   src/aegis/version.cpp)
