@@ -28,37 +28,30 @@ namespace {
   return result;
 }
 
-[[nodiscard]] Result<OrderNamespace> random_namespace() {
-  OrderNamespace::Bytes bytes{};
-
+[[nodiscard]] bool
+fill_order_namespace_from_operating_system(OrderNamespace::Bytes& destination) noexcept {
 #if defined(__APPLE__)
-  if (::getentropy(bytes.data(), bytes.size()) != 0) {
-    return Result<OrderNamespace>::failure(
-        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
-  }
+  return ::getentropy(destination.data(), destination.size()) == 0;
 #elif defined(__linux__)
   std::size_t offset = 0U;
-  while (offset < bytes.size()) {
-    const auto result = ::getrandom(bytes.data() + offset, bytes.size() - offset, 0U);
+  while (offset < destination.size()) {
+    const auto result = ::getrandom(destination.data() + offset, destination.size() - offset, 0U);
     if (result < 0) {
       if (errno == EINTR) {
         continue;
       }
-      return Result<OrderNamespace>::failure(
-          DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+      return false;
     }
     if (result == 0) {
-      return Result<OrderNamespace>::failure(
-          DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+      return false;
     }
     offset += static_cast<std::size_t>(result);
   }
+  return true;
 #else
-  return Result<OrderNamespace>::failure(
-      DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+  static_cast<void>(destination);
+  return false;
 #endif
-
-  return Result<OrderNamespace>::success(OrderNamespace{bytes});
 }
 
 } // namespace
@@ -130,12 +123,18 @@ Result<OrderId> DeterministicOrderIdProvider::next() {
 }
 
 Result<ProductionOrderIdProvider> ProductionOrderIdProvider::create() {
-  auto order_namespace = random_namespace();
-  if (!order_namespace) {
-    return Result<ProductionOrderIdProvider>::failure(std::move(order_namespace).error());
+  return create_with_entropy(fill_order_namespace_from_operating_system);
+}
+
+Result<ProductionOrderIdProvider>
+ProductionOrderIdProvider::create_with_entropy(EntropyFillCallback entropy_fill) {
+  OrderNamespace::Bytes bytes{};
+  if (entropy_fill == nullptr || !entropy_fill(bytes)) {
+    return Result<ProductionOrderIdProvider>::failure(
+        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
   }
   return Result<ProductionOrderIdProvider>::success(
-      ProductionOrderIdProvider{std::move(order_namespace).value()});
+      ProductionOrderIdProvider{OrderNamespace{bytes}});
 }
 
 ProductionOrderIdProvider::ProductionOrderIdProvider(OrderNamespace order_namespace) noexcept

@@ -29,6 +29,10 @@ private:
   Bytes bytes_;
 };
 
+namespace detail {
+struct ProductionOrderIdProviderTestAccess;
+}
+
 class DeterministicOrderIdProvider;
 class ProductionOrderIdProvider;
 
@@ -104,7 +108,13 @@ public:
   [[nodiscard]] Result<OrderId> next() override { return provider_.next(); }
 
 private:
+  using EntropyFillCallback = bool (*)(OrderNamespace::Bytes&) noexcept;
+
+  [[nodiscard]] static Result<ProductionOrderIdProvider>
+  create_with_entropy(EntropyFillCallback entropy_fill);
   explicit ProductionOrderIdProvider(OrderNamespace order_namespace) noexcept;
+
+  friend struct detail::ProductionOrderIdProviderTestAccess;
 
   DeterministicOrderIdProvider provider_;
 };

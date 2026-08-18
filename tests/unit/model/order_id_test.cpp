@@ -10,6 +10,19 @@
 #include <string>
 #include <utility>
 
+namespace aegis::model::detail {
+
+struct ProductionOrderIdProviderTestAccess {
+  using EntropyFillCallback = bool (*)(OrderNamespace::Bytes&) noexcept;
+
+  [[nodiscard]] static Result<ProductionOrderIdProvider>
+  create_with_entropy(EntropyFillCallback entropy_fill) {
+    return ProductionOrderIdProvider::create_with_entropy(entropy_fill);
+  }
+};
+
+} // namespace aegis::model::detail
+
 namespace {
 
 using namespace aegis::model;
@@ -100,6 +113,27 @@ TEST_CASE("the production provider obtains a supported operating-system namespac
   const auto order_id = provider.next();
   REQUIRE(order_id);
   CHECK(order_id.value().to_hex().size() == OrderId::byte_size * 2U);
+}
+
+TEST_CASE("the production provider fails closed when its entropy source is unavailable",
+          "[model][order-id]") {
+  const auto unavailable = [](OrderNamespace::Bytes& destination) noexcept {
+    destination.fill(0xa5U);
+    return false;
+  };
+
+  const auto created =
+      detail::ProductionOrderIdProviderTestAccess::create_with_entropy(unavailable);
+
+  REQUIRE_FALSE(created);
+  CHECK(created.error() ==
+        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+
+  const auto null_source =
+      detail::ProductionOrderIdProviderTestAccess::create_with_entropy(nullptr);
+  REQUIRE_FALSE(null_source);
+  CHECK(null_source.error() ==
+        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
 }
 
 } // namespace
