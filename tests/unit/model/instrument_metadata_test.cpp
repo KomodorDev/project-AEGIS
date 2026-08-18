@@ -10,6 +10,14 @@ namespace {
 
 using namespace aegis::model;
 
+template <typename Scale>
+concept HasContractValue = requires(InstrumentMetadata metadata, Quantity quantity, Scale scale) {
+  metadata.contract_value(quantity, scale, RoundingMode::Exact);
+};
+
+static_assert(!HasContractValue<double>);
+static_assert(!HasContractValue<long double>);
+
 template <typename Value> [[nodiscard]] Value parsed(std::string_view text) {
   auto result = Value::parse_ascii(text);
   REQUIRE(result);

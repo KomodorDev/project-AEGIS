@@ -23,6 +23,14 @@ template <typename Value, typename Scale>
 concept HasRescale =
     requires(Value value, Scale scale) { value.rescale(scale, RoundingMode::Exact); };
 
+template <typename Scale>
+concept HasScaledMultiply =
+    requires(FixedPoint value, Scale scale) { value.multiply(value, scale, RoundingMode::Exact); };
+
+template <typename Scale>
+concept HasScaledDivide =
+    requires(FixedPoint value, Scale scale) { value.divide(value, scale, RoundingMode::Exact); };
+
 static_assert(!std::is_same_v<Price, Quantity>);
 static_assert(!std::is_same_v<Quantity, Notional>);
 static_assert(!std::is_convertible_v<Price, Quantity>);
@@ -36,6 +44,8 @@ static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
 static_assert(!HasRescale<FixedPoint, double>);
 static_assert(!HasRescale<Price, long double>);
+static_assert(!HasScaledMultiply<float>);
+static_assert(!HasScaledDivide<long double>);
 static_assert(!HasProductOperator<Price, Quantity>);
 
 [[nodiscard]] FixedPoint decimal(std::string_view text) {
@@ -75,6 +85,8 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   CHECK(decimal("-9223372036854775808").coefficient() == std::numeric_limits<std::int64_t>::min());
   CHECK(decimal("9223372036854775807.0") == decimal("9223372036854775807"));
   CHECK(decimal("-9223372036854775808.000") == decimal("-9223372036854775808"));
+  CHECK(decimal("922337203685477580.70") == decimal("922337203685477580.7"));
+  CHECK(decimal("-922337203685477580.80") == decimal("-922337203685477580.8"));
 
   for (const auto text : {"9223372036854775808", "-9223372036854775809"}) {
     const auto result = FixedPoint::parse_ascii(text);
@@ -145,6 +157,11 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   REQUIRE(maximum_product);
   CHECK(maximum_product.value() == decimal("9223372036854775807"));
 
+  const auto minimum_product =
+      decimal("-9223372036854775808").multiply(decimal("1"), 18U, RoundingMode::Exact);
+  REQUIRE(minimum_product);
+  CHECK(minimum_product.value() == decimal("-9223372036854775808"));
+
   const auto quotient = decimal("1").divide(decimal("8"), 3U, RoundingMode::Exact);
   REQUIRE(quotient);
   CHECK(quotient.value() == decimal("0.125"));
@@ -160,6 +177,16 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
       decimal("9223372036854775807").divide(decimal("1"), 18U, RoundingMode::Exact);
   REQUIRE(maximum_quotient);
   CHECK(maximum_quotient.value() == decimal("9223372036854775807"));
+
+  const auto minimum_quotient =
+      decimal("-9223372036854775808").divide(decimal("1"), 18U, RoundingMode::Exact);
+  REQUIRE(minimum_quotient);
+  CHECK(minimum_quotient.value() == decimal("-9223372036854775808"));
+
+  const auto minimum_negated =
+      decimal("-9223372036854775808").divide(decimal("-1"), 18U, RoundingMode::Exact);
+  REQUIRE_FALSE(minimum_negated);
+  CHECK(minimum_negated.error().code == DomainErrorCode::ArithmeticOverflow);
 
   const auto division_by_zero = decimal("1").divide(decimal("0"), 2U, RoundingMode::Exact);
   REQUIRE_FALSE(division_by_zero);
