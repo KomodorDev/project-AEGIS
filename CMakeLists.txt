@@ -31,6 +31,8 @@ aegis_create_project_options()
 # Build the AEGIS library and provide the namespaced alias consumers should link against.
 add_library(
   aegis
+  src/aegis/configuration/configuration_provenance.cpp
+  src/aegis/configuration/startup_configuration.cpp
   src/aegis/execution/execution_route.cpp
   src/aegis/market_data/subscription.cpp
   src/aegis/model/fixed_point.cpp
