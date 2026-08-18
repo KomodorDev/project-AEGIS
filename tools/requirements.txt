@@ -1,0 +1,4 @@
+clang-format==18.1.8
+cmake==3.31.10
+ninja==1.13.0
+ruff==0.16.3
