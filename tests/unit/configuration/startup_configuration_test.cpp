@@ -17,6 +17,8 @@ namespace {
 
 using namespace aegis;
 
+// Interesting syntax: requires-expression concepts make selected forbidden public member names on
+// the asserted M1 types compile-time test failures without constructing those types.
 template <typename Configuration>
 concept HasCredentials = requires(Configuration value) { value.credentials; };
 
@@ -55,6 +57,8 @@ static_assert(!HasEndpoint<configuration::VenueDefinition>);
 static_assert(!HasSecret<configuration::VenueDefinition>);
 static_assert(!HasVenueAccountId<configuration::LogicalAccountVenueBinding>);
 
+// Typed parsers fail fast on broken fixtures; hexadecimal output makes canonical byte failures
+// exact.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
   auto result = Identifier::parse(text);
   if (!result) {
@@ -83,6 +87,7 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
   return result;
 }
 
+// Multiple values in every relevant collection ensure reversal genuinely exercises canonical order.
 [[nodiscard]] configuration::StartupConfigurationParams reordered_configuration_params() {
   auto params = test_support::two_firm_configuration_params();
 
@@ -119,6 +124,8 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
   return params;
 }
 
+// Accepted snapshots prove section coherence, exact revision provenance, and independent peer
+// firms.
 TEST_CASE("the accepted reference configuration is sealed and carries exact provenance",
           "[configuration][m1]") {
   const auto result =
@@ -176,6 +183,8 @@ TEST_CASE("peer firms retain independent bot attribution and account ownership",
                     [](const execution::ExecutionRoute& route) { return !route.is_enabled(); }));
 }
 
+// Account ownership is an authorization boundary even when both firms are valid configuration
+// roots.
 TEST_CASE("a route cannot cross from its bot firm into a subsidiary account",
           "[configuration][m1][organization]") {
   auto params = test_support::two_firm_configuration_params();
@@ -189,6 +198,8 @@ TEST_CASE("a route cannot cross from its bot firm into a subsidiary account",
   CHECK(result.error().context.field == "routes.account_firm");
 }
 
+// Canonical evidence must ignore authoring order, change with every semantic/revision input, and
+// match one published byte-and-digest vector.
 TEST_CASE("canonical configuration identity is independent of every input collection order",
           "[configuration][canonical]") {
   auto ordered_params = reordered_configuration_params();
@@ -278,6 +289,8 @@ TEST_CASE("the reference configuration has a published schema-one golden vector"
       configuration::StartupConfiguration::create(test_support::reference_configuration_params());
   REQUIRE(result);
 
+  // This vector locks magic, tags, lengths, order, and endian representation as one schema
+  // contract.
   const std::string expected_bytes =
       "4145474953434647000100010000000800000000000000010002000000080000000000000001"
       "00030000001c000000010000001400010000000e6669726d2e61656769732d6c616200040000"
@@ -312,6 +325,7 @@ TEST_CASE("the reference configuration has a published schema-one golden vector"
         "e869459e338687fe372c4ee1c490a147e3c88261d3c2b89af4520cf990e35310");
 }
 
+// The rejection matrix proves no invalid section escapes and preserves documented section priority.
 TEST_CASE("startup validation rejects incomplete and inconsistent sections atomically",
           "[configuration][validation]") {
   SECTION("missing strategy settings") {

@@ -1,6 +1,7 @@
 # Purpose: compile and register AEGIS unit tests with CTest.
 
-# Keep reusable deterministic fixtures in a small owned library shared by unit and scenario tests.
+# Keep the exact accepted startup inputs in one owned fixture library so unit and scenario evidence
+# cannot silently diverge on configuration provenance.
 add_library(aegis_test_support STATIC support/reference_configuration.cpp)
 target_include_directories(aegis_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/support)
 target_link_libraries(aegis_test_support PUBLIC aegis::aegis)
@@ -9,6 +10,7 @@ aegis_configure_owned_target(aegis_test_support)
 # Link the AEGIS public target and Catch2's variant that supplies the test-program main().
 add_executable(
   aegis_unit_tests
+  # Startup tests bind atomic validation to its canonical bytes, revisions, and golden fingerprint.
   unit/configuration/startup_configuration_test.cpp
   # These tests prove an observation grant never synthesizes or enables execution permission.
   unit/execution/execution_route_test.cpp

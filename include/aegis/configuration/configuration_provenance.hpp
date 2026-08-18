@@ -14,6 +14,8 @@ namespace aegis::configuration {
 
 class StartupConfiguration;
 
+// This digest names the exact schema-versioned canonical configuration bytes; hexadecimal output is
+// a display representation of the same identity rather than a second hash.
 class ConfigurationFingerprint {
 public:
   explicit ConfigurationFingerprint(model::Sha256Digest bytes) noexcept
@@ -29,6 +31,8 @@ private:
   model::Sha256Digest bytes_;
 };
 
+// Metadata revisions retain their venue/instrument key so later evidence can identify the precise
+// reference-data version used for an instrument-specific decision.
 struct InstrumentMetadataRevisionEntry {
   model::VenueId venue_id;
   model::InstrumentId instrument_id;
@@ -38,6 +42,8 @@ struct InstrumentMetadataRevisionEntry {
                          const InstrumentMetadataRevisionEntry&) = default;
 };
 
+// Provenance binds one configuration fingerprint to every section revision needed to reproduce the
+// accepted startup rulebook without copying the rulebook itself into each trace record.
 class ConfigurationProvenance {
 public:
   [[nodiscard]] const ConfigurationFingerprint& fingerprint() const noexcept {
@@ -68,6 +74,8 @@ public:
   friend bool operator==(const ConfigurationProvenance&, const ConfigurationProvenance&) = default;
 
 private:
+  // Interesting syntax: private construction plus the StartupConfiguration friend prevents callers
+  // from minting provenance that was not derived from one atomically accepted snapshot.
   ConfigurationProvenance(ConfigurationFingerprint fingerprint,
                           model::ConfigurationRevision configuration_revision,
                           model::OrganizationRevision organization_revision,

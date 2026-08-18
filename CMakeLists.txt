@@ -31,6 +31,8 @@ aegis_create_project_options()
 # Build the AEGIS library and provide the namespaced alias consumers should link against.
 add_library(
   aegis
+  # Startup validation and provenance form one subsystem that derives and publishes identity only
+  # with an accepted immutable snapshot.
   src/aegis/configuration/configuration_provenance.cpp
   src/aegis/configuration/startup_configuration.cpp
   # Data subscriptions and execution routes remain separate compiled permission boundaries.

@@ -15,6 +15,8 @@
 
 namespace aegis::configuration {
 
+// The schema version is part of the canonical byte prefix; changing it is a compatibility decision,
+// not an implementation detail.
 inline constexpr std::uint16_t canonical_configuration_schema_version = 1U;
 
 // M1 deliberately supports only the credential-free reference environment. Adding another
@@ -23,6 +25,7 @@ enum class VenueEnvironment : std::uint8_t {
   Testnet = 1,
 };
 
+// Venue definitions deliberately contain no endpoints or credentials in the M1 rulebook.
 struct VenueDefinition {
   model::VenueId id;
   VenueEnvironment environment;
@@ -30,6 +33,7 @@ struct VenueDefinition {
   friend bool operator==(const VenueDefinition&, const VenueDefinition&) = default;
 };
 
+// A logical account is owned by one peer firm at one venue; it is not a venue credential container.
 struct LogicalAccountVenueBinding {
   model::LogicalAccountId logical_account_id;
   model::FirmId firm_id;
@@ -45,6 +49,7 @@ enum class StrategyMode : std::uint8_t {
   ObserveOnly = 1,
 };
 
+// Settings must agree with immutable bot registration, while ObserveOnly remains non-executing.
 struct BotStrategySettings {
   model::BotId bot_id;
   model::StrategyId strategy_id;
@@ -77,6 +82,8 @@ struct StartupConfigurationParams {
   std::vector<execution::ExecutionRoute> routes;
 };
 
+// Successful creation publishes one immutable unit whose validated sections, canonical bytes,
+// fingerprint, and revision provenance cannot be observed in a partially updated combination.
 class StartupConfiguration {
 public:
   [[nodiscard]] static model::Result<StartupConfiguration>
@@ -124,6 +131,7 @@ public:
                            const model::InstrumentId& instrument_id) const noexcept;
 
 private:
+  // Only create may assemble the sealed snapshot, keeping every derived identity synchronized.
   StartupConfiguration(model::ConfigurationRevision revision,
                        organization::Organization organization,
                        model::StrategyConfigurationRevision strategy_configuration_revision,

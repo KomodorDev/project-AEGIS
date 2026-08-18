@@ -79,6 +79,8 @@ public:
   }
 
   [[nodiscard]] bool append_u64(std::uint64_t value) {
+    // Interesting syntax: the explicit zero break prevents unsigned shift wrap after emitting the
+    // eighth byte, fixing every integer to portable big-endian width.
     for (unsigned int shift = 56U;; shift -= 8U) {
       if (!append_byte(static_cast<std::uint8_t>((value >> shift) & 0xffU))) {
         return false;
@@ -162,12 +164,15 @@ public:
   }
 
   [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
+  // Interesting syntax: the && qualifier permits destructive extraction only from a disposable
+  // writer, so an encoder cannot accidentally drain a writer it intends to keep using.
   [[nodiscard]] std::vector<std::byte> take_bytes() && { return std::move(bytes_); }
 
 private:
   static constexpr std::size_t maximum_u32_size =
       static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max());
 
+  // Subtraction-form bounds checking avoids overflowing size_t while testing the requested growth.
   [[nodiscard]] bool can_grow(std::size_t additional_size) const noexcept {
     return additional_size <= bytes_.max_size() - bytes_.size();
   }
@@ -175,6 +180,7 @@ private:
   std::vector<std::byte> bytes_;
 };
 
+// Nested record encoders assign field tags and order explicitly; changing either changes schema 1.
 using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
 
 [[nodiscard]] EncodedRecord encoded_record(CanonicalConfigurationWriter writer, bool success) {
@@ -276,6 +282,8 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
   return encoded_record(std::move(writer), success);
 }
 
+// Magic, schema version, top-level tag order, and already-canonical collections form the complete
+// configuration fingerprint preimage.
 [[nodiscard]] model::Result<std::vector<std::byte>>
 encode_configuration(model::ConfigurationRevision revision,
                      const organization::Organization& organization,
@@ -320,6 +328,7 @@ encode_configuration(model::ConfigurationRevision revision,
   return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
 }
 
+// Startup validators canonicalize before using these duplicate and relationship lookup helpers.
 template <typename Record, typename IdAccessor>
 [[nodiscard]] model::Result<void> reject_adjacent_duplicate_ids(const std::vector<Record>& records,
                                                                 std::string_view field,
@@ -371,9 +380,11 @@ find_settings(const std::vector<BotStrategySettings>& settings,
   return found != settings.end() && found->bot_id == bot_id ? &*found : nullptr;
 }
 
+// Strategy settings must uniquely cover every registered bot and repeat its immutable strategy.
 [[nodiscard]] model::Result<std::vector<BotStrategySettings>>
 validate_strategy_settings(std::vector<BotStrategySettings> settings,
                            const organization::Organization& organization) {
+  // Canonical bot order fixes duplicate and relationship error positions.
   std::sort(settings.begin(), settings.end(),
             [](const auto& lhs, const auto& rhs) { return lhs.bot_id < rhs.bot_id; });
   const auto duplicates = reject_adjacent_duplicate_ids(
@@ -399,6 +410,7 @@ validate_strategy_settings(std::vector<BotStrategySettings> settings,
     }
   }
 
+  // Completeness is checked after individual settings are known to be valid registrations.
   const auto& bots = organization.bots();
   for (std::size_t index = 0U; index < bots.size(); ++index) {
     if (find_settings(settings, bots[index].id) == nullptr) {
@@ -409,6 +421,7 @@ validate_strategy_settings(std::vector<BotStrategySettings> settings,
   return model::Result<std::vector<BotStrategySettings>>::success(std::move(settings));
 }
 
+// M1 requires at least one unique credential-free venue with an explicitly assigned environment.
 [[nodiscard]] model::Result<std::vector<VenueDefinition>>
 validate_venues(std::vector<VenueDefinition> venues) {
   if (venues.empty()) {
@@ -432,6 +445,7 @@ validate_venues(std::vector<VenueDefinition> venues) {
   return model::Result<std::vector<VenueDefinition>>::success(std::move(venues));
 }
 
+// Logical account IDs are globally unique and must resolve both their owning firm and venue.
 [[nodiscard]] model::Result<std::vector<LogicalAccountVenueBinding>>
 validate_logical_accounts(std::vector<LogicalAccountVenueBinding> bindings,
                           const std::vector<VenueDefinition>& venues,
@@ -460,6 +474,7 @@ validate_logical_accounts(std::vector<LogicalAccountVenueBinding> bindings,
   return model::Result<std::vector<LogicalAccountVenueBinding>>::success(std::move(bindings));
 }
 
+// Metadata has both a normalized venue/instrument key and a venue-native key; neither may alias.
 [[nodiscard]] model::Result<std::vector<model::InstrumentMetadata>>
 validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metadata_params,
                              const std::vector<VenueDefinition>& venues) {
@@ -478,6 +493,8 @@ validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metada
     }
   }
 
+  // Once normalized keys are canonical, validate native identity and delegate domain-specific
+  // fields.
   using NativeInstrumentKey = std::pair<model::VenueId, model::VenueInstrumentId>;
   std::set<NativeInstrumentKey> native_instrument_keys;
   std::vector<model::InstrumentMetadata> metadata;
@@ -504,6 +521,7 @@ validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metada
   return model::Result<std::vector<model::InstrumentMetadata>>::success(std::move(metadata));
 }
 
+// Permission factories receive dependency catalogs derived only from already validated metadata.
 [[nodiscard]] std::vector<market_data::VenueInstrumentPair>
 venue_instrument_pairs(const std::vector<model::InstrumentMetadata>& metadata) {
   std::vector<market_data::VenueInstrumentPair> pairs;
@@ -514,6 +532,8 @@ venue_instrument_pairs(const std::vector<model::InstrumentMetadata>& metadata) {
   return pairs;
 }
 
+// Execution receives the validated account identity, owner, and venue without configuration
+// secrets.
 [[nodiscard]] std::vector<execution::LogicalAccountVenueBinding>
 execution_account_bindings(const std::vector<LogicalAccountVenueBinding>& bindings) {
   std::vector<execution::LogicalAccountVenueBinding> result;
@@ -525,6 +545,7 @@ execution_account_bindings(const std::vector<LogicalAccountVenueBinding>& bindin
   return result;
 }
 
+// The provenance projection preserves metadata's canonical composite-key order for later lookup.
 [[nodiscard]] std::vector<InstrumentMetadataRevisionEntry>
 metadata_revision_entries(const std::vector<model::InstrumentMetadata>& metadata) {
   std::vector<InstrumentMetadataRevisionEntry> entries;
@@ -572,6 +593,8 @@ StartupConfiguration::create(StartupConfigurationParams params) {
     return model::Result<StartupConfiguration>::failure(metadata.error());
   }
 
+  // Derive permission catalogs from accepted sections rather than accepting parallel authoring
+  // data.
   const auto known_venue_instruments = venue_instrument_pairs(metadata.value());
   auto subscriptions = market_data::SubscriptionConfiguration::create(
       params.subscription_revision, std::move(params.subscriptions), organization.value(),
@@ -589,6 +612,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
     return model::Result<StartupConfiguration>::failure(routes.error());
   }
 
+  // Only a fully valid rulebook is eligible for canonical encoding; no partial bytes are published.
   auto canonical_bytes = encode_configuration(
       params.revision, organization.value(), params.strategy_configuration_revision,
       strategy_settings.value(), venues.value(), logical_accounts.value(), metadata.value(),
@@ -597,6 +621,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
     return model::Result<StartupConfiguration>::failure(canonical_bytes.error());
   }
 
+  // Hash those exact bytes once and bind the resulting identity to every contributing revision.
   ConfigurationFingerprint fingerprint{model::sha256(canonical_bytes.value())};
   ConfigurationProvenance provenance{
       fingerprint,
@@ -608,6 +633,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
       metadata_revision_entries(metadata.value()),
   };
 
+  // Publish validated sections and all derived evidence together as one immutable value.
   return model::Result<StartupConfiguration>::success(StartupConfiguration{
       params.revision,
       std::move(organization).value(),
@@ -624,6 +650,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
   });
 }
 
+// All lookup collections retain factory canonical order, permitting allocation-free binary search.
 const VenueDefinition*
 StartupConfiguration::find_venue(const model::VenueId& venue_id) const noexcept {
   const auto found = std::lower_bound(

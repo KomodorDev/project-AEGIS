@@ -9,6 +9,7 @@
 namespace aegis::test_support {
 namespace {
 
+// Invalid literals are fixture-authoring defects, so typed reference values fail immediately.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
   auto result = Identifier::parse(text);
   if (!result) {
@@ -25,6 +26,8 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
   return std::move(result).value();
 }
 
+// These are the assigned inverse Deribit semantics consumed by canonical startup and trace
+// evidence.
 [[nodiscard]] model::InstrumentMetadataParams reference_metadata() {
   return model::InstrumentMetadataParams{
       id<model::VenueId>("deribit"),
@@ -48,6 +51,7 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
 
 } // namespace
 
+// The baseline intentionally enables observation while leaving the independent execution route off.
 configuration::StartupConfigurationParams reference_configuration_params() {
   const auto firm_id = id<model::FirmId>("firm.aegis-lab");
   const auto desk_id = id<model::DeskId>("desk.digital-assets");
@@ -80,6 +84,7 @@ configuration::StartupConfigurationParams reference_configuration_params() {
   };
 }
 
+// Extend the baseline with an independently owned bot, account, and route at the shared venue.
 configuration::StartupConfigurationParams two_firm_configuration_params() {
   auto params = reference_configuration_params();
 
