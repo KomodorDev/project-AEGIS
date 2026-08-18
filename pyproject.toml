@@ -1,6 +1,10 @@
+# Purpose: define one shared Ruff formatting and linting policy for AEGIS Python tooling.
+
+# Keep Python lines aligned with the C++ width and lint against the supported Python 3.11 syntax.
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 
+# Enable bugbear, pycodestyle errors, Pyflakes, import sorting, and Python-upgrade checks.
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "UP"]

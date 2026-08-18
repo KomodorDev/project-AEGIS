@@ -1,3 +1,6 @@
+# Purpose: keep compiler output, local tooling, and machine-specific files out of Git.
+# Interesting syntax: `*` is a wildcard, while a trailing `/` ignores a whole directory.
+
 # Prerequisites
 *.d
 
@@ -22,7 +25,6 @@
 *.dylib
 *.dll
 *.so.*
-
 
 # Fortran module files
 *.mod

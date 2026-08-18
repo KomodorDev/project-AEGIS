@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
-"""Run the M0 benchmark and retain the context required by the quality budget."""
+"""Run the M0 calibration benchmark and record enough context to reproduce its result."""
 
+# Interesting syntax: postponed annotations allow modern type hints without eager evaluation.
 from __future__ import annotations
 
+# Standard-library modules cover CLI parsing, hashing, host discovery,
+# subprocesses, and JSON output.
 import argparse
 import hashlib
 import json
@@ -16,6 +19,9 @@ from pathlib import Path
 
 
 def command_output(arguments: Sequence[str], *, cwd: Path | None = None) -> str:
+    """Run a command successfully and return its standard output without surrounding whitespace."""
+
+    # check=True converts a nonzero exit into an exception; capture_output keeps evidence concise.
     completed = subprocess.run(
         arguments,
         cwd=cwd,
@@ -27,6 +33,9 @@ def command_output(arguments: Sequence[str], *, cwd: Path | None = None) -> str:
 
 
 def cache_value(cache_path: Path, name: str) -> str:
+    """Read one named value from CMake's `NAME:TYPE=value` cache representation."""
+
+    # Match the full cache-key prefix, then split only once so values may themselves contain `=`.
     prefix = f"{name}:"
     for line in cache_path.read_text(encoding="utf-8").splitlines():
         if line.startswith(prefix) and "=" in line:
@@ -35,6 +44,9 @@ def cache_value(cache_path: Path, name: str) -> str:
 
 
 def sysctl_value(name: str) -> str | None:
+    """Return a macOS sysctl value, or None when the key/command is unavailable."""
+
+    # Host metadata is best-effort: unsupported probes must not invalidate benchmark results.
     try:
         return command_output(["sysctl", "-n", name])
     except (FileNotFoundError, subprocess.CalledProcessError):
@@ -42,27 +54,37 @@ def sysctl_value(name: str) -> str | None:
 
 
 def cpu_model() -> str:
+    """Return the most specific CPU model string available on macOS or Linux."""
+
+    # Apple exposes CPU identity through sysctl rather than Linux's /proc virtual filesystem.
     if platform.system() == "Darwin":
         return sysctl_value("machdep.cpu.brand_string") or sysctl_value("hw.model") or "unknown"
 
+    # Linux usually records a human-readable model once per logical processor in /proc/cpuinfo.
     cpu_info = Path("/proc/cpuinfo")
     if cpu_info.exists():
         for line in cpu_info.read_text(encoding="utf-8").splitlines():
             if line.startswith("model name") and ":" in line:
                 return line.split(":", 1)[1].strip()
+    # Fall back to Python's portable probe and an explicit sentinel on other operating systems.
     return platform.processor() or "unknown"
 
 
 def physical_core_count() -> int | None:
+    """Count physical CPU cores when the host exposes topology without extra dependencies."""
+
+    # macOS reports the total directly.
     if platform.system() == "Darwin":
         value = sysctl_value("hw.physicalcpu")
         return int(value) if value else None
 
+    # Linux lscpu emits CORE,SOCKET pairs; unique pairs distinguish cores across CPU sockets.
     try:
         rows = command_output(["lscpu", "--parse=CORE,SOCKET"])
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
 
+    # Interesting syntax: this set comprehension both filters comments and removes duplicates.
     cores = {
         line for line in rows.splitlines() if line and not line.startswith("#") and line != "-,-"
     }
@@ -70,6 +92,9 @@ def physical_core_count() -> int | None:
 
 
 def parse_arguments() -> argparse.Namespace:
+    """Parse the optional evidence directory while defaulting it inside the repository."""
+
+    # Resolving from __file__ makes the default independent of the caller's current directory.
     repository = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -81,21 +106,27 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Validate inputs, run the benchmark, and write raw results plus a context manifest."""
+
+    # Derive all fixed inputs from the repository and the release preset's stable output paths.
     arguments = parse_arguments()
     repository = Path(__file__).resolve().parents[1]
     binary = (repository / "build/release/benchmarks/aegis_benchmarks").resolve()
     results_dir = arguments.results_dir.resolve()
     cache_path = repository / "build/release/CMakeCache.txt"
 
+    # Fail before creating evidence when the required optimized build is absent or incomplete.
     if not binary.is_file():
         raise FileNotFoundError(f"benchmark executable not found: {binary}")
     if not cache_path.is_file():
         raise FileNotFoundError(f"release configuration not found: {cache_path}")
 
+    # Keep machine-readable timing data and its provenance manifest beside one another.
     results_dir.mkdir(parents=True, exist_ok=True)
     benchmark_path = results_dir / "m0-harness.json"
     context_path = results_dir / "m0-context.json"
 
+    # Use short repeated samples for M0 pipeline calibration, not a product-performance claim.
     benchmark_command = [
         str(binary),
         "--benchmark_min_time=0.01s",
@@ -106,10 +137,13 @@ def main() -> int:
     ]
     subprocess.run(benchmark_command, cwd=repository, check=True)
 
+    # Read tool locations from the actual release cache and fingerprint repository/result state.
     compiler = cache_value(cache_path, "CMAKE_CXX_COMPILER")
     cmake = cache_value(cache_path, "CMAKE_COMMAND")
     git_status = command_output(["git", "status", "--porcelain"], cwd=repository)
     benchmark_hash = hashlib.sha256(benchmark_path.read_bytes()).hexdigest()
+
+    # Capture the fields required to interpret and reproduce a benchmark result responsibly.
     context = {
         "schema_version": 1,
         "workload_id": "BENCH-M0-HARNESS-001",
@@ -137,9 +171,12 @@ def main() -> int:
         "benchmark_result": benchmark_path.name,
         "benchmark_result_sha256": benchmark_hash,
     }
+
+    # Pretty, newline-terminated JSON is both machine-readable and review-friendly.
     context_path.write_text(json.dumps(context, indent=2) + "\n", encoding="utf-8")
     return 0
 
 
+# Interesting syntax: this guard runs main only as a script, not when helpers are imported in tests.
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -1,4 +1,10 @@
+# Purpose: install the exact local/CI tool versions used to reproduce M0 verification.
+# Exact `==` pins prevent silent formatting or build behavior changes between installations.
+
+# C++ formatting and build orchestration.
 clang-format==18.1.8
 cmake==3.31.10
 ninja==1.13.0
+
+# Python formatting and static linting.
 ruff==0.16.3
