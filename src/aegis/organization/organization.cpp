@@ -15,6 +15,8 @@ namespace {
 using model::DomainError;
 using model::DomainErrorCode;
 
+// Both helpers require canonical ID order. That precondition makes duplicate error positions stable
+// across input permutations and permits allocation-free relationship lookup.
 template <typename Record, typename IdAccessor>
 [[nodiscard]] model::Result<void> reject_duplicate_ids(const std::vector<Record>& records,
                                                        std::string_view field, IdAccessor id_of) {
@@ -43,6 +45,7 @@ template <typename Record, typename Id>
 model::Result<Organization> Organization::create(model::OrganizationRevision revision,
                                                  std::vector<Firm> firms, std::vector<Desk> desks,
                                                  std::vector<BotRegistration> bots) {
+  // Reject missing hierarchy levels from root to leaf so simultaneous defects have stable priority.
   if (firms.empty()) {
     return model::Result<Organization>::failure(
         DomainError::at_field(DomainErrorCode::EmptyCollection, "organization.firms"));
@@ -56,6 +59,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
         DomainError::at_field(DomainErrorCode::EmptyCollection, "organization.bots"));
   }
 
+  // Canonicalize every level before reporting duplicates or collection indices.
   std::sort(firms.begin(), firms.end(),
             [](const Firm& lhs, const Firm& rhs) { return lhs.id < rhs.id; });
   std::sort(desks.begin(), desks.end(),
@@ -63,6 +67,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
   std::sort(bots.begin(), bots.end(),
             [](const BotRegistration& lhs, const BotRegistration& rhs) { return lhs.id < rhs.id; });
 
+  // Typed identifiers must be unique within their own hierarchy level.
   const auto firm_duplicates =
       reject_duplicate_ids(firms, "organization.firms.id",
                            [](const Firm& firm) -> const model::FirmId& { return firm.id; });
@@ -82,6 +87,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
     return model::Result<Organization>::failure(bot_duplicates.error());
   }
 
+  // Prove upward references before checking whether every parent has descendants.
   for (std::size_t index = 0U; index < desks.size(); ++index) {
     if (find_by_id(firms, desks[index].firm_id) == nullptr) {
       return model::Result<Organization>::failure(DomainError::at_index(
@@ -95,6 +101,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
     }
   }
 
+  // A published organization is operationally complete: every firm has a desk and every desk a bot.
   for (std::size_t index = 0U; index < firms.size(); ++index) {
     const bool has_desk = std::any_of(desks.begin(), desks.end(), [&](const Desk& desk) {
       return desk.firm_id == firms[index].id;
@@ -114,6 +121,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
     }
   }
 
+  // Materialize transitive firm ownership only after all parent links are known to be safe.
   std::vector<BotAttribution> attributions;
   attributions.reserve(bots.size());
   for (const BotRegistration& bot : bots) {
@@ -126,6 +134,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
       revision, std::move(firms), std::move(desks), std::move(bots), std::move(attributions)});
 }
 
+// Attributions inherit canonical bot-ID order, so lookup never needs a secondary index.
 const BotAttribution* Organization::find_bot(const model::BotId& bot_id) const noexcept {
   const auto found =
       std::lower_bound(bot_attributions_.begin(), bot_attributions_.end(), bot_id,

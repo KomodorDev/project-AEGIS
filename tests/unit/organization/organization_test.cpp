@@ -12,6 +12,7 @@ namespace {
 
 using namespace aegis;
 
+// Invalid literals are fixture-authoring defects, so these terse typed builders fail immediately.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view value) {
   auto parsed = Identifier::parse(value);
   if (!parsed) {
@@ -34,6 +35,7 @@ bot(std::string_view bot_value, std::string_view desk_value, std::string_view st
                                        id<model::StrategyId>(strategy_value)};
 }
 
+// The accepted case proves peer roots retain independent ownership after canonical publication.
 TEST_CASE("peer firms produce canonical immutable bot attribution", "[organization]") {
   auto result = organization::Organization::create(
       model::OrganizationRevision::initial(),
@@ -59,6 +61,8 @@ TEST_CASE("peer firms produce canonical immutable bot attribution", "[organizati
   CHECK(configured.find_bot(id<model::BotId>("bot.unknown")) == nullptr);
 }
 
+// Rejection cases lock root-to-leaf precedence for missing, duplicate, dangling, and orphaned
+// nodes.
 TEST_CASE("organization rejects empty registration collections in section order",
           "[organization]") {
   const auto no_firms =

@@ -26,6 +26,7 @@ add_executable(
   unit/model/sha256_test.cpp
   # Time tests prove nominal clock separation, checked deltas, revisions, and injected progression.
   unit/model/time_test.cpp
+  # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
   unit/trace/trace_test.cpp
   # Version tests ensure the compiled library reports the configured project identity.

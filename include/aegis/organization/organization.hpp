@@ -10,6 +10,8 @@
 
 namespace aegis::organization {
 
+// Authoring records form complete peer Firm -> Desk -> Bot trees. A bot belongs to exactly one desk
+// and carries exactly one strategy registration; no parent-company aggregation is implied.
 struct Firm {
   model::FirmId id;
 
@@ -41,6 +43,8 @@ struct BotAttribution {
   friend bool operator==(const BotAttribution&, const BotAttribution&) = default;
 };
 
+// The factory is the only publication boundary: it canonicalizes registrations, rejects incomplete
+// trees, and exposes immutable transitive attribution for downstream authorization decisions.
 class Organization {
 public:
   [[nodiscard]] static model::Result<Organization> create(model::OrganizationRevision revision,

@@ -47,6 +47,7 @@ add_library(
   src/aegis/model/sha256.cpp
   # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp
+  # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
   src/aegis/trace/trace.cpp
   # Version reporting exposes the configured project identity without adding runtime dependencies.
