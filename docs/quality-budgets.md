@@ -1,9 +1,15 @@
 # Initial Correctness and Performance Budgets
 
+> **Purpose:** Define how AEGIS quality is measured, name stable benchmark/load workloads, and record
+> the initial correctness and latency targets that later milestones must prove or deliberately revise.
+
 **Status:** Provisional M0 baseline. Workload definitions are stable identifiers; thresholds may be
 revised with recorded measurements and rationale.
 
 ## Measurement rules
+
+These rules make results comparable by requiring both the measured value and enough machine/build
+context to explain it. A number without that context is not qualification evidence.
 
 Every reported performance-result bundle must include the workload ID, git revision, build preset,
 compiler and version, operating system, CPU model, logical/physical core count, power mode, sample
@@ -22,6 +28,9 @@ the absolute thresholds.
 
 ## Correctness budgets
 
+Correctness budgets are zero-tolerance invariants: unlike latency targets, they are not relaxed just
+because a host is slower or shared.
+
 | Budget | Target |
 |---|---:|
 | Compiler warnings in AEGIS-owned targets | 0 |
@@ -38,6 +47,9 @@ or trigger resynchronization as specified by the owning milestone. It never coun
 
 ## Named workloads
 
+Stable IDs let documentation, benchmark output, CI artifacts, and future trend reports refer to the
+same operation even if its implementation evolves.
+
 | Workload ID | Definition | Primary units | First owner |
 |---|---|---|---|
 | `BENCH-M0-HARNESS-001` | Benchmark-runner calibration loop with no product behavior | ns/iteration, iterations/s | M0 |
@@ -52,6 +64,9 @@ The M0 harness measurement is evidence that the runner, release build, JSON outp
 work. It has no product-latency threshold because it deliberately performs no AEGIS behavior.
 
 ## Provisional qualification targets
+
+These are starting thresholds for future executable workloads. Measurements and rationale may revise
+them, but a code change must not silently redefine the target.
 
 These targets apply when their owning workloads become executable:
 
@@ -71,6 +86,8 @@ network round trips and exchange acknowledgement. Callback timing begins when th
 starts the turn and ends when all synchronous owner-local work for that turn is complete.
 
 ## Running the M0 harness
+
+This M0 command checks the measurement plumbing only; it does not claim production trading latency.
 
 ```sh
 cmake --workflow --preset benchmark

@@ -1,5 +1,8 @@
 # ADR-0002: Adopt the Initial Delivery Toolchain
 
+> **Purpose:** Record the accepted language, compiler, build, test, formatting, sanitizer, and
+> dependency-pinning choices that make M0 builds repeatable.
+
 - **Status:** Accepted
 - **Date:** 2026-08-18
 - **Scope:** M0 development, build, test, formatting, and measurement baseline
@@ -8,12 +11,17 @@
 
 ## Context
 
+This section explains the problem that required a decision; it is not itself the selected solution.
+
 AEGIS needs a repeatable baseline before domain or exchange behavior is added. A build that varies by
 developer machine would make later determinism and latency evidence untrustworthy. The baseline must
 also avoid selecting networking, asynchronous-I/O, persistence, or production deployment technology
 before a concrete milestone needs it.
 
 ## Decision
+
+Everything in this section is the project policy until this ADR is superseded by another accepted
+decision.
 
 ### Language and supported toolchains
 
@@ -33,6 +41,9 @@ Unsupported compilers fail during configuration instead of silently compiling wi
 Windows, other operating systems, and older compiler versions are outside the M0 support promise.
 
 ### Build and dependency acquisition
+
+The build interface and dependency rules below keep local and CI builds reproducible while avoiding
+an unnecessary production package manager during M0.
 
 CMake 3.25 or newer is the build-system interface and Ninja is the reference generator. Python 3.11
 or newer runs development-tool installation and benchmark evidence collection; it is not a runtime
@@ -57,6 +68,8 @@ stable ABI. That public packaging boundary remains deferred until a real consume
 
 ### Quality policy
 
+These gates define the minimum evidence a normal change must produce before it can be trusted.
+
 - Strict warning flags apply only to AEGIS-owned targets, and warnings are errors by default.
 - clang-format 18.1.8 defines the C++ formatting gate; Ruff 0.16.3 formats and lints Python tooling.
 - CI exercises AppleClang, GCC, and Clang builds.
@@ -68,6 +81,8 @@ stable ABI. That public packaging boundary remains deferred until a real consume
 
 ## Consequences
 
+Accepted decisions have costs as well as benefits; this list makes those trade-offs explicit.
+
 - A developer needs a supported compiler, CMake, and Ninja before the one-command workflow can run.
 - The first configure requires internet access to acquire checksum-verified test dependencies; later
   builds can reuse the ignored build-tree cache.
@@ -77,6 +92,8 @@ stable ABI. That public packaging boundary remains deferred until a real consume
 - Every new AEGIS target must opt into the common language, warning, and sanitizer interface.
 
 ## Revisit triggers
+
+These are concrete reasons to reconsider the ADR, rather than changing the toolchain casually.
 
 Revisit this decision when a required production dependency cannot be managed safely with the chosen
 approach, a supported platform requires a different generator, or all required toolchains provide a
