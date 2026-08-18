@@ -1,0 +1,232 @@
+{
+  "version": 6,
+  "vendor": {
+    "aegis.dev/documentation/1.0": {
+      "purpose": "Provide named, repeatable configure/build/test workflows for developers and CI without shell-specific setup. JSON comments are forbidden, so this supported vendor metadata documents the file itself."
+    }
+  },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "Shared Ninja configuration inherited by every visible profile; centralizes strict warnings, tests, benchmarks, and compile-command export.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "AEGIS_BUILD_BENCHMARKS": true,
+        "AEGIS_WARNINGS_AS_ERRORS": true,
+        "BUILD_TESTING": true,
+        "CMAKE_CXX_EXTENSIONS": false,
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Developer verification",
+      "description": "Debug configuration used for the normal edit-build-test loop.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release benchmark build",
+      "description": "Optimized configuration used to run representative benchmarks.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "displayName": "Address and undefined behavior sanitizers",
+      "description": "Debug configuration that detects invalid memory access and undefined behavior; benchmarks are excluded to keep the check focused.",
+      "inherits": "base",
+      "cacheVariables": {
+        "AEGIS_BUILD_BENCHMARKS": false,
+        "AEGIS_ENABLE_ADDRESS_SANITIZER": true,
+        "AEGIS_ENABLE_UNDEFINED_SANITIZER": true,
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "Thread sanitizer",
+      "description": "Debug configuration that detects data races; it stays separate because TSan cannot be combined with ASan.",
+      "inherits": "base",
+      "cacheVariables": {
+        "AEGIS_BUILD_BENCHMARKS": false,
+        "AEGIS_ENABLE_THREAD_SANITIZER": true,
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "format",
+      "displayName": "Formatting checks",
+      "description": "Minimal configuration that creates formatting targets without downloading tests or benchmarks.",
+      "inherits": "base",
+      "cacheVariables": {
+        "AEGIS_BUILD_BENCHMARKS": false,
+        "BUILD_TESTING": false,
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "description": "Build every target produced by the developer configuration.",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "description": "Build the optimized library, tests, and benchmark harness.",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan-ubsan",
+      "description": "Build unit tests instrumented with ASan and UBSan.",
+      "configurePreset": "asan-ubsan"
+    },
+    {
+      "name": "tsan",
+      "description": "Build unit tests instrumented with TSan.",
+      "configurePreset": "tsan"
+    },
+    {
+      "name": "format",
+      "description": "Build a selected formatting target from the minimal format configuration.",
+      "configurePreset": "format"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "description": "Run developer-profile tests, print failures, and fail if no tests were registered.",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "release",
+      "description": "Run optimized-profile tests before accepting benchmark output.",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "description": "Run tests under address and undefined-behavior instrumentation.",
+      "configurePreset": "asan-ubsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "tsan",
+      "description": "Run tests under thread-race instrumentation.",
+      "configurePreset": "tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "verify",
+      "displayName": "Configure, build, and test",
+      "description": "Execute the complete developer verification sequence in the required order.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "dev"
+        },
+        {
+          "type": "build",
+          "name": "dev"
+        },
+        {
+          "type": "test",
+          "name": "dev"
+        }
+      ]
+    },
+    {
+      "name": "benchmark",
+      "displayName": "Configure, build, and test the release profile",
+      "description": "Prepare an optimized build; the benchmark runner and evidence validator execute separately.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        },
+        {
+          "type": "test",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "verify-asan-ubsan",
+      "displayName": "Configure, build, and test with ASan and UBSan",
+      "description": "Execute the full test sequence with memory and undefined-behavior checks enabled.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "asan-ubsan"
+        },
+        {
+          "type": "build",
+          "name": "asan-ubsan"
+        },
+        {
+          "type": "test",
+          "name": "asan-ubsan"
+        }
+      ]
+    },
+    {
+      "name": "verify-tsan",
+      "displayName": "Configure, build, and test with TSan",
+      "description": "Execute the full test sequence with data-race detection enabled.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "tsan"
+        },
+        {
+          "type": "build",
+          "name": "tsan"
+        },
+        {
+          "type": "test",
+          "name": "tsan"
+        }
+      ]
+    }
+  ]
+}

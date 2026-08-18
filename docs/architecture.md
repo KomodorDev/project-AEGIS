@@ -1,5 +1,8 @@
 # AEGIS Architecture
 
+> **Purpose:** Describe AEGIS's accepted system boundaries, ownership model, critical order path,
+> and the proposed or open design areas that later implementation milestones must resolve.
+
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is an asynchronous, multi-venue trading and risk engine. It receives market data from exchange adapters, normalizes that data, distributes it to subscribed bots, and centrally manages orders, inventory and risk.
 
 ## Document Status and Map
@@ -21,9 +24,16 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [Runtime flows](architecture/runtime-flows.md)
 - [Provisional repository layout](architecture/repository-layout.md)
 - [ADR-0001: Serialized data-plane execution and state ownership](decisions/0001-serialized-data-plane-execution.md)
+- [ADR-0002: Initial delivery toolchain](decisions/0002-delivery-toolchain.md)
+- [ADR-0003: Dedicated Deribit testnet account](decisions/0003-dedicated-testnet-account.md)
+- [M0 reference scenario](reference-scenario.md)
+- [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
 
 ## System Architecture
+
+The diagram groups components by latency responsibility. Solid arrows show the immediate data and
+order path; dotted arrows show asynchronous observations or complete snapshot publication.
 
 ```mermaid
 flowchart TD
@@ -270,6 +280,9 @@ On one serialized executor turn, AEGIS:
 A strategy therefore observes either the coherent state before an update or the coherent state after it, never a half-applied book. If a sequence gap, checksum failure, incompatible metadata change or excessive staleness makes the book unreliable, AEGIS marks it non-ready and obtains a fresh snapshot before treating it as tradable again.
 
 The latency-sensitive data plane needs the current working book, not necessarily its entire history. Historical raw messages, normalized events or book snapshots may be copied asynchronously to off-path storage for replay and research. The required depth—top of book, a fixed number of levels or the full venue book—and the long-term retention policy should follow concrete strategy and recovery requirements.
+
+The following diagram returns to the end-to-end order path and shows where asynchronous venue events
+and control-plane snapshots re-enter the serialized data-plane owner.
 
 ```mermaid
 flowchart LR

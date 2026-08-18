@@ -1,0 +1,11 @@
+{
+  // Purpose: make CMake Tools use this project's pinned virtual-environment executables.
+  // `${workspaceFolder}` keeps the path valid wherever the repository is cloned.
+  "cmake.cmakePath": "${workspaceFolder}/.venv/bin/cmake",
+
+  // Prepending .venv/bin lets CMake find the matching Ninja and formatter tools it launches.
+  // Interesting syntax: `${env:PATH}` preserves the PATH inherited by VS Code.
+  "cmake.environment": {
+    "PATH": "${workspaceFolder}/.venv/bin:${env:PATH}"
+  }
+}

@@ -1,5 +1,8 @@
 # Provisional Repository Layout
 
+> **Purpose:** Describe where future AEGIS components and tests should live, what each area owns, and
+> which dependency directions are allowed—without creating empty directories prematurely.
+
 **Status: Proposed.** This document describes intended ownership and dependency boundaries. It does not create source directories, select build targets or make the displayed tree a permanent API. Runtime ownership follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md).
 
 Return to the [architecture overview](../architecture.md).
@@ -15,6 +18,9 @@ The source layout should make it easy to answer three questions:
 Directories should be added only when the first real implementation or test needs them. Empty scaffolding and `.gitkeep` files do not establish useful architecture.
 
 ## Proposed Source Shape
+
+The tree is a destination map, not a statement that every listed directory already exists. A
+directory is created only when its first implementation or test is added.
 
 ```text
 src/
@@ -47,6 +53,9 @@ Component-owned types stay with their component. For example, a normalized marke
 
 ## Dependency Rules
 
+These rules matter more than the physical folder names: they prevent venue details and runtime
+wiring from leaking into reusable domain behavior.
+
 - `model` is a leaf: it does not depend on another AEGIS subsystem.
 - Venue-independent code never includes or exposes Binance- or Deribit-native message types.
 - Venue code may implement normalized market-data and execution contracts; those contracts do not depend on venue implementations.
@@ -59,6 +68,8 @@ Component-owned types stay with their component. For example, a normalized marke
 Avoid generic directories such as `common`, `utils` or `core`. A reusable helper should remain with the subsystem that gives it meaning until there is evidence of a genuinely independent abstraction.
 
 ## Proposed Test Shape
+
+The test areas separate small component checks from venue contracts and full deterministic flows.
 
 ```text
 tests/
@@ -79,11 +90,14 @@ Tests should be grouped by behavior rather than copied mechanically from build t
 
 ## Deliberately Open
 
-This proposal does not decide:
+This section is an explicit reminder that M0 chose only the tools needed now; later milestones must
+make the remaining choices from concrete requirements.
 
-- build system or dependency manager;
-- networking, serialization or test libraries;
-- co-located headers versus a public `include/aegis` tree;
+M0 selected CMake, a pinned test-dependency approach and the initial testing tools in
+[ADR-0002](../decisions/0002-delivery-toolchain.md). This proposal still does not decide:
+
+- runtime networking, asynchronous-I/O, serialization or persistence libraries;
+- the long-term installed/public API boundary beyond M0's cross-target `include/aegis` headers;
 - library target count, linkage model or C++ modules;
 - executable, service, deployment or UI directory structure;
 - generated code, persistence or migration directories;

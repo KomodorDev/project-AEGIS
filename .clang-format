@@ -1,0 +1,17 @@
+# Purpose: keep all AEGIS C++ source mechanically consistent across editors and CI.
+
+# Start from LLVM's established defaults, then record only deliberate AEGIS overrides.
+BasedOnStyle: LLVM
+
+# Keep diffs readable and use one unambiguous two-space indentation/alignment convention.
+ColumnLimit: 100
+IndentWidth: 2
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# Regroup and case-sensitively sort includes so dependency ordering is deterministic.
+IncludeBlocks: Regroup
+SortIncludes: CaseSensitive
+
+# POSIX text files end in a newline; the formatter repairs a missing final newline.
+InsertNewlineAtEOF: true
