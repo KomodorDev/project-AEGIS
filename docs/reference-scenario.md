@@ -9,6 +9,8 @@
 
 The reference scenario keeps the first implementation narrow enough to explain, replay, and test. It
 is a delivery fixture, not a production strategy and not authorization to trade real money.
+Its single firm is one valid M1 firm root; it does not restrict a startup configuration from holding
+additional independently attributed firm roots for subsidiaries.
 
 The requested “Deribit BTCUSD-Perp” product is interpreted as Deribit native instrument
 `BTC-PERPETUAL`: the inverse, USD-quoted, BTC-settled perpetual. It is not the linear USDC-settled
