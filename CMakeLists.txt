@@ -28,8 +28,11 @@ include(ProjectOptions)
 
 aegis_create_project_options()
 
-# Build the small M0 library and provide the namespaced alias future consumers should link against.
-add_library(aegis src/aegis/version.cpp)
+# Build the AEGIS library and provide the namespaced alias consumers should link against.
+add_library(
+  aegis
+  src/aegis/model/identifier.cpp
+  src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
 
 # Interesting syntax: BUILD_INTERFACE exposes headers while building, without defining install rules.
