@@ -1,7 +1,13 @@
 # M0 Exit Evidence
 
+> **Purpose:** Map every M0 promise to a concrete artifact or reproducible command, while keeping
+> local evidence distinct from the remote CI evidence required for milestone closure.
+
 **Status:** Local evidence complete on 2026-08-18. M0 closes only after the feature branch passes the
 remote CI workflow and the evidence table is updated with that run.
+
+Gate IDs beginning with `M0-S` identify delivered scope; IDs beginning with `M0-E` identify the exit
+conditions that must be evidenced before M0 can close.
 
 ## Scope evidence
 

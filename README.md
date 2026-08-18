@@ -1,5 +1,8 @@
 # AEGIS
 
+> **Purpose:** Give a new contributor the shortest safe path to understand, configure, verify, and
+> benchmark the M0 repository.
+
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. The initial delivery slice is deliberately narrow: one Deribit testnet
 account, one BTC inverse perpetual, one bot, and no production connectivity.
@@ -22,6 +25,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
+The tracked VS Code workspace setting points CMake Tools at this `.venv` and prepends its `bin`
+directory so the matching Ninja is found. Create the environment before using CMake Tools; command-line
+users may instead provide any supported CMake and Ninja installation through `PATH`.
+
 From a fresh checkout, the one verification command is:
 
 ```sh
@@ -31,6 +38,9 @@ cmake --workflow --preset verify
 That command configures, builds, and runs the unit tests with strict warnings treated as errors.
 The first configure downloads immutable, checksum-verified Catch2 and Google Benchmark source
 archives into the ignored build tree. It does not contact an exchange or require credentials.
+
+The `--workflow --preset` form selects an ordered configure/build/test workflow. A plain `--preset`
+selects one configure preset, while `--build --preset` selects a previously configured build preset.
 
 Other quality commands are:
 
