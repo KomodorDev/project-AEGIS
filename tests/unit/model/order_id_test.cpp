@@ -45,8 +45,9 @@ using namespace aegis::model;
 static_assert(OrderNamespace::byte_size == 16U);
 static_assert(OrderId::byte_size == 24U);
 
-// Interesting syntax: a requires-expression proves bool cannot select the authored-counter factory,
-// while signed and wide unsigned sources remain callable for runtime range validation.
+// Interesting syntax: a requires-expression proves bool and plain character input cannot select the
+// factory, while signed char and wider standard integers remain callable. The narrow runtime case
+// below instantiates the accepted body and its std::in_range use.
 template <typename Counter>
 concept HasOrderProviderFactory = requires(OrderNamespace order_namespace, Counter counter) {
   DeterministicOrderIdProvider::create(order_namespace, counter);
@@ -121,6 +122,7 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   REQUIRE_FALSE(negative);
   CHECK(negative.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
 
+  // Unsigned char is a supported numeric integer source despite sharing plain char's storage width.
   auto narrow_counter =
       DeterministicOrderIdProvider::create(sequential_namespace(), static_cast<unsigned char>(1));
   REQUIRE(narrow_counter);

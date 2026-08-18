@@ -10,8 +10,8 @@ namespace {
 
 using namespace aegis::model;
 
-// Interesting syntax: a requires-expression proves forbidden contract-value scale types are not
-// callable without making the test suite contain a deliberately uncompilable invocation.
+// Interesting syntax: a requires-expression proves float, bool, enum, and plain/wide/Unicode
+// character scales are removed at overload resolution without adding uncompilable test calls.
 template <typename Scale>
 concept HasContractValue = requires(InstrumentMetadata metadata, Quantity quantity, Scale scale) {
   metadata.contract_value(quantity, scale, RoundingMode::Exact);
@@ -24,8 +24,8 @@ enum LegacyScale { LegacyScaleZero = 0 };
 static_assert(!HasContractValue<double>);
 static_assert(!HasContractValue<long double>);
 
-// Bool and legacy enums remain non-invocable, while a signed integer reaches checked runtime
-// validation so negative scales can return a domain error.
+// The exclusions match std::in_range's portable source set, while signed integers remain callable;
+// the negative-scale assertion below instantiates the body and proves checked runtime rejection.
 static_assert(!HasContractValue<bool>);
 static_assert(!HasContractValue<LegacyScale>);
 static_assert(!HasContractValue<char>);

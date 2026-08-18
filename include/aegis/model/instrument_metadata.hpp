@@ -99,8 +99,10 @@ public:
 
   // Convert declared contracts to the multiplier's declared currency. The API deliberately takes no
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
-  // Interesting syntax: the deleted floating-point overload makes a lossy target scale fail during
-  // overload resolution, while wide integers remain available for checked validation.
+  // Interesting syntax: CheckedIntegerInput rejects bool, enum, and plain/wide/Unicode character
+  // scales, while the deleted overload gives floating-point scales the same compile-time firewall.
+  // Signed and unsigned char remain supported numeric sources and wide integers remain available
+  // for checked validation.
   // The deduced scale retains its sign through in_range, so negative values become InvalidScale
   // instead of wrapping into a large unsigned target.
   template <detail::CheckedIntegerInput Scale>

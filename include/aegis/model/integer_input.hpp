@@ -1,4 +1,5 @@
-// Purpose: constrain checked numeric entry points to portable standard integer source types.
+// Purpose: define the portable integer source-type concepts used before checked narrowing; exclude
+// ambiguous character, Boolean, enum, and floating inputs from authored numeric APIs.
 
 #pragma once
 
@@ -7,11 +8,14 @@
 
 namespace aegis::model::detail {
 
+// Interesting syntax: remove_cvref makes concept membership depend on the underlying source type,
+// not on whether a caller or requires-expression presents it through cv/ref qualification.
 template <typename Value> using UnqualifiedIntegerInput = std::remove_cvref_t<Value>;
 
-// std::in_range is specified for the standard signed and unsigned integer types, excluding bool,
-// plain char, and the wide/Unicode character types. Matching that set keeps requires-expressions
-// and real calls aligned; signed char and unsigned char remain ordinary integer inputs.
+// Interesting syntax: enumerate exactly the standard signed/unsigned types accepted by
+// std::in_range. This keeps requires-expressions and instantiated bodies aligned: bool,
+// plain/wide/Unicode character types, enums, and floating-point values are excluded, while signed
+// char and unsigned char remain ordinary numeric integer inputs.
 template <typename Value>
 concept CheckedIntegerInput = std::same_as<UnqualifiedIntegerInput<Value>, signed char> ||
                               std::same_as<UnqualifiedIntegerInput<Value>, unsigned char> ||
@@ -24,6 +28,8 @@ concept CheckedIntegerInput = std::same_as<UnqualifiedIntegerInput<Value>, signe
                               std::same_as<UnqualifiedIntegerInput<Value>, long long> ||
                               std::same_as<UnqualifiedIntegerInput<Value>, unsigned long long>;
 
+// Non-fallible constructors further require an unsigned member of that portable set. This admits
+// unsigned char but not signed char because there is no Result channel for rejecting a negative.
 template <typename Value>
 concept CheckedUnsignedIntegerInput =
     CheckedIntegerInput<Value> && std::unsigned_integral<UnqualifiedIntegerInput<Value>>;

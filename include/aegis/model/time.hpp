@@ -27,8 +27,9 @@ struct ProcessingTimestampTag;
 // timestamp types, so comparisons cannot accidentally cross wall-clock and monotonic domains.
 template <typename Tag> class Timestamp {
 public:
-  // Non-fallible construction accepts only representable unsigned integer sources; signed and bool
-  // inputs cannot reach the cast because this boundary has no DomainError channel.
+  // Interesting syntax: CheckedUnsignedIntegerInput admits unsigned char and wider unsigned
+  // standard integers, but excludes signed, bool, enum, floating, and plain/wide/Unicode character
+  // sources before this non-fallible cast.
   template <CheckedUnsignedIntegerInput Value>
     requires(sizeof(UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr Timestamp(Value nanoseconds) noexcept
@@ -98,8 +99,8 @@ AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 // increment may silently narrow or wrap.
 template <typename Tag> class Revision {
 public:
-  // A fallible factory keeps signed input intact until range and nonzero checks can report the
-  // revision tag's deterministic field rather than accepting an unsigned wraparound.
+  // CheckedIntegerInput admits signed/unsigned char and wider standard integers. A fallible factory
+  // keeps signed input intact until range and nonzero checks can report the revision tag's field.
   template <CheckedIntegerInput Value>
   [[nodiscard]] static Result<Revision> from_value(Value value) {
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
@@ -206,8 +207,8 @@ public:
   explicit DeterministicClockProvider(Value initial_nanoseconds) noexcept
       : current_nanoseconds_{static_cast<std::uint64_t>(initial_nanoseconds)} {}
 
-  // Advance is fallible, so it accepts signed authored integers and rejects negatives through the
-  // stable clock_nanoseconds field before handing normalized values to checked addition.
+  // Advance is fallible, so CheckedIntegerInput admits signed/unsigned char and wider integer
+  // sources, then rejects negative values at clock_nanoseconds before checked addition.
   template <detail::CheckedIntegerInput Value>
   [[nodiscard]] Result<void> advance(Value nanoseconds) {
     if (!std::in_range<std::uint64_t>(nanoseconds)) {

@@ -17,9 +17,9 @@ using namespace aegis::model;
 template <typename Left, typename Right>
 concept HasProductOperator = requires(Left left, Right right) { left* right; };
 
-// Interesting syntax: requires-expression probes verify that deleted floating-point entry points
-// are absent from callable API surface without requiring a separate expected-compilation-failure
-// test.
+// Interesting syntax: requires-expression probes verify that constraints and deleted overloads
+// remove forbidden types at overload resolution. Supported narrow-integer runtime cases below also
+// instantiate function bodies, guarding against a constraint/body mismatch around std::in_range.
 template <typename Value, typename Coefficient, typename Scale>
 concept HasFromScaled =
     requires(Coefficient coefficient, Scale scale) { Value::from_scaled(coefficient, scale); };
@@ -58,8 +58,9 @@ static_assert(!HasFromScaled<Quantity, int, float>);
 static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
 
-// Boolean coefficients/scales are not authored numeric inputs. Ordinary signed and wide unsigned
-// integers remain callable so their original ranges can be checked before representation narrowing.
+// Bool, enum, and plain/wide/Unicode character sources are non-invocable; signed char, unsigned
+// char, and wider standard integers remain callable so their original ranges can be checked before
+// representation narrowing.
 static_assert(!HasFromScaled<FixedPoint, bool, int>);
 static_assert(!HasFromScaled<Price, bool, int>);
 static_assert(!HasFromScaled<FixedPoint, char, int>);
@@ -177,6 +178,8 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   CHECK(invalid_price.error() ==
         DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "price"));
 
+  // Instantiating both narrow signed and unsigned source types proves supported character-width
+  // integers compile through std::in_range and preserve exact value semantics at runtime.
   const auto narrow_integers =
       FixedPoint::from_scaled(static_cast<signed char>(12), static_cast<unsigned char>(1));
   REQUIRE(narrow_integers);

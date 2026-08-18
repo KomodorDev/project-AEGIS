@@ -35,10 +35,12 @@ public:
 
   // Construction accepts already-scaled integers or strict ordinary decimal text; both paths
   // preserve exactness and canonicalize redundant fractional zeros.
-  // Interesting syntax: the constrained overload plus a deleted floating-point overload makes
-  // binary-float construction ill-formed instead of permitting an implicit lossy conversion.
+  // Interesting syntax: CheckedIntegerInput is deliberately narrower than std::integral, and the
+  // deleted floating overload completes the compile-time firewall for ambiguous numeric sources.
   // Boolean values are not authored integers. Deducing both remaining inputs preserves their width
   // and signedness for std::in_range; conversion to the kernel representation follows both gates.
+  // Plain, wide, and Unicode character types plus enums are also excluded; signed char and unsigned
+  // char remain numeric integers and take the same checked path as wider standard integer types.
   template <detail::CheckedIntegerInput Coefficient, detail::CheckedIntegerInput Scale>
   [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient, Scale scale) {
     if (!std::in_range<std::int64_t>(coefficient)) {
@@ -158,7 +160,8 @@ struct NotionalTag {
 template <typename Tag> class DecimalValue {
 public:
   // Factories delegate validation to FixedPoint and replace its generic error field with the
-  // nominal domain that the caller supplied.
+  // nominal domain that the caller supplied. Reusing CheckedIntegerInput keeps the nominal and
+  // kernel callable surfaces identical.
   template <CheckedIntegerInput Coefficient, CheckedIntegerInput Scale>
   [[nodiscard]] static Result<DecimalValue> from_scaled(Coefficient coefficient, Scale scale) {
     auto value = FixedPoint::from_scaled(coefficient, scale);

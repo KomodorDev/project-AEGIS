@@ -12,8 +12,9 @@ namespace {
 
 using namespace aegis::model;
 
-// Interesting syntax: requires-expressions verify that fallible factories reject ambiguous source
-// types at overload resolution, complementing runtime checks for supported narrow integers.
+// Interesting syntax: requires-expressions verify fallible factories reject bool and plain
+// character sources at overload resolution. Runtime narrow-integer cases instantiate accepted
+// bodies, keeping concept membership aligned with std::in_range compatibility.
 template <typename Value>
 concept HasRevisionFactory = requires(Value value) { ConfigurationRevision::from_value(value); };
 
@@ -31,8 +32,9 @@ static_assert(!std::is_same_v<InstrumentMetadataRevision, RouteRevision>);
 static_assert(!std::is_convertible_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<SessionEpoch, SequenceNumber>);
 
-// Non-fallible constructors reject signed and bool sources at compile time. Fallible factories keep
-// signed sources callable so negatives become stable DomainError values instead of narrowing.
+// Non-fallible constructors accept unsigned char but reject all signed, bool, enum, floating, and
+// plain/wide/Unicode character sources. Fallible factories also admit signed char so negatives can
+// become stable DomainError values instead of narrowing.
 static_assert(std::is_constructible_v<SourceTimestamp, std::uint64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, std::int64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, char>);
@@ -110,6 +112,7 @@ TEST_CASE("installed revisions reject zero and fail on increment overflow", "[mo
   CHECK(negative.error() ==
         DomainError::at_field(DomainErrorCode::InvalidRevision, "configuration_revision"));
 
+  // Unsigned char must remain a usable numeric revision source after the portable concept filter.
   const auto narrow_revision = ConfigurationRevision::from_value(static_cast<unsigned char>(2));
   REQUIRE(narrow_revision);
   CHECK(narrow_revision.value().value() == 2U);
