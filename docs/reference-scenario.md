@@ -18,6 +18,9 @@ The requested “Deribit BTCUSD-Perp” product is interpreted as Deribit native
 
 ## Fixed scenario
 
+The values below are fixed fixture identities and scenario constraints. They are not venue payload
+fields, live credentials or permission to substitute a similarly named instrument or account.
+
 | Concept | Reference value |
 |---|---|
 | Firm | `firm.aegis-lab` |

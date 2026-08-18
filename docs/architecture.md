@@ -74,6 +74,10 @@ Bots never communicate with exchanges directly. Every order must pass inline thr
 
 ## Organizational Hierarchy
 
+This hierarchy defines immutable attribution and future aggregation boundaries. It does not imply
+that firms, desks or bots are mutable runtime containers, nor does it create authority between peer
+firm roots.
+
 One AEGIS startup configuration represents one or more independently attributed firms. Each firm is
 an organizational root, allowing subsidiaries to remain distinct without introducing a parent
 `Company` entity or cross-firm aggregation in M1.

@@ -1,5 +1,8 @@
 # AEGIS Implementation Roadmap
 
+> **Purpose:** Sequence AEGIS delivery by externally meaningful capability gates while preserving
+> the accepted safety and ownership constraints at every intermediate milestone.
+
 **Status: Proposed.** This roadmap turns the accepted [architecture](architecture.md) and [serialized data-plane decision](decisions/0001-serialized-data-plane-execution.md) into capability-based delivery milestones. Milestones are completion gates, not calendar estimates. Independent delivery-sequencing and trading-safety reviews have been incorporated.
 
 ## Delivery Strategy

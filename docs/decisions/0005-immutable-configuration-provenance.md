@@ -20,6 +20,10 @@ attributed subsidiaries without inventing a parent-company model in M1.
 
 ## Decision
 
+The subsections progress from authority, through atomic validation, to canonical evidence. That
+ordering is deliberate: the hash and trace are meaningful only after the complete rulebook and its
+ownership relationships are validated.
+
 ### Organization and permissions
 
 One startup configuration contains one or more `Firm` roots. Each `Desk` references exactly one

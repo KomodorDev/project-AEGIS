@@ -19,6 +19,10 @@ identity to make tests deterministic.
 
 ## Decision
 
+The following value families form one compatibility boundary: identities prevent category mixing,
+exact numbers prevent silent precision loss, and typed time/revision/identity providers make replay
+deterministic without weakening production behavior.
+
 ### Typed identifiers and deterministic errors
 
 Every identity is a distinct nominal type. In particular, `FirmId`, `DeskId`, `BotId`, `StrategyId`,

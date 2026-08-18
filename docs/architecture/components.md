@@ -1,5 +1,8 @@
 # Components and Domain Ownership
 
+> **Purpose:** Assign each logical responsibility and mutable-state boundary to an architectural
+> owner without prematurely fixing C++ class, process or deployment structure.
+
 This document expands the [architecture overview](../architecture.md). It describes logical responsibilities and state ownership, not final C++ classes, APIs, object layouts, processes or deployment units.
 
 ## Status Legend
