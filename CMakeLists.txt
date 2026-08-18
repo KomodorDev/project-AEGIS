@@ -35,6 +35,7 @@ add_library(
   src/aegis/market_data/subscription.cpp
   src/aegis/model/fixed_point.cpp
   src/aegis/model/identifier.cpp
+  src/aegis/model/instrument_metadata.cpp
   src/aegis/model/order_id.cpp
   src/aegis/model/sha256.cpp
   src/aegis/model/time.cpp

@@ -8,6 +8,7 @@ add_executable(
   unit/model/domain_error_result_test.cpp
   unit/model/fixed_point_test.cpp
   unit/model/identifier_test.cpp
+  unit/model/instrument_metadata_test.cpp
   unit/model/order_id_test.cpp
   unit/model/sha256_test.cpp
   unit/model/time_test.cpp
