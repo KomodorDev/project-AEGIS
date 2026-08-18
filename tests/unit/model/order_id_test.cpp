@@ -45,8 +45,8 @@ using namespace aegis::model;
 static_assert(OrderNamespace::byte_size == 16U);
 static_assert(OrderId::byte_size == 24U);
 
-// Interesting syntax: a requires-expression probes factory participation without constructing a
-// provider, protecting the public integral boundary at compile time.
+// Interesting syntax: a requires-expression proves bool cannot select the authored-counter factory,
+// while signed and wide unsigned sources remain callable for runtime range validation.
 template <typename Counter>
 concept HasOrderProviderFactory = requires(OrderNamespace order_namespace, Counter counter) {
   DeterministicOrderIdProvider::create(order_namespace, counter);
@@ -110,8 +110,8 @@ TEST_CASE("different restart namespaces cannot collide at the same counter", "[m
   CHECK(before_id.value() != after_id.value());
 }
 
-// Invalid signed entry, narrow valid integers, and UINT64_MAX exercise every counter boundary
-// without wrapping the sequence back to zero.
+// Negative authored entry must map to InvalidValue at order_counter; narrow valid integers and
+// UINT64_MAX then exercise acceptance and final-value exhaustion without wrapping back to zero.
 TEST_CASE("order counters reject zero and fail after their final value", "[model][order-id]") {
   const auto invalid = DeterministicOrderIdProvider::create(sequential_namespace(), 0U);
   REQUIRE_FALSE(invalid);

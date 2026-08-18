@@ -389,6 +389,8 @@ FixedPoint FixedPoint::canonical(std::int64_t coefficient, std::uint8_t scale) n
   return FixedPoint{coefficient, scale};
 }
 
+// Public entry has already proved coefficient representability. Retain the wide scale until its
+// semantic 0..18 bound passes, then narrow once into canonical storage.
 Result<FixedPoint> FixedPoint::from_validated_scaled(std::int64_t coefficient,
                                                      std::uint64_t scale) {
   if (scale > maximum_scale) {

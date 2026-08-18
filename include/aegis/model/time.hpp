@@ -27,6 +27,8 @@ struct ProcessingTimestampTag;
 // timestamp types, so comparisons cannot accidentally cross wall-clock and monotonic domains.
 template <typename Tag> class Timestamp {
 public:
+  // Non-fallible construction accepts only representable unsigned integer sources; signed and bool
+  // inputs cannot reach the cast because this boundary has no DomainError channel.
   template <CheckedUnsignedIntegerInput Value>
     requires(sizeof(UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr Timestamp(Value nanoseconds) noexcept
@@ -52,6 +54,8 @@ struct SequenceNumberTag {
 // fails before unsigned wrap and reports the tag-specific stable field.
 template <typename Tag> class CheckedUnsigned {
 public:
+  // Epoch and sequence construction uses the same no-narrowing rule as timestamps before storing a
+  // uint64_t value.
   template <CheckedUnsignedIntegerInput Value>
     requires(sizeof(UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr CheckedUnsigned(Value value) noexcept
@@ -94,6 +98,8 @@ AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 // increment may silently narrow or wrap.
 template <typename Tag> class Revision {
 public:
+  // A fallible factory keeps signed input intact until range and nonzero checks can report the
+  // revision tag's deterministic field rather than accepting an unsigned wraparound.
   template <CheckedIntegerInput Value>
   [[nodiscard]] static Result<Revision> from_value(Value value) {
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
@@ -135,6 +141,8 @@ using ProcessingTimestamp = detail::Timestamp<detail::ProcessingTimestampTag>;
 // required. The named subtraction rejects reversed receive/processing order.
 class ElapsedNanoseconds {
 public:
+  // A duration constructor is intentionally unsigned-only because invalid signed input has no
+  // result channel in which to return an error.
   template <detail::CheckedUnsignedIntegerInput Value>
     requires(sizeof(detail::UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit constexpr ElapsedNanoseconds(Value value) noexcept
@@ -192,11 +200,14 @@ class DeterministicClockProvider final : public ClockProvider {
 public:
   DeterministicClockProvider() noexcept = default;
 
+  // Initial state is non-fallible and therefore unsigned-only, matching the timestamp constructors.
   template <detail::CheckedUnsignedIntegerInput Value>
     requires(sizeof(detail::UnqualifiedIntegerInput<Value>) <= sizeof(std::uint64_t))
   explicit DeterministicClockProvider(Value initial_nanoseconds) noexcept
       : current_nanoseconds_{static_cast<std::uint64_t>(initial_nanoseconds)} {}
 
+  // Advance is fallible, so it accepts signed authored integers and rejects negatives through the
+  // stable clock_nanoseconds field before handing normalized values to checked addition.
   template <detail::CheckedIntegerInput Value>
   [[nodiscard]] Result<void> advance(Value nanoseconds) {
     if (!std::in_range<std::uint64_t>(nanoseconds)) {

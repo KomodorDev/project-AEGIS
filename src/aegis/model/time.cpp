@@ -20,8 +20,9 @@ Result<ElapsedNanoseconds> processing_delay(ProcessingTimestamp processing,
       ElapsedNanoseconds{processing.nanoseconds() - receive.nanoseconds()});
 }
 
-// The public template has already rejected negative or unrepresentable inputs. Subtraction-based
-// capacity checking then guarantees the state is unchanged on overflow.
+// The public template has already mapped negative or unrepresentable input to ArithmeticOverflow at
+// clock_nanoseconds. Subtraction-based capacity checking preserves that field and leaves state
+// unchanged when the normalized increment would overflow.
 Result<void> DeterministicClockProvider::advance_validated(std::uint64_t nanoseconds) {
   if (nanoseconds > std::numeric_limits<std::uint64_t>::max() - current_nanoseconds_) {
     return Result<void>::failure(

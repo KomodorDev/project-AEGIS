@@ -31,8 +31,8 @@ static_assert(!std::is_same_v<InstrumentMetadataRevision, RouteRevision>);
 static_assert(!std::is_convertible_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<SessionEpoch, SequenceNumber>);
 
-// Non-fallible constructors admit only portable unsigned inputs; fallible factories admit safe
-// signed inputs so invalid negatives become stable DomainError values instead of narrowing.
+// Non-fallible constructors reject signed and bool sources at compile time. Fallible factories keep
+// signed sources callable so negatives become stable DomainError values instead of narrowing.
 static_assert(std::is_constructible_v<SourceTimestamp, std::uint64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, std::int64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, char>);
@@ -58,7 +58,8 @@ TEST_CASE("a deterministic clock returns explicitly advanced monotonic values", 
   CHECK(clock.processing_now() == ProcessingTimestamp{12U});
 }
 
-// Advancing is atomic on both arithmetic overflow and negative signed input.
+// Advancing is atomic on both state overflow and negative signed input, and both failures retain
+// the clock_nanoseconds field.
 TEST_CASE("a deterministic clock fails rather than wrapping", "[model][time]") {
   DeterministicClockProvider clock{std::numeric_limits<std::uint64_t>::max()};
 
@@ -97,8 +98,8 @@ TEST_CASE("session and sequence increments are checked", "[model][time]") {
   CHECK(exhausted.error().code == DomainErrorCode::ArithmeticOverflow);
 }
 
-// Installed revision zero is absent, negative entry is invalid, and the final assigned revision
-// cannot increment into wraparound.
+// Installed revision zero and negative entry both report the nominal revision field; the final
+// assigned revision cannot increment into wraparound.
 TEST_CASE("installed revisions reject zero and fail on increment overflow", "[model][time]") {
   const auto absent = ConfigurationRevision::from_value(0U);
   REQUIRE_FALSE(absent);

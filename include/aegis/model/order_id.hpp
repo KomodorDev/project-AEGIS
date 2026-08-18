@@ -94,6 +94,8 @@ public:
     return create_validated(order_namespace, 1U);
   }
 
+  // Preserve an authored counter's sign and width through std::in_range. Bool is not a counter, and
+  // negative or unrepresentable values fail with the stable order_counter field before conversion.
   template <detail::CheckedIntegerInput Counter>
   [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace,
                                                                    Counter initial_counter) {

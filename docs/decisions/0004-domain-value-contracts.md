@@ -63,6 +63,12 @@ values outside the representation are rejected. Authored text may contain at mos
 digits before canonical trailing-zero removal, so the accepted grammar has the same explicit scale
 bound as the representation.
 
+Authored integer entry preserves the source type until validation: Boolean values are not numeric
+domain inputs, coefficients must fit the signed 64-bit representation, and signed-negative or wide
+scale values must fail before conversion to an unsigned or stored scale. These gates return the same
+stable field-specific errors as textual validation instead of allowing implicit narrowing to change
+the accepted value or its failure identity.
+
 `Price`, `Quantity`, and `Notional` are distinct wrappers over that representation. They have no
 implicit conversions between one another and no construction or decision-path conversion from
 `float`, `double`, or `long double`. Zero is representable so state can be initialized, while the
@@ -90,6 +96,12 @@ there is no generic cross-type arithmetic. `SessionEpoch`, `SequenceNumber`, and
 are also distinct checked unsigned types. Revision zero means absent and is invalid for an installed
 value; increment overflow is an explicit error.
 
+The same before-narrowing rule applies to provider state. Non-fallible timestamp, sequence, session,
+elapsed-time, and deterministic-clock construction accepts only representable unsigned inputs.
+Fallible revision, clock-advance, and deterministic order-counter factories retain signedness long
+enough to reject negatives through `configuration_revision`, `clock_nanoseconds`, or `order_counter`
+errors, and their maximum values fail on the next checked transition rather than wrapping.
+
 Clock and identifier generation are injected capabilities. Tests use a deterministic clock and an
 order-ID provider initialized with a fixed namespace and counter. The production provider obtains a
 fresh 128-bit namespace from the operating system's cryptographically secure random source at
@@ -104,6 +116,7 @@ IDs. M3 owns any constrained venue client-order-ID encoding and its correlation 
 - Replay tests control every clock value and generated identifier without changing production policy.
 - Exact arithmetic is more verbose because every lossy boundary requires an explicit policy.
 - Stable error codes, canonical parsing, and portable checked arithmetic become compatibility
-  contracts and require golden and boundary tests.
+  contracts and require compile-time input-surface checks plus runtime negative, wide-integer, and
+  overflow boundary tests.
 - Networking, event dispatch, order semantics, risk, OMS behavior, and venue-native identifier
   encoding remain outside M1.

@@ -87,7 +87,8 @@ std::string OrderId::to_hex() const { return bytes_to_hex(bytes_.data(), bytes_.
 Result<DeterministicOrderIdProvider>
 DeterministicOrderIdProvider::create_validated(OrderNamespace order_namespace,
                                                std::uint64_t initial_counter) {
-  // Counter zero is reserved; all public integral range checks have completed before this boundary.
+  // Counter zero is reserved; public range checks have already mapped negative or unrepresentable
+  // authored values to InvalidValue at order_counter before this fixed-width boundary.
   if (initial_counter == 0U) {
     return Result<DeterministicOrderIdProvider>::failure(
         DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));

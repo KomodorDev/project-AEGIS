@@ -37,8 +37,8 @@ public:
   // preserve exactness and canonicalize redundant fractional zeros.
   // Interesting syntax: the constrained overload plus a deleted floating-point overload makes
   // binary-float construction ill-formed instead of permitting an implicit lossy conversion.
-  // Deducing both inputs preserves their width and signedness for range checks; conversion to the
-  // kernel's fixed-width representation happens only after both checks pass.
+  // Boolean values are not authored integers. Deducing both remaining inputs preserves their width
+  // and signedness for std::in_range; conversion to the kernel representation follows both gates.
   template <detail::CheckedIntegerInput Coefficient, detail::CheckedIntegerInput Scale>
   [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient, Scale scale) {
     if (!std::in_range<std::int64_t>(coefficient)) {
@@ -67,8 +67,9 @@ public:
   [[nodiscard]] Result<FixedPoint> checked_add(FixedPoint other) const;
   [[nodiscard]] Result<FixedPoint> checked_subtract(FixedPoint other) const;
 
-  // Keep a signed target scale in its source type until in_range rejects negatives; only normalized
-  // uint64_t values cross into the out-of-line arithmetic implementation.
+  // Keep a target scale in its source type until std::in_range rejects negative signed or
+  // unrepresentable wide values with InvalidScale; only normalized uint64_t values cross into the
+  // out-of-line arithmetic implementation.
   template <detail::CheckedIntegerInput Scale>
   [[nodiscard]] Result<FixedPoint> rescale(Scale target_scale, RoundingMode rounding) const {
     if (!std::in_range<std::uint64_t>(target_scale)) {

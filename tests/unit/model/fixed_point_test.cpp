@@ -58,8 +58,8 @@ static_assert(!HasFromScaled<Quantity, int, float>);
 static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
 
-// Boolean coefficients/scales and legacy enums are not numeric domain inputs; ordinary signed and
-// wide unsigned integers remain callable and are checked at runtime.
+// Boolean coefficients/scales are not authored numeric inputs. Ordinary signed and wide unsigned
+// integers remain callable so their original ranges can be checked before representation narrowing.
 static_assert(!HasFromScaled<FixedPoint, bool, int>);
 static_assert(!HasFromScaled<Price, bool, int>);
 static_assert(!HasFromScaled<FixedPoint, char, int>);
@@ -157,6 +157,8 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   REQUIRE_FALSE(formerly_wrapped_scale);
   CHECK(formerly_wrapped_scale.error().code == DomainErrorCode::InvalidScale);
 
+  // UINT64_MAX guards the former unsafe coefficient narrowing while the adjacent signed maximum
+  // proves a wide source is accepted when its value is representable.
   const auto maximum_unsigned_coefficient =
       FixedPoint::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
   REQUIRE_FALSE(maximum_unsigned_coefficient);
@@ -169,6 +171,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   CHECK(maximum_signed_as_unsigned.value().coefficient() ==
         std::numeric_limits<std::int64_t>::max());
 
+  // Nominal wrappers must preserve the same overflow code while replacing the generic kernel field.
   const auto invalid_price = Price::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
   REQUIRE_FALSE(invalid_price);
   CHECK(invalid_price.error() ==
