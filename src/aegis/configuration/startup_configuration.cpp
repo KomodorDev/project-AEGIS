@@ -532,8 +532,8 @@ venue_instrument_pairs(const std::vector<model::InstrumentMetadata>& metadata) {
   return pairs;
 }
 
-// Execution receives the validated account identity, owner, and venue without configuration
-// secrets.
+// Retain validated firm ownership in the secret-free projection so ExecutionRouteConfiguration
+// remains the public same-firm authorization boundary.
 [[nodiscard]] std::vector<execution::LogicalAccountVenueBinding>
 execution_account_bindings(const std::vector<LogicalAccountVenueBinding>& bindings) {
   std::vector<execution::LogicalAccountVenueBinding> result;
@@ -603,6 +603,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
     return model::Result<StartupConfiguration>::failure(subscriptions.error());
   }
 
+  // Route validation receives firm-owned accounts directly; no weaker post-validation is required.
   auto routes = execution::ExecutionRouteConfiguration::create(
       params.route_revision, std::move(params.routes), organization.value(),
       std::vector<execution::VenueInstrumentPair>{known_venue_instruments.begin(),

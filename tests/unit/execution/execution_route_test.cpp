@@ -40,6 +40,8 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   return std::move(result).value();
 }
 
+// Both owners are valid peer firms, ensuring ownership rejection is not a dangling-reference
+// shortcut.
 [[nodiscard]] organization::Organization two_firm_organization() {
   auto result = organization::Organization::create(
       model::OrganizationRevision::initial(),
@@ -166,6 +168,7 @@ TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
   const execution::LogicalAccountVenueBinding duplicate_account{
       id<model::LogicalAccountId>("account.z"), id<model::FirmId>("firm.aegis-lab"),
       id<model::VenueId>("deribit")};
+  // One account ID with two owners must fail before either owner could be selected by lookup.
   auto conflicting_owner = duplicate_account;
   conflicting_owner.firm_id = id<model::FirmId>("firm.aegis-subsidiary");
   const auto duplicate_account_result = execution::ExecutionRouteConfiguration::create(
@@ -243,6 +246,7 @@ TEST_CASE("routes require an explicit venue-instrument pair and account-venue bi
         model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
                                      "routes.account_venue", 0U));
 
+  // Exact account_firm failure proves the public route factory owns the authorization decision.
   const auto multi_firm = two_firm_organization();
   const auto firm_result = execution::ExecutionRouteConfiguration::create(
       model::RouteRevision::initial(), {route("route.mismatched-firm")}, multi_firm,

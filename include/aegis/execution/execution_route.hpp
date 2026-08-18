@@ -18,6 +18,8 @@ enum class ExecutionRouteState : std::uint8_t { Disabled = 0, Enabled = 1 };
 
 using VenueInstrumentPair = std::pair<model::VenueId, model::InstrumentId>;
 
+// This minimal dependency projection deliberately retains account ownership so the public route
+// factory, not only startup orchestration, can enforce same-firm execution authority.
 struct LogicalAccountVenueBinding {
   model::LogicalAccountId logical_account_id;
   model::FirmId firm_id;

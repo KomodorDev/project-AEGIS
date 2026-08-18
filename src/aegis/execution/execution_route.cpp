@@ -1,4 +1,4 @@
-// Purpose: validate and canonically order explicit execution-route grants.
+// Purpose: validate, firm-scope, and canonically order explicit execution-route grants.
 
 #include "aegis/execution/execution_route.hpp"
 
@@ -51,6 +51,8 @@ template <typename Value>
                      [&](const VenueInstrumentPair& pair) { return pair.second == instrument_id; });
 }
 
+// LogicalAccountId is authoritative: conflicting owner or venue records are duplicates too. Sorting
+// the full tuple first gives every such conflict a deterministic collection index.
 [[nodiscard]] model::Result<void>
 sort_and_reject_duplicate_account_ids(std::vector<LogicalAccountVenueBinding>& bindings) {
   std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
@@ -66,6 +68,7 @@ sort_and_reject_duplicate_account_ids(std::vector<LogicalAccountVenueBinding>& b
   return model::Result<void>::success();
 }
 
+// The preceding unique-ID check makes this canonical lookup resolve exactly one owner and venue.
 [[nodiscard]] const LogicalAccountVenueBinding*
 find_account(const std::vector<LogicalAccountVenueBinding>& bindings,
              const model::LogicalAccountId& logical_account_id) noexcept {
@@ -141,6 +144,7 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
       return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
           DomainErrorCode::InvalidRelationship, "routes.account_venue", index));
     }
+    // Venue compatibility is insufficient: the bot and logical account must share one peer firm.
     if (account->firm_id != bot->firm_id) {
       return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
           DomainErrorCode::InvalidRelationship, "routes.account_firm", index));
