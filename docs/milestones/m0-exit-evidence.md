@@ -3,8 +3,8 @@
 > **Purpose:** Map every M0 promise to a concrete artifact or reproducible command, while keeping
 > local evidence distinct from the remote CI evidence required for milestone closure.
 
-**Status:** Local evidence complete on 2026-08-18. M0 closes only after the feature branch passes the
-remote CI workflow and the evidence table is updated with that run.
+**Status:** Local and required remote CI evidence complete on 2026-08-18. M0 remains unintegrated
+until [PR #6](https://github.com/KomodorDev/project-AEGIS/pull/6) is approved and merged into `dev`.
 
 Gate IDs beginning with `M0-S` identify delivered scope; IDs beginning with `M0-E` identify the exit
 conditions that must be evidenced before M0 can close.
@@ -26,10 +26,10 @@ conditions that must be evidenced before M0 can close.
 
 | Gate | Reproducible evidence | State |
 |---|---|---|
-| `M0-E01` Fresh checkout configures, builds, and tests with one command locally and in CI | `cmake --workflow --preset verify`; identical command in README and compiler-matrix CI jobs | Local pass: arm64 macOS 15.7.4 / AppleClang 16; remote matrix pending |
+| `M0-E01` Fresh checkout configures, builds, and tests with one command locally and in CI | `cmake --workflow --preset verify`; identical command in README and compiler-matrix CI jobs | Local pass: arm64 macOS 15.7.4 / AppleClang 16; remote Linux/macOS matrix pass in [run 32158462423](https://github.com/KomodorDev/project-AEGIS/actions/runs/32158462423) |
 | `M0-E02` Scenario, venue, and environment are explicit | Deribit testnet / `BTC-PERPETUAL` / one firm, desk, bot, account alias, subscription, and disabled route | Complete |
 | `M0-E03` Account rules are explicit and testable | Dedicated `segregated_sm` subaccount, staged permissions, no external activity, authority split, and fail-closed mismatch matrix | Complete as an operating contract; executable venue checks begin in M7 |
-| `M0-E04` Measurements have names, workloads, and units | `BENCH-M0-HARNESS-001` plus M2/M3/M10 workload definitions and provisional targets | Local release/JSON smoke pass; remote artifact pending |
+| `M0-E04` Measurements have names, workloads, and units | `BENCH-M0-HARNESS-001` plus M2/M3/M10 workload definitions and provisional targets | Local release/JSON smoke pass; remote benchmark/evidence validation and artifact upload passed in [run 32158462423](https://github.com/KomodorDev/project-AEGIS/actions/runs/32158462423) |
 | `M0-E05` Default path needs no credential or production endpoint | Build graph contains only local AEGIS code and checksum-pinned test dependencies; no exchange client or transmission target exists | Complete |
 
 ## Commands to record before closure
@@ -54,5 +54,7 @@ timing is calibration only and is not a product latency result.
 The same `verify` command also passed from an uncached temporary source copy using the documented
 minimum CMake 3.25.2 and Ninja 1.13.0, including first-time checksum-verified dependency acquisition.
 
-The remote evidence must be a GitHub Actions run for a pull request whose base branch is `dev`. CI
-timings are benchmark-harness evidence only; they do not qualify the provisional latency targets.
+[GitHub Actions run 32158462423](https://github.com/KomodorDev/project-AEGIS/actions/runs/32158462423)
+validated commit `7566cc0` on PR #6 targeting `dev`: formatting, GCC, Clang, AppleClang,
+ASan+UBSan, TSan, and benchmark-evidence jobs all passed. CI timings are benchmark-harness evidence
+only; they do not qualify the provisional latency targets.
