@@ -17,6 +17,8 @@ namespace {
 using model::DomainError;
 using model::DomainErrorCode;
 
+// Canonicalize caller-supplied dependency catalogs before binary search so duplicate permissions
+// cannot make membership ambiguous and their reported indices are input-order independent.
 template <typename Value>
 [[nodiscard]] model::Result<void> sort_and_reject_duplicates(std::vector<Value>& values,
                                                              std::string_view field) {
@@ -56,6 +58,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
                                   std::vector<Subscription> subscriptions,
                                   const organization::Organization& organization,
                                   std::vector<VenueInstrumentPair> known_venue_instruments) {
+  // Catalog defects take precedence because every subscription depends on an unambiguous source.
   const auto dependency_duplicates =
       sort_and_reject_duplicates(known_venue_instruments, "subscriptions.known_venue_instruments");
   if (!dependency_duplicates) {

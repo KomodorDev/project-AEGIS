@@ -104,6 +104,7 @@ TEST_CASE("subscription IDs and semantic keys must both be unique", "[market_dat
                                      "subscriptions.semantic_key", 1U));
 }
 
+// Permission catalogs must fail with canonical indices before any subscription is evaluated.
 TEST_CASE("subscription dependency pairs reject duplicates after canonical sorting",
           "[market_data][subscription]") {
   const auto organization = reference_organization();

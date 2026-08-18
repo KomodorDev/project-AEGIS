@@ -145,6 +145,7 @@ TEST_CASE("route IDs and semantic keys must both be unique", "[execution][route]
                                      "routes.semantic_key", 1U));
 }
 
+// Permission catalogs must fail with canonical indices before any individual route is evaluated.
 TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
           "[execution][route]") {
   const auto organization = reference_organization();

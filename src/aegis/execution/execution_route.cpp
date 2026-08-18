@@ -17,6 +17,8 @@ namespace {
 using model::DomainError;
 using model::DomainErrorCode;
 
+// Canonicalize caller-supplied dependency catalogs before binary search so duplicate permissions
+// cannot make membership ambiguous and their reported indices are input-order independent.
 template <typename Value>
 [[nodiscard]] model::Result<void> sort_and_reject_duplicates(std::vector<Value>& values,
                                                              std::string_view field) {
@@ -83,6 +85,8 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
     const organization::Organization& organization,
     std::vector<VenueInstrumentPair> known_venue_instruments,
     std::vector<LogicalAccountVenueBinding> known_account_bindings) {
+  // Catalog defects take precedence because every route validation depends on an unambiguous
+  // source.
   const auto venue_instrument_duplicates =
       sort_and_reject_duplicates(known_venue_instruments, "routes.known_venue_instruments");
   if (!venue_instrument_duplicates) {
