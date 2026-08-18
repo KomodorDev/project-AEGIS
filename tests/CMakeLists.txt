@@ -3,6 +3,8 @@
 # Link the AEGIS public target and Catch2's variant that supplies the test-program main().
 add_executable(
   aegis_unit_tests
+  unit/execution/execution_route_test.cpp
+  unit/market_data/subscription_test.cpp
   unit/model/domain_error_result_test.cpp
   unit/model/identifier_test.cpp
   unit/model/order_id_test.cpp
