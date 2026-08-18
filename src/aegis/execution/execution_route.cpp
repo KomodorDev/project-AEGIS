@@ -47,10 +47,31 @@ template <typename Value>
                      [&](const VenueInstrumentPair& pair) { return pair.second == instrument_id; });
 }
 
-[[nodiscard]] bool contains_account(const std::vector<LogicalAccountVenueBinding>& bindings,
-                                    const model::LogicalAccountId& logical_account_id) noexcept {
-  return std::any_of(bindings.begin(), bindings.end(),
-                     [&](const auto& binding) { return binding.first == logical_account_id; });
+[[nodiscard]] model::Result<void>
+sort_and_reject_duplicate_account_ids(std::vector<LogicalAccountVenueBinding>& bindings) {
+  std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
+    return std::tie(lhs.logical_account_id, lhs.firm_id, lhs.venue_id) <
+           std::tie(rhs.logical_account_id, rhs.firm_id, rhs.venue_id);
+  });
+  for (std::size_t index = 1U; index < bindings.size(); ++index) {
+    if (bindings[index - 1U].logical_account_id == bindings[index].logical_account_id) {
+      return model::Result<void>::failure(DomainError::at_index(
+          DomainErrorCode::DuplicateIdentifier, "routes.known_account_bindings", index));
+    }
+  }
+  return model::Result<void>::success();
+}
+
+[[nodiscard]] const LogicalAccountVenueBinding*
+find_account(const std::vector<LogicalAccountVenueBinding>& bindings,
+             const model::LogicalAccountId& logical_account_id) noexcept {
+  const auto found = std::lower_bound(
+      bindings.begin(), bindings.end(), logical_account_id,
+      [](const LogicalAccountVenueBinding& binding, const model::LogicalAccountId& target) {
+        return binding.logical_account_id < target;
+      });
+  return found != bindings.end() && found->logical_account_id == logical_account_id ? &*found
+                                                                                    : nullptr;
 }
 
 } // namespace
@@ -66,7 +87,7 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
     return model::Result<ExecutionRouteConfiguration>::failure(venue_instrument_duplicates.error());
   }
   const auto account_binding_duplicates =
-      sort_and_reject_duplicates(known_account_bindings, "routes.known_account_bindings");
+      sort_and_reject_duplicate_account_ids(known_account_bindings);
   if (!account_binding_duplicates) {
     return model::Result<ExecutionRouteConfiguration>::failure(account_binding_duplicates.error());
   }
@@ -85,7 +106,8 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
   std::set<SemanticKey> semantic_keys;
   for (std::size_t index = 0U; index < routes.size(); ++index) {
     const ExecutionRoute& route = routes[index];
-    if (organization.find_bot(route.bot_id) == nullptr) {
+    const auto* const bot = organization.find_bot(route.bot_id);
+    if (bot == nullptr) {
       return model::Result<ExecutionRouteConfiguration>::failure(
           DomainError::at_index(DomainErrorCode::DanglingReference, "routes.bot_id", index));
     }
@@ -93,7 +115,8 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
       return model::Result<ExecutionRouteConfiguration>::failure(
           DomainError::at_index(DomainErrorCode::DanglingReference, "routes.venue_id", index));
     }
-    if (!contains_account(known_account_bindings, route.logical_account_id)) {
+    const auto* const account = find_account(known_account_bindings, route.logical_account_id);
+    if (account == nullptr) {
       return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
           DomainErrorCode::DanglingReference, "routes.logical_account_id", index));
     }
@@ -106,10 +129,13 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
       return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
           DomainErrorCode::InvalidRelationship, "routes.venue_instrument", index));
     }
-    if (!contains(known_account_bindings,
-                  LogicalAccountVenueBinding{route.logical_account_id, route.venue_id})) {
+    if (account->venue_id != route.venue_id) {
       return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
           DomainErrorCode::InvalidRelationship, "routes.account_venue", index));
+    }
+    if (account->firm_id != bot->firm_id) {
+      return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
+          DomainErrorCode::InvalidRelationship, "routes.account_firm", index));
     }
     if (route.state != ExecutionRouteState::Disabled &&
         route.state != ExecutionRouteState::Enabled) {

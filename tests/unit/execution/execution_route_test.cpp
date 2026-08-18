@@ -37,6 +37,27 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   return std::move(result).value();
 }
 
+[[nodiscard]] organization::Organization two_firm_organization() {
+  auto result = organization::Organization::create(
+      model::OrganizationRevision::initial(),
+      {organization::Firm{id<model::FirmId>("firm.aegis-lab")},
+       organization::Firm{id<model::FirmId>("firm.aegis-subsidiary")}},
+      {organization::Desk{id<model::DeskId>("desk.digital-assets"),
+                          id<model::FirmId>("firm.aegis-lab")},
+       organization::Desk{id<model::DeskId>("desk.subsidiary"),
+                          id<model::FirmId>("firm.aegis-subsidiary")}},
+      {organization::BotRegistration{id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+                                     id<model::DeskId>("desk.digital-assets"),
+                                     id<model::StrategyId>("strategy.deterministic-reference")},
+       organization::BotRegistration{id<model::BotId>("bot.subsidiary-reference"),
+                                     id<model::DeskId>("desk.subsidiary"),
+                                     id<model::StrategyId>("strategy.subsidiary-reference")}});
+  if (!result) {
+    throw std::logic_error{"invalid two-firm organization in test fixture"};
+  }
+  return std::move(result).value();
+}
+
 [[nodiscard]] execution::ExecutionRoute route(std::string_view route_id) {
   return execution::ExecutionRoute{id<model::RouteId>(route_id),
                                    id<model::BotId>("bot.deribit-btc-perpetual-reference"),
@@ -52,7 +73,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
 
 [[nodiscard]] std::vector<execution::LogicalAccountVenueBinding> account_bindings() {
   return {{id<model::LogicalAccountId>("account.deribit-testnet-aegis"),
-           id<model::VenueId>("deribit")}};
+           id<model::FirmId>("firm.aegis-lab"), id<model::VenueId>("deribit")}};
 }
 
 TEST_CASE("the reference route is explicit, canonical, and disabled by default",
@@ -137,13 +158,16 @@ TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
                                      "routes.known_venue_instruments", 2U));
 
   const execution::LogicalAccountVenueBinding duplicate_account{
-      id<model::LogicalAccountId>("account.z"), id<model::VenueId>("deribit")};
+      id<model::LogicalAccountId>("account.z"), id<model::FirmId>("firm.aegis-lab"),
+      id<model::VenueId>("deribit")};
+  auto conflicting_owner = duplicate_account;
+  conflicting_owner.firm_id = id<model::FirmId>("firm.aegis-subsidiary");
   const auto duplicate_account_result = execution::ExecutionRouteConfiguration::create(
       model::RouteRevision::initial(), {route("route.a")}, organization, venue_instruments(),
       {duplicate_account,
        {id<model::LogicalAccountId>("account.deribit-testnet-aegis"),
-        id<model::VenueId>("deribit")},
-       duplicate_account});
+        id<model::FirmId>("firm.aegis-lab"), id<model::VenueId>("deribit")},
+       conflicting_owner});
   REQUIRE_FALSE(duplicate_account_result);
   CHECK(duplicate_account_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
@@ -205,11 +229,22 @@ TEST_CASE("routes require an explicit venue-instrument pair and account-venue bi
       model::RouteRevision::initial(), {route("route.mismatched-account")}, organization,
       venue_instruments(),
       {{id<model::LogicalAccountId>("account.deribit-testnet-aegis"),
-        id<model::VenueId>("coinbase")}});
+        id<model::FirmId>("firm.aegis-lab"), id<model::VenueId>("coinbase")}});
   REQUIRE_FALSE(account_result);
   CHECK(account_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
                                      "routes.account_venue", 0U));
+
+  const auto multi_firm = two_firm_organization();
+  const auto firm_result = execution::ExecutionRouteConfiguration::create(
+      model::RouteRevision::initial(), {route("route.mismatched-firm")}, multi_firm,
+      venue_instruments(),
+      {{id<model::LogicalAccountId>("account.deribit-testnet-aegis"),
+        id<model::FirmId>("firm.aegis-subsidiary"), id<model::VenueId>("deribit")}});
+  REQUIRE_FALSE(firm_result);
+  CHECK(firm_result.error() ==
+        model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
+                                     "routes.account_firm", 0U));
 }
 
 TEST_CASE("execution routes reject unassigned state values", "[execution][route]") {

@@ -15,7 +15,15 @@ namespace aegis::execution {
 enum class ExecutionRouteState : std::uint8_t { Disabled = 0, Enabled = 1 };
 
 using VenueInstrumentPair = std::pair<model::VenueId, model::InstrumentId>;
-using LogicalAccountVenueBinding = std::pair<model::LogicalAccountId, model::VenueId>;
+
+struct LogicalAccountVenueBinding {
+  model::LogicalAccountId logical_account_id;
+  model::FirmId firm_id;
+  model::VenueId venue_id;
+
+  friend bool operator==(const LogicalAccountVenueBinding&,
+                         const LogicalAccountVenueBinding&) = default;
+};
 
 struct ExecutionRoute {
   model::RouteId id;

@@ -460,41 +460,6 @@ validate_logical_accounts(std::vector<LogicalAccountVenueBinding> bindings,
   return model::Result<std::vector<LogicalAccountVenueBinding>>::success(std::move(bindings));
 }
 
-[[nodiscard]] const LogicalAccountVenueBinding*
-find_logical_account_binding(const std::vector<LogicalAccountVenueBinding>& bindings,
-                             const model::LogicalAccountId& logical_account_id) noexcept {
-  const auto found = std::lower_bound(
-      bindings.begin(), bindings.end(), logical_account_id,
-      [](const LogicalAccountVenueBinding& binding, const model::LogicalAccountId& target) {
-        return binding.logical_account_id < target;
-      });
-  return found != bindings.end() && found->logical_account_id == logical_account_id ? &*found
-                                                                                    : nullptr;
-}
-
-[[nodiscard]] model::Result<void>
-validate_route_firm_ownership(const execution::ExecutionRouteConfiguration& routes,
-                              const organization::Organization& organization,
-                              const std::vector<LogicalAccountVenueBinding>& logical_accounts) {
-  for (std::size_t index = 0U; index < routes.routes().size(); ++index) {
-    const auto& route = routes.routes()[index];
-    const auto* const bot = organization.find_bot(route.bot_id);
-    const auto* const account =
-        find_logical_account_binding(logical_accounts, route.logical_account_id);
-    // The section factory has already proven both references exist. Keep this defensive branch
-    // deterministic if that contract is ever accidentally weakened.
-    if (bot == nullptr || account == nullptr) {
-      return model::Result<void>::failure(
-          DomainError::at_index(DomainErrorCode::DanglingReference, "routes.firm", index));
-    }
-    if (bot->firm_id != account->firm_id) {
-      return model::Result<void>::failure(DomainError::at_index(
-          DomainErrorCode::InvalidRelationship, "routes.account_firm", index));
-    }
-  }
-  return model::Result<void>::success();
-}
-
 [[nodiscard]] model::Result<std::vector<model::InstrumentMetadata>>
 validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metadata_params,
                              const std::vector<VenueDefinition>& venues) {
@@ -554,7 +519,8 @@ execution_account_bindings(const std::vector<LogicalAccountVenueBinding>& bindin
   std::vector<execution::LogicalAccountVenueBinding> result;
   result.reserve(bindings.size());
   for (const auto& binding : bindings) {
-    result.emplace_back(binding.logical_account_id, binding.venue_id);
+    result.push_back(execution::LogicalAccountVenueBinding{binding.logical_account_id,
+                                                           binding.firm_id, binding.venue_id});
   }
   return result;
 }
@@ -621,11 +587,6 @@ StartupConfiguration::create(StartupConfigurationParams params) {
       execution_account_bindings(logical_accounts.value()));
   if (!routes) {
     return model::Result<StartupConfiguration>::failure(routes.error());
-  }
-  const auto route_firm_ownership =
-      validate_route_firm_ownership(routes.value(), organization.value(), logical_accounts.value());
-  if (!route_firm_ownership) {
-    return model::Result<StartupConfiguration>::failure(route_firm_ownership.error());
   }
 
   auto canonical_bytes = encode_configuration(
