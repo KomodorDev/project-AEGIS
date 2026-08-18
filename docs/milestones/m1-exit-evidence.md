@@ -55,6 +55,10 @@ M2 owns runtime dispatch; M3 owns order admission and fake transport initiation.
 
 ## Local verification
 
+The matrix layers ordinary behavior, compile-time type boundaries, sanitizer instrumentation and an
+optimized build. A passing normal suite alone is therefore not treated as proof of portability,
+undefined-behavior safety or release-mode correctness.
+
 With the documented `.venv` activated, the closeout commands are:
 
 ```sh
