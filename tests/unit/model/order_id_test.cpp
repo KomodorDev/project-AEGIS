@@ -28,6 +28,8 @@ namespace {
 
 using namespace aegis::model;
 
+// The deterministic fixture makes namespace bytes visually traceable in canonical hex vectors;
+// changing the first byte also creates a distinct restart namespace.
 [[nodiscard]] OrderNamespace sequential_namespace(std::uint8_t first_byte = 0U) {
   OrderNamespace::Bytes bytes{};
   for (std::size_t index = 0; index < bytes.size(); ++index) {
@@ -36,9 +38,12 @@ using namespace aegis::model;
   return OrderNamespace{bytes};
 }
 
+// Byte widths are part of the persisted ID contract, not implementation-dependent object sizes.
 static_assert(OrderNamespace::byte_size == 16U);
 static_assert(OrderId::byte_size == 24U);
 
+// Interesting syntax: a requires-expression probes factory participation without constructing a
+// provider, protecting the public integral boundary at compile time.
 template <typename Counter>
 concept HasOrderProviderFactory = requires(OrderNamespace order_namespace, Counter counter) {
   DeterministicOrderIdProvider::create(order_namespace, counter);
@@ -51,6 +56,7 @@ static_assert(!HasOrderProviderFactory<bool>);
 static_assert(!HasOrderProviderFactory<char>);
 static_assert(HasOrderProviderFactory<signed char>);
 
+// This golden vector pins namespace placement, big-endian counter encoding, and increment order.
 TEST_CASE("deterministic order IDs use canonical namespace and big-endian counter bytes",
           "[model][order-id]") {
   const auto order_namespace = sequential_namespace();
@@ -68,6 +74,7 @@ TEST_CASE("deterministic order IDs use canonical namespace and big-endian counte
   CHECK(second.value().to_hex() == "000102030405060708090a0b0c0d0e0f0000000000000002");
 }
 
+// Replay providers with identical injected state must reproduce the same next identity exactly.
 TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[model][order-id]") {
   auto first_created = DeterministicOrderIdProvider::create(sequential_namespace(), 42U);
   auto second_created = DeterministicOrderIdProvider::create(sequential_namespace(), 42U);
@@ -83,6 +90,8 @@ TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[m
   CHECK(first.value() == second.value());
 }
 
+// A fresh namespace, rather than wall time or host identity, separates equal counters across
+// restart.
 TEST_CASE("different restart namespaces cannot collide at the same counter", "[model][order-id]") {
   auto before_restart_created = DeterministicOrderIdProvider::create(sequential_namespace(0U), 1U);
   auto after_restart_created = DeterministicOrderIdProvider::create(sequential_namespace(1U), 1U);
@@ -98,6 +107,8 @@ TEST_CASE("different restart namespaces cannot collide at the same counter", "[m
   CHECK(before_id.value() != after_id.value());
 }
 
+// Invalid signed entry, narrow valid integers, and UINT64_MAX exercise every counter boundary
+// without wrapping the sequence back to zero.
 TEST_CASE("order counters reject zero and fail after their final value", "[model][order-id]") {
   const auto invalid = DeterministicOrderIdProvider::create(sequential_namespace(), 0U);
   REQUIRE_FALSE(invalid);
@@ -126,6 +137,8 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   CHECK(exhausted.error().context.field == "order_counter");
 }
 
+// The production smoke path proves the current platform can source a namespace and produce a full
+// canonical identity without exposing the random bytes as a test oracle.
 TEST_CASE("the production provider obtains a supported operating-system namespace",
           "[model][order-id]") {
   auto created = ProductionOrderIdProvider::create();

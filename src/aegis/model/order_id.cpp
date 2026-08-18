@@ -16,6 +16,7 @@
 namespace aegis::model {
 namespace {
 
+// Hex output is canonical lowercase ASCII with two digits per byte and no locale dependency.
 [[nodiscard]] std::string bytes_to_hex(const std::uint8_t* bytes, std::size_t size) {
   constexpr std::array<char, 16> digits{'0', '1', '2', '3', '4', '5', '6', '7',
                                         '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
@@ -60,9 +61,13 @@ std::string OrderNamespace::to_hex() const { return bytes_to_hex(bytes_.data(), 
 
 OrderId OrderId::from_parts(const OrderNamespace& order_namespace, std::uint64_t counter) noexcept {
   Bytes bytes{};
+
+  // Namespace bytes are copied verbatim so the entropy contribution has one stable representation.
   for (std::size_t index = 0; index < OrderNamespace::byte_size; ++index) {
     bytes[index] = order_namespace.bytes()[index];
   }
+
+  // The counter is appended most-significant byte first, making IDs identical on every host endian.
   for (std::size_t offset = 0; offset < sizeof(counter); ++offset) {
     constexpr std::size_t bits_per_byte = 8U;
     const auto shift = (sizeof(counter) - 1U - offset) * bits_per_byte;
@@ -77,6 +82,7 @@ std::string OrderId::to_hex() const { return bytes_to_hex(bytes_.data(), bytes_.
 Result<DeterministicOrderIdProvider>
 DeterministicOrderIdProvider::create_validated(OrderNamespace order_namespace,
                                                std::uint64_t initial_counter) {
+  // Counter zero is reserved; all public integral range checks have completed before this boundary.
   if (initial_counter == 0U) {
     return Result<DeterministicOrderIdProvider>::failure(
         DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
@@ -89,6 +95,8 @@ DeterministicOrderIdProvider::DeterministicOrderIdProvider(OrderNamespace order_
                                                            std::uint64_t initial_counter) noexcept
     : namespace_{order_namespace}, next_counter_{initial_counter} {}
 
+// Custom moves transfer the sole right to continue a sequence and disable the former owner, so
+// moved-from providers cannot duplicate IDs.
 DeterministicOrderIdProvider::DeterministicOrderIdProvider(
     DeterministicOrderIdProvider&& other) noexcept
     : namespace_{other.namespace_}, next_counter_{other.next_counter_},
@@ -108,12 +116,14 @@ DeterministicOrderIdProvider::operator=(DeterministicOrderIdProvider&& other) no
 }
 
 Result<OrderId> DeterministicOrderIdProvider::next() {
+  // Exhaustion is sticky, including on a moved-from provider.
   if (exhausted_) {
     return Result<OrderId>::failure(
         DomainError::at_field(DomainErrorCode::CounterExhausted, "order_counter"));
   }
 
   const auto order_id = OrderId::from_parts(namespace_, next_counter_);
+  // Emit UINT64_MAX once, then transition without incrementing through zero.
   if (next_counter_ == std::numeric_limits<std::uint64_t>::max()) {
     exhausted_ = true;
   } else {

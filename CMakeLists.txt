@@ -39,8 +39,10 @@ add_library(
   # Identifier grammar is compiled; its Result and error primitives remain header-only.
   src/aegis/model/identifier.cpp
   src/aegis/model/instrument_metadata.cpp
+  # Clock and order-ID providers own stateful behavior; their typed values remain in public headers.
   src/aegis/model/order_id.cpp
   src/aegis/model/sha256.cpp
+  # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp
   src/aegis/organization/organization.cpp
   src/aegis/trace/trace.cpp

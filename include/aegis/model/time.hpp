@@ -1,4 +1,5 @@
-// Purpose: keep venue, monotonic, sequence, session, and revision domains type-distinct.
+// Purpose: define type-distinct time, sequence, session, and revision values plus injected
+// monotonic clocks; cross-clock arithmetic is available only through named checked operations.
 
 #pragma once
 
@@ -22,6 +23,8 @@ struct SourceTimestampTag;
 struct ReceiveTimestampTag;
 struct ProcessingTimestampTag;
 
+// Interesting syntax: tag-parameterized storage produces unrelated source, receive, and processing
+// timestamp types, so comparisons cannot accidentally cross wall-clock and monotonic domains.
 template <typename Tag> class Timestamp {
 public:
   template <CheckedUnsignedIntegerInput Value>
@@ -45,6 +48,8 @@ struct SequenceNumberTag {
   static constexpr std::string_view field = "sequence_number";
 };
 
+// Session epochs and source sequences allow zero where their protocols require it, but increment
+// fails before unsigned wrap and reports the tag-specific stable field.
 template <typename Tag> class CheckedUnsigned {
 public:
   template <CheckedUnsignedIntegerInput Value>
@@ -69,6 +74,8 @@ private:
   std::uint64_t value_;
 };
 
+// Revision tags supply stable error fields while keeping each configuration dimension nominally
+// distinct from every other revision kind.
 #define AEGIS_REVISION_TAG(TagName, Field)                                                         \
   struct TagName {                                                                                 \
     static constexpr std::string_view field = Field;                                               \
@@ -83,6 +90,8 @@ AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 
 #undef AEGIS_REVISION_TAG
 
+// Installed revisions start at one: zero represents absence, and neither construction nor
+// increment may silently narrow or wrap.
 template <typename Tag> class Revision {
 public:
   template <CheckedIntegerInput Value>
@@ -117,10 +126,13 @@ private:
 
 } // namespace detail
 
+// Public timestamp names expose the clock-domain distinction without exposing their tag machinery.
 using SourceTimestamp = detail::Timestamp<detail::SourceTimestampTag>;
 using ReceiveTimestamp = detail::Timestamp<detail::ReceiveTimestampTag>;
 using ProcessingTimestamp = detail::Timestamp<detail::ProcessingTimestampTag>;
 
+// Elapsed time has its own type so a duration cannot be supplied where an absolute timestamp is
+// required. The named subtraction rejects reversed receive/processing order.
 class ElapsedNanoseconds {
 public:
   template <detail::CheckedUnsignedIntegerInput Value>
@@ -140,6 +152,7 @@ private:
 [[nodiscard]] Result<ElapsedNanoseconds> processing_delay(ProcessingTimestamp processing,
                                                           ReceiveTimestamp receive);
 
+// Epochs, sequences, and revisions share checked mechanics but remain unrelated public types.
 using SessionEpoch = detail::CheckedUnsigned<detail::SessionEpochTag>;
 using SequenceNumber = detail::CheckedUnsigned<detail::SequenceNumberTag>;
 
@@ -150,6 +163,8 @@ using StrategyConfigurationRevision = detail::Revision<detail::StrategyConfigura
 using SubscriptionRevision = detail::Revision<detail::SubscriptionRevisionTag>;
 using RouteRevision = detail::Revision<detail::RouteRevisionTag>;
 
+// Interesting syntax: the non-virtual public API wraps a private raw-counter hook, ensuring every
+// implementation returns the correct nominal timestamp type while callers inject one capability.
 class ClockProvider {
 public:
   ClockProvider() = default;
@@ -171,6 +186,8 @@ private:
   [[nodiscard]] virtual std::uint64_t monotonic_nanoseconds() noexcept = 0;
 };
 
+// The deterministic clock is test-controlled and never advances implicitly; signed entry is
+// accepted only so negative values can fail as domain errors before any unsigned conversion.
 class DeterministicClockProvider final : public ClockProvider {
 public:
   DeterministicClockProvider() noexcept = default;
@@ -199,6 +216,8 @@ private:
   std::uint64_t current_nanoseconds_{0U};
 };
 
+// The system implementation exposes elapsed steady-clock nanoseconds from a process-local origin,
+// never wall time or an epoch comparable with SourceTimestamp.
 class SystemClockProvider final : public ClockProvider {
 public:
   SystemClockProvider() noexcept;

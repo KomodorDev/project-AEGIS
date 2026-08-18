@@ -1,4 +1,5 @@
-// Purpose: prove clocks, timestamps, sequences, sessions, and revisions remain deterministic.
+// Purpose: prove time-domain separation, checked counters/revisions, and injected monotonic clocks
+// remain deterministic across valid and unsafe integral inputs.
 
 #include "aegis/model/time.hpp"
 
@@ -11,6 +12,8 @@ namespace {
 
 using namespace aegis::model;
 
+// Interesting syntax: requires-expressions verify that fallible factories reject ambiguous source
+// types at overload resolution, complementing runtime checks for supported narrow integers.
 template <typename Value>
 concept HasRevisionFactory = requires(Value value) { ConfigurationRevision::from_value(value); };
 
@@ -18,6 +21,8 @@ template <typename Value>
 concept HasClockAdvance =
     requires(DeterministicClockProvider clock, Value value) { clock.advance(value); };
 
+// Nominal time and revision domains must never become interchangeable even though their storage is
+// the same unsigned width.
 static_assert(!std::is_same_v<SourceTimestamp, ReceiveTimestamp>);
 static_assert(!std::is_same_v<ReceiveTimestamp, ProcessingTimestamp>);
 static_assert(!std::is_convertible_v<SourceTimestamp, ReceiveTimestamp>);
@@ -25,6 +30,9 @@ static_assert(!std::is_same_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<InstrumentMetadataRevision, RouteRevision>);
 static_assert(!std::is_convertible_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<SessionEpoch, SequenceNumber>);
+
+// Non-fallible constructors admit only portable unsigned inputs; fallible factories admit safe
+// signed inputs so invalid negatives become stable DomainError values instead of narrowing.
 static_assert(std::is_constructible_v<SourceTimestamp, std::uint64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, std::int64_t>);
 static_assert(!std::is_constructible_v<SourceTimestamp, char>);
@@ -40,6 +48,8 @@ static_assert(!HasClockAdvance<char>);
 static_assert(!HasClockAdvance<bool>);
 static_assert(HasClockAdvance<unsigned char>);
 
+// An injected clock changes only when the test advances it and returns distinct receive/processing
+// timestamp types over the same controlled monotonic counter.
 TEST_CASE("a deterministic clock returns explicitly advanced monotonic values", "[model][time]") {
   DeterministicClockProvider clock{7U};
 
@@ -48,6 +58,7 @@ TEST_CASE("a deterministic clock returns explicitly advanced monotonic values", 
   CHECK(clock.processing_now() == ProcessingTimestamp{12U});
 }
 
+// Advancing is atomic on both arithmetic overflow and negative signed input.
 TEST_CASE("a deterministic clock fails rather than wrapping", "[model][time]") {
   DeterministicClockProvider clock{std::numeric_limits<std::uint64_t>::max()};
 
@@ -63,6 +74,8 @@ TEST_CASE("a deterministic clock fails rather than wrapping", "[model][time]") {
         DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
 }
 
+// The named cross-type operation returns elapsed time only for a valid receive-before-processing
+// ordering, avoiding generic timestamp arithmetic.
 TEST_CASE("processing delay is the only named receive-to-processing subtraction", "[model][time]") {
   const auto delay = processing_delay(ProcessingTimestamp{19U}, ReceiveTimestamp{11U});
   REQUIRE(delay);
@@ -73,6 +86,7 @@ TEST_CASE("processing delay is the only named receive-to-processing subtraction"
   CHECK(reversed.error().code == DomainErrorCode::InvalidTimestampOrder);
 }
 
+// Protocol counters increment normally but report an error instead of wrapping at UINT64_MAX.
 TEST_CASE("session and sequence increments are checked", "[model][time]") {
   const auto next_epoch = SessionEpoch{4U}.next();
   REQUIRE(next_epoch);
@@ -83,6 +97,8 @@ TEST_CASE("session and sequence increments are checked", "[model][time]") {
   CHECK(exhausted.error().code == DomainErrorCode::ArithmeticOverflow);
 }
 
+// Installed revision zero is absent, negative entry is invalid, and the final assigned revision
+// cannot increment into wraparound.
 TEST_CASE("installed revisions reject zero and fail on increment overflow", "[model][time]") {
   const auto absent = ConfigurationRevision::from_value(0U);
   REQUIRE_FALSE(absent);

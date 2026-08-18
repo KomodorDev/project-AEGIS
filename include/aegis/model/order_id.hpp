@@ -16,6 +16,8 @@
 
 namespace aegis::model {
 
+// A restart namespace contributes 128 opaque bits to every generated ID. It is comparable and
+// printable for evidence, but only providers decide how it is sourced.
 class OrderNamespace {
 public:
   static constexpr std::size_t byte_size = 16U;
@@ -40,6 +42,8 @@ struct ProductionOrderIdProviderTestAccess;
 class DeterministicOrderIdProvider;
 class ProductionOrderIdProvider;
 
+// The canonical 24-byte identity is namespace bytes followed by an unsigned 64-bit counter. Its
+// private factory prevents callers from inventing alternate encodings.
 class OrderId {
 public:
   static constexpr std::size_t byte_size = OrderNamespace::byte_size + sizeof(std::uint64_t);
@@ -63,6 +67,8 @@ private:
   Bytes bytes_;
 };
 
+// Interesting syntax: providers are deliberately move-only so one counter stream cannot be copied
+// into two owners that could emit the same identity.
 class OrderIdProvider {
 public:
   OrderIdProvider(const OrderIdProvider&) = delete;
@@ -77,6 +83,8 @@ protected:
   OrderIdProvider() = default;
 };
 
+// Deterministic construction exposes namespace and initial counter for replay tests, then emits the
+// final uint64 counter exactly once before entering a permanent exhausted state.
 class DeterministicOrderIdProvider final : public OrderIdProvider {
 public:
   [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace) {
@@ -114,6 +122,8 @@ private:
   bool exhausted_{false};
 };
 
+// Production construction supplies a fresh operating-system namespace and delegates counter
+// encoding and exhaustion behavior to the same deterministic core.
 class ProductionOrderIdProvider final : public OrderIdProvider {
 public:
   [[nodiscard]] static Result<ProductionOrderIdProvider> create();
