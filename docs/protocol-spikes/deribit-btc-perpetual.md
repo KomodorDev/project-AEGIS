@@ -1,5 +1,8 @@
 # Deribit BTC Perpetual Public-Protocol Spike
 
+> **Purpose:** Record why M0 selects Deribit testnet and `BTC-PERPETUAL`, while separating durable
+> adapter requirements from one time-stamped metadata observation.
+
 - **Date:** 2026-08-18
 - **Time box:** Half a working day
 - **Result:** Select Deribit testnet and native instrument `BTC-PERPETUAL`

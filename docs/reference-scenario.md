@@ -1,8 +1,11 @@
 # M0 Reference Scenario
 
+> **Purpose:** Pin one small, deterministic Deribit scenario that every later milestone can build,
+> replay, and test against without silently widening trading authority.
+
 **Status:** Accepted baseline for M1–M12. Changes require an explicit roadmap or decision update.
 
-## Purpose
+## Safety boundary
 
 The reference scenario keeps the first implementation narrow enough to explain, replay, and test. It
 is a delivery fixture, not a production strategy and not authorization to trade real money.

@@ -1,10 +1,16 @@
 # ADR-0003: Isolate the Reference Scenario in a Dedicated Testnet Account
 
+> **Purpose:** Fix the account, authority, permission, and fail-closed safety boundary that every
+> Deribit milestone must obey.
+
 - **Status:** Accepted
 - **Date:** 2026-08-18
 - **Scope:** Deribit account ownership, authority, permissions, and unexpected activity
 - **Related:** [Reference scenario](../reference-scenario.md),
   [implementation roadmap](../implementation-roadmap.md)
+
+Names in backticks are exact account settings, permission scopes, or AEGIS identifiers. Words such
+as “must” and “never” state requirements rather than recommendations.
 
 ## Context
 
