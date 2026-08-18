@@ -2,28 +2,62 @@
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is an asynchronous, multi-venue trading and risk engine. It receives market data from exchange adapters, normalizes that data, distributes it to subscribed bots, and centrally manages orders, inventory and risk.
 
+## Document Status and Map
+
+The architecture documentation uses these status labels:
+
+| Status | Meaning |
+|---|---|
+| **Accepted** | A project decision that implementations must preserve until it is superseded. |
+| **Proposed** | A candidate design that has not yet been accepted. |
+| **Illustrative** | An explanatory example, not a final C++ API or wire format. |
+| **Open** | A decision that has deliberately not been made yet. |
+
+Unless stated otherwise, architectural rules in this document are **Accepted**. C++ snippets are **Illustrative**.
+
+Supporting documents provide more detail without turning conceptual diagrams into final APIs:
+
+- [Components and ownership](architecture/components.md)
+- [Runtime flows](architecture/runtime-flows.md)
+- [Provisional repository layout](architecture/repository-layout.md)
+- [ADR-0001: Serialized data-plane execution and state ownership](decisions/0001-serialized-data-plane-execution.md)
+
 ## System Architecture
 
 ```mermaid
 flowchart TD
-    E["Binance and Deribit"] --> A["Asynchronous venue adapters"]
-    A --> M["Normalized market-data core"]
-    M --> B["Bot subscriptions"]
+    subgraph D["Latency-sensitive data plane"]
+        A["Shared venue adapters"] --> M["Normalized market-data core"]
+        M --> B["Bot subscriptions and strategy callbacks"]
+        B -->|"submit OrderRequest (inline)"| Q["Execution-route authorization"]
+        Q --> G["Inline pre-trade risk guard"]
+        S["Owner-installed risk snapshot"] --> G
+        G -->|"Approved reservation"| O["Order management system"]
+        O -->|"Normalized order"| A
+        A -->|"Exchange-native order"| V["Venue/account session"]
+        O -->|"Order and reservation transitions"| L["Owner-local order, reservation and fill state"]
+        L --> I["Immediate bot, desk and firm inventory"]
+    end
 
-    B --> O["Order intents"]
-    O --> R["Central risk gate"]
-    R --> X["Order management system"]
-    X --> A
+    subgraph C["Control plane"]
+        R["Risk coordinator"]
+        P["Reporting projections"] --> U["Risk-monitoring UI"]
+    end
 
-    A --> L["Order and fill ledger"]
-    L --> I["Bot, desk and firm inventory"]
-    I --> R
-    I --> U["Risk-monitoring UI"]
+    E["Binance and Deribit"] -->|"Native market data"| A
+    V -->|"Asynchronous socket write"| E
+    E -->|"Acknowledgements, rejections and fills"| V
+    V -->|"Native execution event"| A
+    A -->|"Normalized execution event"| O
+    L -. "Order and reservation observations" .-> R
+    I -. "Position and inventory observations" .-> R
+    I -. "Reporting snapshots" .-> P
+    R -. "Publish complete versioned budget/mode snapshot" .-> S
 ```
 
 Exchange adapters are responsible only for communication with exchanges and translation between exchange-native messages and AEGIS data types.
 
-Bots never communicate with exchanges directly. Every order must pass through the central risk gate and order management system.
+Bots never communicate with exchanges directly. Every order must pass inline through route authorization, the pre-trade risk guard and then the order management system.
 
 ## Organizational Hierarchy
 
@@ -111,8 +145,6 @@ A bot is a running instance of a strategy with concrete configuration and organi
 ```cpp
 struct Bot {
     BotId id;
-    DeskId desk_id;
-
     BotConfiguration configuration;
     std::unique_ptr<Strategy> strategy;
 };
@@ -204,6 +236,8 @@ The control plane handles:
 
 These operations may run asynchronously because they are not part of the immediate order-submission path.
 
+The data plane owns the immediate confirmed positions, reservations and order-derived exposure required by the next pre-trade check. It exports immutable facts and snapshots to the control plane for aggregation, reporting and policy calculation; the control plane does not reach into mutable data-plane state.
+
 ### Data plane
 
 The data plane handles:
@@ -212,29 +246,39 @@ The data plane handles:
 - Strategy callbacks
 - Pre-trade risk checks
 - Exposure reservation
+- Order-state reconciliation
+- Immediate position and inventory updates
 - Order encoding
 - Exchange transmission
 
+For the first implementation, one dedicated thread and serialized executor owns all mutable data-plane state and runs every data-plane handler to completion. This is an accepted v1 ownership decision, not a claim that the engine will always remain single-threaded. See [ADR-0001](decisions/0001-serialized-data-plane-execution.md).
+
 ```mermaid
 flowchart LR
-    B["Bot"] --> G["Inline pre-trade risk guard"]
-    G --> V["Venue gateway"]
+    B["Strategy callback"] -->|"submit OrderRequest"| A["Route authorization"]
+    A --> G["Inline check and reserve"]
+    G --> O["Order management system"]
+    O --> V["Venue adapter and account session<br/>encode and initiate async write"]
     V --> E["Exchange"]
 
-    C["Risk coordinator"] -. "Budgets and modes" .-> G
-    E --> F["Acknowledgements and fills"]
-    F --> L["Inventory ledger"]
-    L --> C
+    E -. "Async acknowledgement, rejection or fill" .-> V
+    V -. "Normalized execution event" .-> O
+    O --> L["Reservation and inventory update"]
+    L -. "Immutable facts" .-> C["Risk coordinator"]
+    C -. "Publish complete versioned budget/mode snapshot" .-> S["Executor snapshot adoption"]
+    S --> G
 ```
 
 The critical order path is:
 
 ```text
-Strategy decision
+Strategy callback
 → submit OrderRequest
-→ check and reserve local risk capacity
+→ authorize the configured execution route
+→ check and reserve local risk capacity inline
+→ register the order with the order management system
 → encode exchange-native order
-→ asynchronous socket write
+→ initiate asynchronous socket write
 ```
 
 It must not require:
@@ -246,6 +290,8 @@ It must not require:
 - A UI update
 - A network call to a separate risk service
 - A thread hop merely to approve the order
+
+An asynchronous stream may eventually require a bounded, session-local write sequencer when another write is already in progress. That mechanism would sit after OMS admission, would not be a general-purpose event bus, and would not move the risk decision to another execution context. Its capacity and admission-failure policy remain **Open**.
 
 The bot submits a small, fixed-size `OrderRequest`:
 
@@ -260,16 +306,23 @@ struct OrderRequest {
 };
 ```
 
-Submission performs an immediate risk check:
+Submission performs route authorization followed by an immediate risk check. The route context and function names below are illustrative; the final route-selection API remains open:
 
 ```cpp
 SubmitResult Engine::submit_order(
     BotId bot_id,
     const OrderRequest& request
 ) {
+    auto route = execution_routes_.authorize(bot_id, request);
+
+    if (!route) {
+        return SubmitResult::rejected(route.error());
+    }
+
     auto approval = pre_trade_risk_.check_and_reserve(
         bot_id,
-        request
+        request,
+        route.value()
     );
 
     if (!approval) {
@@ -277,15 +330,17 @@ SubmitResult Engine::submit_order(
     }
 
     return order_manager_.submit(
+        bot_id,
         request,
+        route.value(),
         approval.reservation()
     );
 }
 ```
 
-The risk check and exposure reservation form one atomic operation. This prevents two concurrent requests from consuming the same available capacity.
+The risk check and exposure reservation form one atomic operation. The v1 data-plane executor runs this operation to completion, so another submission cannot interleave and consume the same available capacity.
 
-Order acknowledgements, rejections and fills are processed asynchronously after submission.
+Order acknowledgements, rejections and fills are processed asynchronously on later turns of the same executor. They reconcile OMS state before reservations and immediate inventory are updated and before the originating bot receives its order event. The detailed OMS states and reservation transitions remain **Open**.
 
 ## Hierarchical Risk Budgets
 
@@ -323,7 +378,7 @@ enum class RiskMode {
 };
 ```
 
-The latest mode and risk budget are cached directly in the pre-trade risk guard, making enforcement fast.
+The control plane publishes the latest modes and budgets as complete, immutable snapshots with monotonically increasing revisions. The data-plane owner installs a snapshot between callbacks and ignores stale revisions, so an inline risk decision observes one coherent policy version without calling the coordinator. Detailed hierarchy precedence and `ReduceOnly` behavior remain **Open**.
 
 ## Relationship to Production Trading Systems
 
