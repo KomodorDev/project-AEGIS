@@ -14,6 +14,7 @@ add_executable(
   unit/market_data/subscription_test.cpp
   # These primitive tests pin stable Result/error contracts and nominal identifier grammar.
   unit/model/domain_error_result_test.cpp
+  # Fixed-point tests pin canonical storage, explicit rounding, and overflow behavior.
   unit/model/fixed_point_test.cpp
   # Identifier tests enforce the nominal grammar and immutable validated-value boundary.
   unit/model/identifier_test.cpp

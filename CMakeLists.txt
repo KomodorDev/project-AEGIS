@@ -35,6 +35,7 @@ add_library(
   src/aegis/configuration/startup_configuration.cpp
   src/aegis/execution/execution_route.cpp
   src/aegis/market_data/subscription.cpp
+  # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.
   src/aegis/model/fixed_point.cpp
   # Identifier grammar is compiled; its Result and error primitives remain header-only.
   src/aegis/model/identifier.cpp

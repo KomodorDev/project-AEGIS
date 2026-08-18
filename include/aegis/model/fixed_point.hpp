@@ -17,6 +17,7 @@ namespace aegis::model {
 
 class InstrumentMetadata;
 
+// Precision-changing operations never select a rounding policy implicitly.
 enum class RoundingMode : std::uint8_t {
   Exact = 0,
   TowardZero = 1,
@@ -26,11 +27,14 @@ enum class RoundingMode : std::uint8_t {
   NearestTiesToEven = 5,
 };
 
-// This representation is the arithmetic kernel. Decision-path APIs use the nominal wrappers below.
+// Store one canonical signed coefficient and decimal scale. Decision-path APIs use the nominal
+// wrappers below rather than exposing this arithmetic kernel as an interchangeable business value.
 class FixedPoint {
 public:
   static constexpr std::uint8_t maximum_scale = 18U;
 
+  // Construction accepts already-scaled integers or strict ordinary decimal text; both paths
+  // preserve exactness and canonicalize redundant fractional zeros.
   template <detail::CheckedIntegerInput Coefficient, detail::CheckedIntegerInput Scale>
   [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient, Scale scale) {
     if (!std::in_range<std::int64_t>(coefficient)) {
@@ -54,6 +58,8 @@ public:
   [[nodiscard]] constexpr std::uint8_t scale() const noexcept { return scale_; }
   [[nodiscard]] std::string to_string() const;
 
+  // Addition and subtraction stay exact. Operations that may discard precision require the caller
+  // to provide a target scale and explicit rounding policy.
   [[nodiscard]] Result<FixedPoint> checked_add(FixedPoint other) const;
   [[nodiscard]] Result<FixedPoint> checked_subtract(FixedPoint other) const;
   template <detail::CheckedIntegerInput Scale>
@@ -93,9 +99,14 @@ public:
   template <typename Scale>
     requires std::floating_point<std::remove_cvref_t<Scale>>
   [[nodiscard]] Result<FixedPoint> divide(FixedPoint, Scale, RoundingMode) const = delete;
+
+  // Increment checks and quantization operate on exact decimal multiples, including cross-scale
+  // values, without converting through binary floating point.
   [[nodiscard]] Result<bool> is_multiple_of(FixedPoint increment) const;
   [[nodiscard]] Result<FixedPoint> quantize(FixedPoint increment, RoundingMode rounding) const;
 
+  // Canonical equality is structural; ordering remains exact even when operands use different
+  // scales.
   friend bool operator==(FixedPoint lhs, FixedPoint rhs) noexcept;
   friend std::strong_ordering operator<=>(FixedPoint lhs, FixedPoint rhs) noexcept;
 
@@ -129,8 +140,12 @@ struct NotionalTag {
   static constexpr std::string_view field = "notional";
 };
 
+// Interesting syntax: the tag parameter creates distinct Price, Quantity, and Notional types while
+// sharing one implementation, so unrelated financial dimensions cannot convert implicitly.
 template <typename Tag> class DecimalValue {
 public:
+  // Factories delegate validation to FixedPoint and replace its generic error field with the
+  // nominal domain that the caller supplied.
   template <CheckedIntegerInput Coefficient, CheckedIntegerInput Scale>
   [[nodiscard]] static Result<DecimalValue> from_scaled(Coefficient coefficient, Scale scale) {
     auto value = FixedPoint::from_scaled(coefficient, scale);
@@ -161,6 +176,7 @@ public:
   [[nodiscard]] constexpr std::uint8_t scale() const noexcept { return value_.scale(); }
   [[nodiscard]] std::string to_string() const { return value_.to_string(); }
 
+  // Arithmetic preserves the nominal wrapper and consistently remaps kernel failures to its tag.
   [[nodiscard]] Result<DecimalValue> checked_add(DecimalValue other) const {
     return wrap(value_.checked_add(other.value_));
   }
@@ -192,6 +208,8 @@ public:
     return wrap(value_.quantize(increment.value_, rounding));
   }
 
+  // Interesting syntax: hidden friends are found by argument-dependent lookup only for matching
+  // DecimalValue instantiations, keeping cross-domain comparisons out of overload resolution.
   friend bool operator==(DecimalValue lhs, DecimalValue rhs) noexcept {
     return lhs.value_ == rhs.value_;
   }
@@ -202,6 +220,7 @@ public:
 private:
   explicit constexpr DecimalValue(FixedPoint value) noexcept : value_{value} {}
 
+  // Preserve the kernel error code while making its field identify the public nominal domain.
   [[nodiscard]] static Result<DecimalValue> wrap(Result<FixedPoint> result) {
     if (!result) {
       auto error = result.error();
@@ -215,6 +234,8 @@ private:
 
   FixedPoint value_;
 
+  // Interesting syntax: narrowly scoped friendship lets metadata perform its declared unit
+  // conversion without making the underlying arithmetic value public to ordinary callers.
   friend class ::aegis::model::InstrumentMetadata;
 };
 

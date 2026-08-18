@@ -12,6 +12,7 @@
 namespace aegis::model {
 namespace {
 
+// Powers needed by scale reduction and divisibility checks are bounded by maximum_scale.
 constexpr std::array<std::uint64_t, 19U> powers_of_ten{
     1ULL,
     10ULL,
@@ -34,10 +35,14 @@ constexpr std::array<std::uint64_t, 19U> powers_of_ten{
     1'000'000'000'000'000'000ULL,
 };
 
+// Carry signed coefficients as a separate sign and magnitude. The asymmetric limits preserve the
+// full INT64_MIN range without ever negating that value in signed arithmetic.
 constexpr std::uint64_t negative_limit = std::uint64_t{1U} << 63U;
 constexpr std::uint64_t positive_limit =
     static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
 
+// Convert through -(value + 1) before restoring the final unit so INT64_MIN never undergoes the
+// undefined signed negation that a direct absolute-value operation would require.
 [[nodiscard]] constexpr std::uint64_t magnitude(std::int64_t value) noexcept {
   if (value >= 0) {
     return static_cast<std::uint64_t>(value);
@@ -45,6 +50,8 @@ constexpr std::uint64_t positive_limit =
   return static_cast<std::uint64_t>(-(value + 1)) + 1U;
 }
 
+// Restore a signed coefficient only after checking the asymmetric positive/negative bounds; the
+// negative limit is returned through its dedicated representation-safe branch.
 [[nodiscard]] Result<std::int64_t> signed_coefficient(std::uint64_t value, bool negative,
                                                       std::string field) {
   const auto limit = negative ? negative_limit : positive_limit;
@@ -61,11 +68,14 @@ constexpr std::uint64_t positive_limit =
   return Result<std::int64_t>::success(-static_cast<std::int64_t>(value));
 }
 
+// DecimalDigits is a least-significant-digit-first scratch value. Its fixed storage lets alignment,
+// products, and long division finish before a result is checked back into a signed coefficient.
 struct DecimalDigits {
   std::array<std::uint8_t, 64U> values{};
   std::size_t size{1U};
 };
 
+// Build and normalize scratch magnitudes without introducing leading zero digits.
 [[nodiscard]] DecimalDigits digits_from(std::uint64_t value, std::size_t decimal_shift = 0U) {
   DecimalDigits result;
   if (value == 0U) {
@@ -87,6 +97,7 @@ void normalize(DecimalDigits& value) noexcept {
   }
 }
 
+// Compare and combine unsigned magnitudes after callers have aligned their decimal scales.
 [[nodiscard]] int compare_magnitude(const DecimalDigits& lhs, const DecimalDigits& rhs) noexcept {
   if (lhs.size != rhs.size) {
     return lhs.size < rhs.size ? -1 : 1;
@@ -119,7 +130,7 @@ void normalize(DecimalDigits& value) noexcept {
   return result;
 }
 
-// The caller establishes lhs >= rhs.
+// The caller establishes lhs >= rhs, so borrow propagation cannot produce a negative magnitude.
 [[nodiscard]] DecimalDigits subtract_magnitudes(const DecimalDigits& lhs,
                                                 const DecimalDigits& rhs) noexcept {
   DecimalDigits result;
@@ -140,6 +151,8 @@ void normalize(DecimalDigits& value) noexcept {
   return result;
 }
 
+// Removing the least-significant decimal zero reduces coefficient and scale together, preserving
+// the represented value while moving it toward canonical form.
 void remove_decimal_zero(DecimalDigits& value) noexcept {
   for (std::size_t index = 1U; index < value.size; ++index) {
     value.values[index - 1U] = value.values[index];
@@ -173,6 +186,8 @@ void increment_magnitude(DecimalDigits& value) noexcept {
   ++value.values[index];
 }
 
+// Convert scratch digits only after proving every multiply-and-add stays within the supplied
+// sign-specific coefficient limit.
 [[nodiscard]] Result<std::uint64_t> digits_to_magnitude(const DecimalDigits& value,
                                                         std::uint64_t limit) {
   std::uint64_t result = 0U;
@@ -187,6 +202,8 @@ void increment_magnitude(DecimalDigits& value) noexcept {
   return Result<std::uint64_t>::success(result);
 }
 
+// Form the full schoolbook product in scratch storage so intermediate precision never depends on a
+// compiler-specific extended integer type.
 [[nodiscard]] DecimalDigits multiply_magnitudes(std::uint64_t lhs, std::uint64_t rhs) noexcept {
   if (lhs == 0U || rhs == 0U) {
     return DecimalDigits{};
@@ -219,6 +236,8 @@ void increment_magnitude(DecimalDigits& value) noexcept {
   return result;
 }
 
+// Classify discarded information once, then apply the same exact/directional/ties-to-even policy to
+// rescaling, multiplication, and division.
 enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
 
 [[nodiscard]] Result<bool> rounding_increment(bool negative, FractionRelation fraction,
@@ -249,6 +268,8 @@ enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
       DomainError::at_field(DomainErrorCode::InvalidValue, "rounding_mode"));
 }
 
+// Inspect the highest discarded decimal digit plus a sticky bit for all lower digits, producing the
+// exact zero/below-half/tie/above-half classification shared by every rounding policy.
 [[nodiscard]] FractionRelation decimal_fraction(const DecimalDigits& value,
                                                 std::size_t discarded_digits) noexcept {
   if (discarded_digits == 0U) {
@@ -274,6 +295,8 @@ enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
   return FractionRelation::Half;
 }
 
+// Apply a previously classified fraction without letting a rounding increment cross the signed
+// coefficient boundary.
 [[nodiscard]] Result<std::uint64_t> round_magnitude(std::uint64_t truncated, std::uint64_t limit,
                                                     bool negative, FractionRelation fraction,
                                                     RoundingMode rounding) {
@@ -293,6 +316,7 @@ enum class FractionRelation { Zero, LessThanHalf, Half, GreaterThanHalf };
 
 [[nodiscard]] FractionRelation binary_fraction(std::uint64_t remainder,
                                                std::uint64_t divisor) noexcept {
+  // Callers maintain remainder < divisor, so doubling is sufficient to classify the exact fraction.
   if (remainder == 0U) {
     return FractionRelation::Zero;
   }
@@ -349,6 +373,7 @@ struct DecimalDivisionStep {
 
 } // namespace
 
+// Canonical values use scale zero for zero and contain no removable trailing decimal zeros.
 FixedPoint FixedPoint::canonical(std::int64_t coefficient, std::uint8_t scale) noexcept {
   if (coefficient == 0) {
     return FixedPoint{0, 0U};
@@ -368,6 +393,7 @@ Result<FixedPoint> FixedPoint::from_validated_scaled(std::int64_t coefficient,
   return Result<FixedPoint>::success(canonical(coefficient, static_cast<std::uint8_t>(scale)));
 }
 
+// Parse in phases so syntax, scale, and coefficient failures remain distinct and deterministic.
 Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
   if (text.empty()) {
     return Result<FixedPoint>::failure(
@@ -385,6 +411,7 @@ Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
         DomainError::at_field(DomainErrorCode::InvalidDecimal, "fixed_point"));
   }
 
+  // Accept only an unsigned run of ordinary ASCII digits before the optional decimal point.
   const auto integer_start = position;
   std::size_t integer_digits = 0U;
   while (position < text.size() && text[position] >= '0' && text[position] <= '9') {
@@ -399,6 +426,7 @@ Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
   const auto integer_end = position;
   auto fraction_start = position;
   auto fraction_end = position;
+  // Bound textual precision while scanning; exponent notation and an empty fraction remain invalid.
   if (position < text.size() && text[position] == '.') {
     ++position;
     fraction_start = position;
@@ -420,12 +448,15 @@ Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
         DomainError::at_field(DomainErrorCode::InvalidDecimal, "fixed_point"));
   }
 
+  // Remove redundant fractional zeros before accumulation so only canonical significant digits
+  // consume the signed coefficient range.
   while (fraction_end > fraction_start && text[fraction_end - 1U] == '0') {
     --fraction_end;
   }
   const auto scale = static_cast<std::uint8_t>(fraction_end - fraction_start);
   const auto limit = negative ? negative_limit : positive_limit;
   std::uint64_t parsed = 0U;
+  // Fold both digit runs under the sign-specific limit before restoring the signed coefficient.
   const auto append_digits = [&](std::size_t begin, std::size_t end) -> bool {
     for (auto index = begin; index < end; ++index) {
       const auto digit = static_cast<std::uint64_t>(text[index] - '0');
@@ -448,6 +479,7 @@ Result<FixedPoint> FixedPoint::parse_ascii(std::string_view text) {
   return Result<FixedPoint>::success(canonical(coefficient.value(), scale));
 }
 
+// Render the canonical coefficient directly, inserting only the zeros required by its stored scale.
 std::string FixedPoint::to_string() const {
   const auto absolute = magnitude(coefficient_);
   auto digits = std::to_string(absolute);
@@ -465,6 +497,7 @@ std::string FixedPoint::to_string() const {
 }
 
 Result<FixedPoint> FixedPoint::checked_add(FixedPoint other) const {
+  // Align decimal points in scratch storage instead of multiplying either signed coefficient.
   const auto common_scale = std::max(scale_, other.scale_);
   const auto lhs =
       digits_from(magnitude(coefficient_), static_cast<std::size_t>(common_scale - scale_));
@@ -473,6 +506,7 @@ Result<FixedPoint> FixedPoint::checked_add(FixedPoint other) const {
   const bool lhs_negative = coefficient_ < 0;
   const bool rhs_negative = other.coefficient_ < 0;
 
+  // Equal signs add magnitudes; differing signs subtract the smaller magnitude from the larger.
   DecimalDigits result;
   bool result_negative = false;
   if (lhs_negative == rhs_negative) {
@@ -489,6 +523,7 @@ Result<FixedPoint> FixedPoint::checked_add(FixedPoint other) const {
     }
   }
 
+  // Canonicalize before converting back so removable fractional zeros do not cause false overflow.
   auto result_scale = common_scale;
   while (result_scale > 0U && result.values[0U] == 0U) {
     remove_decimal_zero(result);
@@ -512,6 +547,7 @@ Result<FixedPoint> FixedPoint::checked_add(FixedPoint other) const {
 }
 
 Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
+  // Align decimal points and invert only the rhs sign; never negate a possibly minimal coefficient.
   const auto common_scale = std::max(scale_, other.scale_);
   const auto lhs =
       digits_from(magnitude(coefficient_), static_cast<std::size_t>(common_scale - scale_));
@@ -520,6 +556,7 @@ Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
   const bool lhs_negative = coefficient_ < 0;
   const bool rhs_negative = !(other.coefficient_ < 0);
 
+  // Reuse sign-magnitude addition after the logical sign inversion.
   DecimalDigits result;
   bool result_negative = false;
   if (lhs_negative == rhs_negative) {
@@ -536,6 +573,7 @@ Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
     }
   }
 
+  // Remove canonical zeros before enforcing the asymmetric signed coefficient boundary.
   auto result_scale = common_scale;
   while (result_scale > 0U && result.values[0U] == 0U) {
     remove_decimal_zero(result);
@@ -559,6 +597,7 @@ Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
 
 Result<FixedPoint> FixedPoint::rescale_validated(std::uint64_t target_scale,
                                                  RoundingMode rounding) const {
+  // Validate policy and scale before narrowing the public input to the stored scale type.
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
@@ -567,9 +606,11 @@ Result<FixedPoint> FixedPoint::rescale_validated(std::uint64_t target_scale,
   }
   const auto validated_scale = static_cast<std::uint8_t>(target_scale);
   if (validated_scale >= scale_) {
+    // Canonical storage never pads a value with insignificant zeros merely to report a wider scale.
     return Result<FixedPoint>::success(*this);
   }
 
+  // Reducing scale divides once, classifies the exact remainder, and rounds under the signed limit.
   const auto divisor = powers_of_ten[static_cast<std::size_t>(scale_ - validated_scale)];
   const auto absolute = magnitude(coefficient_);
   const auto truncated = absolute / divisor;
@@ -590,6 +631,7 @@ Result<FixedPoint> FixedPoint::rescale_validated(std::uint64_t target_scale,
 
 Result<FixedPoint> FixedPoint::multiply_validated(FixedPoint other, std::uint64_t target_scale,
                                                   RoundingMode rounding) const {
+  // Establish the output policy before constructing the potentially wider scratch product.
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
@@ -603,6 +645,8 @@ Result<FixedPoint> FixedPoint::multiply_validated(FixedPoint other, std::uint64_
     return Result<FixedPoint>::success(canonical(0, 0U));
   }
 
+  // Compare the natural product scale with the requested precision and retain only significant
+  // digits; canonical output does not materialize insignificant target-scale zeros.
   const auto source_scale = static_cast<int>(scale_) + static_cast<int>(other.scale_);
   const auto shift = static_cast<int>(validated_scale) - source_scale;
   auto result_scale = validated_scale;
@@ -625,6 +669,7 @@ Result<FixedPoint> FixedPoint::multiply_validated(FixedPoint other, std::uint64_
     }
   }
 
+  // Round and canonicalize in scratch storage before attempting the bounded coefficient conversion.
   auto increment =
       rounding_increment(negative, fraction, (retained.values[0U] % 2U) != 0U, rounding);
   if (!increment) {
@@ -653,6 +698,7 @@ Result<FixedPoint> FixedPoint::multiply_validated(FixedPoint other, std::uint64_
 
 Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_t target_scale,
                                                 RoundingMode rounding) const {
+  // Reject invalid policy, scale, and zero divisor before beginning quotient generation.
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
@@ -674,12 +720,15 @@ Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_
   const auto denominator = magnitude(divisor.coefficient_);
   auto truncated = numerator / denominator;
   auto remainder = numerator % denominator;
+  // The exponent states how many quotient digits must be generated (positive) or discarded
+  // (negative) after accounting for both operand scales and requested result precision.
   const auto exponent = static_cast<int>(validated_scale) + static_cast<int>(divisor.scale_) -
                         static_cast<int>(scale_);
   auto result_scale = validated_scale;
   FractionRelation fraction = FractionRelation::Zero;
 
   if (exponent >= 0) {
+    // Extend the quotient by ordinary long division, retaining the final remainder for rounding.
     auto retained = digits_from(truncated);
     for (int index = 0; index < exponent; ++index) {
       const auto step = next_decimal_digit(remainder, denominator);
@@ -707,6 +756,8 @@ Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_
     truncated = converted.value();
     fraction = FractionRelation::Zero;
   } else {
+    // Discard low quotient digits. Any original division remainder is sticky because it represents
+    // additional nonzero precision below every discarded integer digit.
     const auto discarded = static_cast<std::size_t>(-exponent);
     std::uint8_t leading = 0U;
     bool sticky = remainder != 0U;
@@ -730,6 +781,7 @@ Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_
     }
   }
 
+  // Enforce the signed boundary before and after the possible rounding increment.
   if (truncated > limit) {
     return Result<FixedPoint>::failure(
         DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
@@ -746,6 +798,7 @@ Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_
 }
 
 Result<bool> FixedPoint::is_multiple_of(FixedPoint increment) const {
+  // Zero is never a usable increment, while every zero value is aligned to a nonzero increment.
   if (increment.coefficient_ == 0) {
     return Result<bool>::failure(
         DomainError::at_field(DomainErrorCode::DivisionByZero, "fixed_point"));
@@ -757,6 +810,8 @@ Result<bool> FixedPoint::is_multiple_of(FixedPoint increment) const {
   }
 
   if (scale_ >= increment.scale_) {
+    // A finer-scaled value must first contain the increment magnitude, then enough decimal zeros to
+    // account for the remaining scale difference.
     if ((value % unit) != 0U) {
       return Result<bool>::success(false);
     }
@@ -765,6 +820,8 @@ Result<bool> FixedPoint::is_multiple_of(FixedPoint increment) const {
     return Result<bool>::success((quotient % factor) == 0U);
   }
 
+  // A coarser-scaled value contributes powers of ten. Cancel their 2/5 factors from the increment
+  // instead of multiplying the value and risking overflow.
   auto reduced_unit = unit;
   const auto scale_difference = static_cast<std::size_t>(increment.scale_ - scale_);
   for (std::size_t index = 0U; index < scale_difference; ++index) {
@@ -779,6 +836,7 @@ Result<bool> FixedPoint::is_multiple_of(FixedPoint increment) const {
 }
 
 Result<FixedPoint> FixedPoint::quantize(FixedPoint increment, RoundingMode rounding) const {
+  // Quantization requires a positive unit and returns already-aligned values unchanged.
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
@@ -794,6 +852,7 @@ Result<FixedPoint> FixedPoint::quantize(FixedPoint increment, RoundingMode round
     return Result<FixedPoint>::success(*this);
   }
 
+  // Round to an integral count of increments, then reconstruct the decimal value exactly.
   auto units = divide(increment, 0U, rounding);
   if (!units) {
     return Result<FixedPoint>::failure(units.error());
@@ -806,6 +865,7 @@ bool operator==(FixedPoint lhs, FixedPoint rhs) noexcept {
 }
 
 std::strong_ordering operator<=>(FixedPoint lhs, FixedPoint rhs) noexcept {
+  // Resolve equality and sign before aligning magnitudes in scratch storage for exact comparison.
   if (lhs == rhs) {
     return std::strong_ordering::equal;
   }

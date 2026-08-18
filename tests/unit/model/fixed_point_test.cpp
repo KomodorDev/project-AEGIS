@@ -12,6 +12,8 @@ namespace {
 
 using namespace aegis::model;
 
+// Interesting syntax: this requires-expression proves that nominal values expose no generic product
+// operator, without adding an intentionally ill-formed expression to the test translation unit.
 template <typename Left, typename Right>
 concept HasProductOperator = requires(Left left, Right right) { left* right; };
 
@@ -33,6 +35,8 @@ concept HasScaledDivide =
 
 enum LegacyScale { LegacyScaleZero = 0 };
 
+// Price, Quantity, and Notional are compile-time domains rather than aliases of one interchangeable
+// decimal type.
 static_assert(!std::is_same_v<Price, Quantity>);
 static_assert(!std::is_same_v<Quantity, Notional>);
 static_assert(!std::is_convertible_v<Price, Quantity>);
@@ -66,12 +70,14 @@ static_assert(!HasScaledMultiply<char>);
 static_assert(!HasScaledDivide<wchar_t>);
 static_assert(!HasProductOperator<Price, Quantity>);
 
+// Parse every fixture literal through the production path so malformed test data fails immediately.
 [[nodiscard]] FixedPoint decimal(std::string_view text) {
   auto result = FixedPoint::parse_ascii(text);
   REQUIRE(result);
   return result.value();
 }
 
+// Canonical storage removes representational differences without changing exact numeric ordering.
 TEST_CASE("decimal parsing is strict and storage is canonical", "[model][fixed-point]") {
   const auto value = decimal("0012.3400");
   CHECK(value.coefficient() == 1234);
@@ -87,6 +93,8 @@ TEST_CASE("decimal parsing is strict and storage is canonical", "[model][fixed-p
   CHECK(decimal("-0.10") < decimal("0"));
 }
 
+// The parser accepts only ordinary decimal notation and distinguishes syntax, scale, and range
+// errors.
 TEST_CASE("decimal parsing rejects non-ordinary notation and representation overflow",
           "[model][fixed-point]") {
   for (const auto text : {"", "-", ".1", "1.", "+1", "1e2", "NaN", " 1", "1,2"}) {
@@ -150,6 +158,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   CHECK(narrow_integers.value() == decimal("1.2"));
 }
 
+// Cross-scale addition and subtraction remain exact through both signed overflow boundaries.
 TEST_CASE("addition and subtraction preserve exact cross-scale values and fail on overflow",
           "[model][fixed-point]") {
   const auto sum = decimal("1.2").checked_add(decimal("0.03"));
@@ -169,6 +178,7 @@ TEST_CASE("addition and subtraction preserve exact cross-scale values and fail o
   CHECK(subtract_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
 }
 
+// Every directional policy is explicit, including signed floor/ceiling and ties-to-even behavior.
 TEST_CASE("rescaling requires an explicit policy and handles every signed direction",
           "[model][fixed-point]") {
   const auto exact = decimal("1.25").rescale(1U, RoundingMode::Exact);
@@ -190,6 +200,8 @@ TEST_CASE("rescaling requires an explicit policy and handles every signed direct
   CHECK(decimal("-1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("-1.4"));
 }
 
+// Target-scaled products and quotients preserve exact results and report precision or range
+// failures.
 TEST_CASE("multiplication and division are target-scaled and checked", "[model][fixed-point]") {
   const auto product = decimal("0.2").multiply(decimal("0.5"), 1U, RoundingMode::Exact);
   REQUIRE(product);
@@ -241,6 +253,7 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   CHECK(division_by_zero.error().code == DomainErrorCode::DivisionByZero);
 }
 
+// Alignment and quantization work across unequal scales without introducing binary-float error.
 TEST_CASE("multiple tests and quantization are exact across different scales",
           "[model][fixed-point]") {
   CHECK(decimal("1.2").is_multiple_of(decimal("0.3")).value());
@@ -256,6 +269,7 @@ TEST_CASE("multiple tests and quantization are exact across different scales",
         decimal("-1.2"));
 }
 
+// Unknown rounding enumerators fail closed across every precision-changing operation.
 TEST_CASE("unassigned rounding modes fail instead of selecting an implicit policy",
           "[model][fixed-point]") {
   const auto invalid = static_cast<RoundingMode>(255U);
