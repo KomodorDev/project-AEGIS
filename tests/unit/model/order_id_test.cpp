@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 namespace aegis::model::detail {
@@ -37,6 +38,16 @@ using namespace aegis::model;
 
 static_assert(OrderNamespace::byte_size == 16U);
 static_assert(OrderId::byte_size == 24U);
+
+template <typename Counter>
+concept HasOrderProviderFactory = requires(OrderNamespace order_namespace, Counter counter) {
+  DeterministicOrderIdProvider::create(order_namespace, counter);
+};
+
+static_assert(HasOrderProviderFactory<std::uint64_t>);
+static_assert(HasOrderProviderFactory<std::int64_t>);
+static_assert(!HasOrderProviderFactory<double>);
+static_assert(!HasOrderProviderFactory<bool>);
 
 TEST_CASE("deterministic order IDs use canonical namespace and big-endian counter bytes",
           "[model][order-id]") {
@@ -89,6 +100,10 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   const auto invalid = DeterministicOrderIdProvider::create(sequential_namespace(), 0U);
   REQUIRE_FALSE(invalid);
   CHECK(invalid.error().code == DomainErrorCode::InvalidValue);
+
+  const auto negative = DeterministicOrderIdProvider::create(sequential_namespace(), -1);
+  REQUIRE_FALSE(negative);
+  CHECK(negative.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
 
   auto created = DeterministicOrderIdProvider::create(sequential_namespace(),
                                                       std::numeric_limits<std::uint64_t>::max());

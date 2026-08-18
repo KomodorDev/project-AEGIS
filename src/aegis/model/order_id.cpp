@@ -75,8 +75,8 @@ OrderId OrderId::from_parts(const OrderNamespace& order_namespace, std::uint64_t
 std::string OrderId::to_hex() const { return bytes_to_hex(bytes_.data(), bytes_.size()); }
 
 Result<DeterministicOrderIdProvider>
-DeterministicOrderIdProvider::create(OrderNamespace order_namespace,
-                                     std::uint64_t initial_counter) {
+DeterministicOrderIdProvider::create_validated(OrderNamespace order_namespace,
+                                               std::uint64_t initial_counter) {
   if (initial_counter == 0U) {
     return Result<DeterministicOrderIdProvider>::failure(
         DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));

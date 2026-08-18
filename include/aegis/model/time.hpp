@@ -6,10 +6,13 @@
 
 #include <chrono>
 #include <compare>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace aegis::model {
 namespace detail {
@@ -20,7 +23,11 @@ struct ProcessingTimestampTag;
 
 template <typename Tag> class Timestamp {
 public:
-  explicit constexpr Timestamp(std::uint64_t nanoseconds) noexcept : nanoseconds_{nanoseconds} {}
+  template <std::unsigned_integral Value>
+    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
+             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  explicit constexpr Timestamp(Value nanoseconds) noexcept
+      : nanoseconds_{static_cast<std::uint64_t>(nanoseconds)} {}
 
   [[nodiscard]] constexpr std::uint64_t nanoseconds() const noexcept { return nanoseconds_; }
 
@@ -40,7 +47,11 @@ struct SequenceNumberTag {
 
 template <typename Tag> class CheckedUnsigned {
 public:
-  explicit constexpr CheckedUnsigned(std::uint64_t value) noexcept : value_{value} {}
+  template <std::unsigned_integral Value>
+    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
+             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  explicit constexpr CheckedUnsigned(Value value) noexcept
+      : value_{static_cast<std::uint64_t>(value)} {}
 
   [[nodiscard]] constexpr std::uint64_t value() const noexcept { return value_; }
 
@@ -75,12 +86,14 @@ AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 
 template <typename Tag> class Revision {
 public:
-  [[nodiscard]] static Result<Revision> from_value(std::uint64_t value) {
-    if (value == 0U) {
+  template <std::integral Value>
+    requires(!std::same_as<std::remove_cvref_t<Value>, bool>)
+  [[nodiscard]] static Result<Revision> from_value(Value value) {
+    if (!std::in_range<std::uint64_t>(value) || value == 0) {
       return Result<Revision>::failure(
           DomainError::at_field(DomainErrorCode::InvalidRevision, std::string{Tag::field}));
     }
-    return Result<Revision>::success(Revision{value});
+    return Result<Revision>::success(Revision{static_cast<std::uint64_t>(value)});
   }
 
   [[nodiscard]] static constexpr Revision initial() noexcept { return Revision{1U}; }
@@ -112,7 +125,11 @@ using ProcessingTimestamp = detail::Timestamp<detail::ProcessingTimestampTag>;
 
 class ElapsedNanoseconds {
 public:
-  explicit constexpr ElapsedNanoseconds(std::uint64_t value) noexcept : value_{value} {}
+  template <std::unsigned_integral Value>
+    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
+             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  explicit constexpr ElapsedNanoseconds(Value value) noexcept
+      : value_{static_cast<std::uint64_t>(value)} {}
 
   [[nodiscard]] constexpr std::uint64_t value() const noexcept { return value_; }
 
@@ -159,17 +176,32 @@ private:
 
 class DeterministicClockProvider final : public ClockProvider {
 public:
-  explicit DeterministicClockProvider(std::uint64_t initial_nanoseconds = 0U) noexcept
-      : current_nanoseconds_{initial_nanoseconds} {}
+  DeterministicClockProvider() noexcept = default;
 
-  [[nodiscard]] Result<void> advance(std::uint64_t nanoseconds);
+  template <std::unsigned_integral Value>
+    requires(!std::same_as<std::remove_cvref_t<Value>, bool> &&
+             sizeof(std::remove_cvref_t<Value>) <= sizeof(std::uint64_t))
+  explicit DeterministicClockProvider(Value initial_nanoseconds) noexcept
+      : current_nanoseconds_{static_cast<std::uint64_t>(initial_nanoseconds)} {}
+
+  template <std::integral Value>
+    requires(!std::same_as<std::remove_cvref_t<Value>, bool>)
+  [[nodiscard]] Result<void> advance(Value nanoseconds) {
+    if (!std::in_range<std::uint64_t>(nanoseconds)) {
+      return Result<void>::failure(
+          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
+    }
+    return advance_validated(static_cast<std::uint64_t>(nanoseconds));
+  }
 
 private:
+  [[nodiscard]] Result<void> advance_validated(std::uint64_t nanoseconds);
+
   [[nodiscard]] std::uint64_t monotonic_nanoseconds() noexcept override {
     return current_nanoseconds_;
   }
 
-  std::uint64_t current_nanoseconds_;
+  std::uint64_t current_nanoseconds_{0U};
 };
 
 class SystemClockProvider final : public ClockProvider {

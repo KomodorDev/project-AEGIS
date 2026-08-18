@@ -55,7 +55,9 @@ The common decimal representation is a signed 64-bit coefficient plus a decimal 
 18, representing `coefficient * 10^-scale`. Equivalent values compare numerically, and canonical
 storage removes redundant trailing zeroes (zero has scale zero). Decimal text parsing is exact and
 accepts only ordinary base-10 notation; exponent notation, `NaN`, infinities, locale syntax, and
-values outside the representation are rejected.
+values outside the representation are rejected. Authored text may contain at most 18 fractional
+digits before canonical trailing-zero removal, so the accepted grammar has the same explicit scale
+bound as the representation.
 
 `Price`, `Quantity`, and `Notional` are distinct wrappers over that representation. They have no
 implicit conversions between one another and no construction or decision-path conversion from

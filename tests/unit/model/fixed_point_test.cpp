@@ -42,6 +42,10 @@ static_assert(!HasFromScaled<Price, double, int>);
 static_assert(!HasFromScaled<Quantity, int, float>);
 static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
+static_assert(!HasFromScaled<FixedPoint, bool, int>);
+static_assert(!HasFromScaled<Price, bool, int>);
+static_assert(HasFromScaled<FixedPoint, std::uint64_t, int>);
+static_assert(HasFromScaled<Price, std::uint64_t, int>);
 static_assert(!HasRescale<FixedPoint, double>);
 static_assert(!HasRescale<Price, long double>);
 static_assert(!HasScaledMultiply<float>);
@@ -81,6 +85,10 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   REQUIRE_FALSE(excessive_scale);
   CHECK(excessive_scale.error().code == DomainErrorCode::InvalidScale);
 
+  const auto excessive_textual_scale = FixedPoint::parse_ascii("1.0000000000000000000");
+  REQUIRE_FALSE(excessive_textual_scale);
+  CHECK(excessive_textual_scale.error().code == DomainErrorCode::InvalidScale);
+
   CHECK(decimal("9223372036854775807").coefficient() == std::numeric_limits<std::int64_t>::max());
   CHECK(decimal("-9223372036854775808").coefficient() == std::numeric_limits<std::int64_t>::min());
   CHECK(decimal("9223372036854775807.0") == decimal("9223372036854775807"));
@@ -100,6 +108,23 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto formerly_wrapped_scale = FixedPoint::from_scaled(1, std::uint64_t{256U});
   REQUIRE_FALSE(formerly_wrapped_scale);
   CHECK(formerly_wrapped_scale.error().code == DomainErrorCode::InvalidScale);
+
+  const auto maximum_unsigned_coefficient =
+      FixedPoint::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
+  REQUIRE_FALSE(maximum_unsigned_coefficient);
+  CHECK(maximum_unsigned_coefficient.error() ==
+        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
+
+  const auto maximum_signed_as_unsigned = FixedPoint::from_scaled(
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()), 0U);
+  REQUIRE(maximum_signed_as_unsigned);
+  CHECK(maximum_signed_as_unsigned.value().coefficient() ==
+        std::numeric_limits<std::int64_t>::max());
+
+  const auto invalid_price = Price::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
+  REQUIRE_FALSE(invalid_price);
+  CHECK(invalid_price.error() ==
+        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "price"));
 }
 
 TEST_CASE("addition and subtraction preserve exact cross-scale values and fail on overflow",

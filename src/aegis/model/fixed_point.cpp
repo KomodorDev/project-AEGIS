@@ -360,7 +360,8 @@ FixedPoint FixedPoint::canonical(std::int64_t coefficient, std::uint8_t scale) n
   return FixedPoint{coefficient, scale};
 }
 
-Result<FixedPoint> FixedPoint::from_scaled(std::int64_t coefficient, std::uint64_t scale) {
+Result<FixedPoint> FixedPoint::from_validated_scaled(std::int64_t coefficient,
+                                                     std::uint64_t scale) {
   if (scale > maximum_scale) {
     return Result<FixedPoint>::failure(invalid_scale_error());
   }

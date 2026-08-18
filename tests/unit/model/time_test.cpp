@@ -18,6 +18,11 @@ static_assert(!std::is_same_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<InstrumentMetadataRevision, RouteRevision>);
 static_assert(!std::is_convertible_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<SessionEpoch, SequenceNumber>);
+static_assert(std::is_constructible_v<SourceTimestamp, std::uint64_t>);
+static_assert(!std::is_constructible_v<SourceTimestamp, std::int64_t>);
+static_assert(!std::is_constructible_v<SessionEpoch, int>);
+static_assert(!std::is_constructible_v<ElapsedNanoseconds, double>);
+static_assert(!std::is_constructible_v<DeterministicClockProvider, int>);
 
 TEST_CASE("a deterministic clock returns explicitly advanced monotonic values", "[model][time]") {
   DeterministicClockProvider clock{7U};
@@ -34,6 +39,12 @@ TEST_CASE("a deterministic clock fails rather than wrapping", "[model][time]") {
   REQUIRE_FALSE(result);
   CHECK(result.error().code == DomainErrorCode::ArithmeticOverflow);
   CHECK(result.error().context.field == "clock_nanoseconds");
+
+  DeterministicClockProvider ordinary_clock;
+  const auto negative = ordinary_clock.advance(-1);
+  REQUIRE_FALSE(negative);
+  CHECK(negative.error() ==
+        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
 }
 
 TEST_CASE("processing delay is the only named receive-to-processing subtraction", "[model][time]") {
@@ -60,6 +71,11 @@ TEST_CASE("installed revisions reject zero and fail on increment overflow", "[mo
   const auto absent = ConfigurationRevision::from_value(0U);
   REQUIRE_FALSE(absent);
   CHECK(absent.error().code == DomainErrorCode::InvalidRevision);
+
+  const auto negative = ConfigurationRevision::from_value(-1);
+  REQUIRE_FALSE(negative);
+  CHECK(negative.error() ==
+        DomainError::at_field(DomainErrorCode::InvalidRevision, "configuration_revision"));
 
   CHECK(OrganizationRevision::initial().value() == 1U);
 

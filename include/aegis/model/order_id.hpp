@@ -6,9 +6,12 @@
 
 #include <array>
 #include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <type_traits>
+#include <utility>
 
 namespace aegis::model {
 
@@ -75,8 +78,20 @@ protected:
 
 class DeterministicOrderIdProvider final : public OrderIdProvider {
 public:
-  [[nodiscard]] static Result<DeterministicOrderIdProvider>
-  create(OrderNamespace order_namespace, std::uint64_t initial_counter = 1U);
+  [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace) {
+    return create_validated(order_namespace, 1U);
+  }
+
+  template <std::integral Counter>
+    requires(!std::same_as<std::remove_cvref_t<Counter>, bool>)
+  [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace,
+                                                                   Counter initial_counter) {
+    if (!std::in_range<std::uint64_t>(initial_counter)) {
+      return Result<DeterministicOrderIdProvider>::failure(
+          DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
+    }
+    return create_validated(order_namespace, static_cast<std::uint64_t>(initial_counter));
+  }
 
   DeterministicOrderIdProvider(const DeterministicOrderIdProvider&) = delete;
   DeterministicOrderIdProvider& operator=(const DeterministicOrderIdProvider&) = delete;
@@ -86,6 +101,9 @@ public:
   [[nodiscard]] Result<OrderId> next() override;
 
 private:
+  [[nodiscard]] static Result<DeterministicOrderIdProvider>
+  create_validated(OrderNamespace order_namespace, std::uint64_t initial_counter);
+
   DeterministicOrderIdProvider(OrderNamespace order_namespace,
                                std::uint64_t initial_counter) noexcept;
 

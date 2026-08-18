@@ -30,8 +30,16 @@ class FixedPoint {
 public:
   static constexpr std::uint8_t maximum_scale = 18U;
 
-  [[nodiscard]] static Result<FixedPoint> from_scaled(std::int64_t coefficient,
-                                                      std::uint64_t scale);
+  template <std::integral Coefficient>
+    requires(!std::same_as<std::remove_cvref_t<Coefficient>, bool>)
+  [[nodiscard]] static Result<FixedPoint> from_scaled(Coefficient coefficient,
+                                                      std::uint64_t scale) {
+    if (!std::in_range<std::int64_t>(coefficient)) {
+      return Result<FixedPoint>::failure(
+          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
+    }
+    return from_validated_scaled(static_cast<std::int64_t>(coefficient), scale);
+  }
   template <typename Coefficient, typename Scale>
     requires(std::floating_point<std::remove_cvref_t<Coefficient>> ||
              std::floating_point<std::remove_cvref_t<Scale>>)
@@ -69,6 +77,8 @@ private:
       : coefficient_{coefficient}, scale_{scale} {}
 
   [[nodiscard]] static FixedPoint canonical(std::int64_t coefficient, std::uint8_t scale) noexcept;
+  [[nodiscard]] static Result<FixedPoint> from_validated_scaled(std::int64_t coefficient,
+                                                                std::uint64_t scale);
 
   std::int64_t coefficient_;
   std::uint8_t scale_;
@@ -88,7 +98,9 @@ struct NotionalTag {
 
 template <typename Tag> class DecimalValue {
 public:
-  [[nodiscard]] static Result<DecimalValue> from_scaled(std::int64_t coefficient,
+  template <std::integral Coefficient>
+    requires(!std::same_as<std::remove_cvref_t<Coefficient>, bool>)
+  [[nodiscard]] static Result<DecimalValue> from_scaled(Coefficient coefficient,
                                                         std::uint64_t scale) {
     auto value = FixedPoint::from_scaled(coefficient, scale);
     if (!value) {

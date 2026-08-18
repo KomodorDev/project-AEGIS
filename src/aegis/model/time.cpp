@@ -18,7 +18,7 @@ Result<ElapsedNanoseconds> processing_delay(ProcessingTimestamp processing,
       ElapsedNanoseconds{processing.nanoseconds() - receive.nanoseconds()});
 }
 
-Result<void> DeterministicClockProvider::advance(std::uint64_t nanoseconds) {
+Result<void> DeterministicClockProvider::advance_validated(std::uint64_t nanoseconds) {
   if (nanoseconds > std::numeric_limits<std::uint64_t>::max() - current_nanoseconds_) {
     return Result<void>::failure(
         DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
