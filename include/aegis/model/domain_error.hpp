@@ -10,7 +10,8 @@
 
 namespace aegis::model {
 
-// Values are persisted compatibility identifiers. Add new codes explicitly; never renumber one.
+// Values are persisted compatibility identifiers. The hundreds bands reserve primitive, metadata,
+// configuration, and encoding failures; add new codes explicitly and never renumber one.
 enum class DomainErrorCode : std::uint16_t {
   InvalidIdentifier = 1,
   InvalidValue = 2,
@@ -46,6 +47,8 @@ struct DomainErrorContext {
   friend bool operator==(const DomainErrorContext&, const DomainErrorContext&) = default;
 };
 
+// Named factories make the presence or absence of collection position explicit at each failure
+// site, while structural equality lets deterministic tests compare the complete machine contract.
 struct DomainError {
   DomainErrorCode code;
   DomainErrorContext context;

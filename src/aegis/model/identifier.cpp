@@ -7,6 +7,7 @@
 namespace aegis::model::detail {
 namespace {
 
+// Explicit byte ranges keep identifier acceptance independent of locale and character-class APIs.
 [[nodiscard]] bool is_lower_alphanumeric(char character) noexcept {
   return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
 }
@@ -18,6 +19,7 @@ namespace {
 template <typename IsAlphanumeric>
 [[nodiscard]] bool is_segmented_token(std::string_view value, char separator,
                                       IsAlphanumeric is_alphanumeric) noexcept {
+  // Endpoints must be data, and the scan then rules out adjacent separators and foreign bytes.
   if (value.empty() || !is_alphanumeric(value.front()) || !is_alphanumeric(value.back())) {
     return false;
   }
@@ -41,6 +43,8 @@ template <typename IsAlphanumeric>
 
 [[nodiscard]] bool is_organization_identifier(std::string_view value,
                                               std::string_view prefix) noexcept {
+  // The stable prefix counts toward the limit; only the remaining slug may contain dot or dash
+  // separators, with the same non-empty-segment invariant as other token grammars.
   constexpr std::size_t maximum_size = 64;
   if (value.size() > maximum_size || !value.starts_with(prefix)) {
     return false;
@@ -70,12 +74,16 @@ template <typename IsAlphanumeric>
 }
 
 [[nodiscard]] bool is_adapter_identifier(std::string_view value) noexcept {
+  // Adapter identifiers preserve venue punctuation but reject controls, non-ASCII bytes, and values
+  // too large for the fixed configuration contract.
   constexpr std::size_t maximum_size = 128;
   if (value.empty() || value.size() > maximum_size) {
     return false;
   }
 
   for (const char raw_character : value) {
+    // Interesting syntax: converting through unsigned char prevents implementation-defined signed
+    // char values from satisfying or bypassing the byte-range comparison.
     const auto character = static_cast<unsigned char>(raw_character);
     if (character < 0x20U || character > 0x7eU) {
       return false;
@@ -88,6 +96,7 @@ template <typename IsAlphanumeric>
 
 bool is_valid_identifier(std::string_view value, IdentifierGrammar grammar,
                          std::string_view prefix) noexcept {
+  // Keep dispatch exhaustive and fail closed if an unassigned enum value reaches this boundary.
   switch (grammar) {
   case IdentifierGrammar::Organization:
     return is_organization_identifier(value, prefix);

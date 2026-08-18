@@ -36,6 +36,7 @@ add_library(
   src/aegis/execution/execution_route.cpp
   src/aegis/market_data/subscription.cpp
   src/aegis/model/fixed_point.cpp
+  # Identifier grammar is compiled; its Result and error primitives remain header-only.
   src/aegis/model/identifier.cpp
   src/aegis/model/instrument_metadata.cpp
   src/aegis/model/order_id.cpp
@@ -43,6 +44,7 @@ add_library(
   src/aegis/model/time.cpp
   src/aegis/organization/organization.cpp
   src/aegis/trace/trace.cpp
+  # Version reporting exposes the configured project identity without adding runtime dependencies.
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
 

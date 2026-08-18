@@ -12,8 +12,12 @@
 namespace aegis::model {
 namespace detail {
 
+// Grammar selection is closed and internal; public identifiers expose validated values, not a
+// caller-selectable grammar mode.
 enum class IdentifierGrammar { Organization, Venue, Instrument, Adapter };
 
+// Interesting syntax: incomplete tag types parameterize one implementation into unrelated nominal
+// C++ types, while traits bind each type to its grammar and stable error field at compile time.
 struct FirmIdTag;
 struct DeskIdTag;
 struct BotIdTag;
@@ -28,6 +32,8 @@ struct VenueAccountIdTag;
 
 template <typename Tag> struct IdentifierTraits;
 
+// These specializations keep the repeated organization mapping uniform without introducing a
+// runtime registry or allowing a prefix to drift away from its error field.
 #define AEGIS_ORGANIZATION_ID_TRAITS(TagName, Prefix, Field)                                       \
   template <> struct IdentifierTraits<TagName> {                                                   \
     static constexpr IdentifierGrammar grammar = IdentifierGrammar::Organization;                  \
@@ -45,6 +51,8 @@ AEGIS_ORGANIZATION_ID_TRAITS(RouteIdTag, "route.", "route_id");
 
 #undef AEGIS_ORGANIZATION_ID_TRAITS
 
+// Venue and normalized-instrument identifiers use distinct exchange-facing grammars without a
+// required organizational prefix, while still retaining type-specific error fields.
 template <> struct IdentifierTraits<VenueIdTag> {
   static constexpr IdentifierGrammar grammar = IdentifierGrammar::Venue;
   static constexpr std::string_view prefix{};
@@ -57,6 +65,8 @@ template <> struct IdentifierTraits<InstrumentIdTag> {
   static constexpr std::string_view field = "instrument_id";
 };
 
+// Adapter-owned strings share a deliberately broad printable-ASCII grammar but remain distinct
+// nominal types with distinct failure fields.
 #define AEGIS_ADAPTER_ID_TRAITS(TagName, Field)                                                    \
   template <> struct IdentifierTraits<TagName> {                                                   \
     static constexpr IdentifierGrammar grammar = IdentifierGrammar::Adapter;                       \
@@ -74,6 +84,8 @@ AEGIS_ADAPTER_ID_TRAITS(VenueAccountIdTag, "venue_account_id");
 
 } // namespace detail
 
+// Construction is factory-only so every stored string has already passed its type's exact grammar;
+// the owning value is then immutable through the public API.
 template <typename Tag> class Identifier {
 public:
   [[nodiscard]] static Result<Identifier> parse(std::string_view value) {
@@ -87,6 +99,8 @@ public:
 
   [[nodiscard]] std::string_view value() const noexcept { return value_; }
 
+  // Interesting syntax: defaulted hidden friends compare only the same tag instantiation, making
+  // cross-domain equality and ordering ill-formed instead of relying on caller discipline.
   friend bool operator==(const Identifier&, const Identifier&) = default;
   friend auto operator<=>(const Identifier&, const Identifier&) = default;
 
@@ -96,6 +110,8 @@ private:
   std::string value_;
 };
 
+// Public aliases are the domain vocabulary; the shared implementation is intentionally not exposed
+// as a generic string identifier at call sites.
 using FirmId = Identifier<detail::FirmIdTag>;
 using DeskId = Identifier<detail::DeskIdTag>;
 using BotId = Identifier<detail::BotIdTag>;

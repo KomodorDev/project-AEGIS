@@ -13,9 +13,12 @@ using aegis::model::DomainError;
 using aegis::model::DomainErrorCode;
 using aegis::model::Result;
 
+// Persisted numeric assignments must not drift when later milestones add new error categories.
 static_assert(static_cast<std::uint16_t>(DomainErrorCode::InvalidIdentifier) == 1U);
 static_assert(static_cast<std::uint16_t>(DomainErrorCode::TraceCapacityExceeded) == 301U);
 
+// Successful results expose their value through both the explicit predicate and contextual boolean
+// conversion used by production validation chains.
 TEST_CASE("a successful result exposes only its value", "[model][result]") {
   auto result = Result<std::string>::success("accepted");
 
@@ -24,6 +27,7 @@ TEST_CASE("a successful result exposes only its value", "[model][result]") {
   CHECK(result.value() == "accepted");
 }
 
+// Collection failures must retain stable machine-readable location rather than depending on prose.
 TEST_CASE("a failed result preserves field and collection position", "[model][result]") {
   auto result = Result<int>::failure(
       DomainError::at_index(DomainErrorCode::DuplicateIdentifier, "firms", 3U));
@@ -36,6 +40,7 @@ TEST_CASE("a failed result preserves field and collection position", "[model][re
   CHECK(*result.error().context.collection_index == std::size_t{3U});
 }
 
+// Command-style operations use the void specialization without weakening field-only error context.
 TEST_CASE("void results distinguish completion from failure", "[model][result]") {
   const auto completed = Result<void>::success();
   const auto failed =

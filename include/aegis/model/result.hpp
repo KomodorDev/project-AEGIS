@@ -11,6 +11,8 @@
 
 namespace aegis::model {
 
+// A result has exactly one active arm. Reading the inactive arm is a programming error; expected
+// domain failures must be inspected through the boolean state and returned as DomainError values.
 template <typename T> class [[nodiscard]] Result {
 public:
   [[nodiscard]] static Result success(T value) { return Result{std::move(value)}; }
@@ -21,6 +23,8 @@ public:
 
   explicit operator bool() const noexcept { return has_value(); }
 
+  // Interesting syntax: ref-qualified accessors preserve borrowing from lvalues and permit moving
+  // a value or error out of a temporary result without adding a second ownership API.
   [[nodiscard]] T& value() & { return std::get<T>(storage_); }
   [[nodiscard]] const T& value() const& { return std::get<T>(storage_); }
   [[nodiscard]] T&& value() && { return std::get<T>(std::move(storage_)); }
@@ -37,6 +41,8 @@ private:
   std::variant<T, DomainError> storage_;
 };
 
+// Interesting syntax: the explicit void specialization uses an optional error as its discriminant,
+// so successful commands need no dummy payload while retaining the same inspection contract.
 template <> class [[nodiscard]] Result<void> {
 public:
   [[nodiscard]] static Result success() noexcept { return Result{}; }

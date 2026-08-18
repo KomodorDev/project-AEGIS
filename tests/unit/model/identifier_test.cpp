@@ -12,6 +12,8 @@ namespace {
 
 using namespace aegis::model;
 
+// Nominal identifier kinds must remain unrelated at compile time and constructible only through
+// their validating factories.
 static_assert(!std::is_same_v<FirmId, DeskId>);
 static_assert(!std::is_same_v<LogicalAccountId, VenueAccountId>);
 static_assert(!std::is_same_v<InstrumentId, VenueInstrumentId>);
@@ -19,6 +21,7 @@ static_assert(!std::is_convertible_v<FirmId, DeskId>);
 static_assert(!std::is_convertible_v<LogicalAccountId, VenueAccountId>);
 static_assert(!std::is_constructible_v<FirmId, std::string>);
 
+// The reference vocabulary is a compatibility fixture for every public identifier kind.
 TEST_CASE("reference configuration identifiers satisfy their nominal grammars", "[model][id]") {
   CHECK(FirmId::parse("firm.aegis-lab"));
   CHECK(DeskId::parse("desk.digital-assets"));
@@ -33,6 +36,8 @@ TEST_CASE("reference configuration identifiers satisfy their nominal grammars", 
   CHECK(VenueAccountId::parse("native-account:1234"));
 }
 
+// Organization IDs combine a kind-specific prefix with bounded lowercase slug segments; failures
+// must also identify the exact nominal field.
 TEST_CASE("organizational identifiers reject wrong prefixes and malformed segments",
           "[model][id]") {
   constexpr std::array invalid_firms{
@@ -53,6 +58,8 @@ TEST_CASE("organizational identifiers reject wrong prefixes and malformed segmen
   CHECK_FALSE(FirmId::parse("firm." + std::string(60U, 'a')));
 }
 
+// Venue and normalized-instrument grammars intentionally differ in case while sharing strict dash
+// segmentation and fixed byte limits.
 TEST_CASE("venue and normalized instrument identifiers enforce case and separators",
           "[model][id]") {
   CHECK(VenueId::parse("deribit-testnet"));
@@ -69,6 +76,8 @@ TEST_CASE("venue and normalized instrument identifiers enforce case and separato
   CHECK_FALSE(InstrumentId::parse(std::string(65U, 'A')));
 }
 
+// Adapter values may contain venue punctuation and spaces, but never controls, embedded NUL, or
+// bytes beyond the bounded printable-ASCII contract.
 TEST_CASE("adapter identifiers accept only bounded printable ASCII", "[model][id]") {
   CHECK(VenueInstrumentId::parse("BTC-PERPETUAL"));
   CHECK(VenueInstrumentId::parse("venue instrument #1"));
@@ -78,6 +87,7 @@ TEST_CASE("adapter identifiers accept only bounded printable ASCII", "[model][id
   CHECK_FALSE(VenueAccountId::parse(std::string{"native\0account", 14U}));
 }
 
+// Once accepted, an identifier exposes the exact validated bytes without a mutating escape hatch.
 TEST_CASE("valid identifiers expose immutable canonical bytes", "[model][id]") {
   const auto parsed = FirmId::parse("firm.aegis-lab");
   REQUIRE(parsed);

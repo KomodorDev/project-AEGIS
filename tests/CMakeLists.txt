@@ -12,8 +12,10 @@ add_executable(
   unit/configuration/startup_configuration_test.cpp
   unit/execution/execution_route_test.cpp
   unit/market_data/subscription_test.cpp
+  # These primitive tests pin stable Result/error contracts and nominal identifier grammar.
   unit/model/domain_error_result_test.cpp
   unit/model/fixed_point_test.cpp
+  # Identifier tests enforce the nominal grammar and immutable validated-value boundary.
   unit/model/identifier_test.cpp
   unit/model/instrument_metadata_test.cpp
   unit/model/order_id_test.cpp
@@ -21,6 +23,7 @@ add_executable(
   unit/model/time_test.cpp
   unit/organization/organization_test.cpp
   unit/trace/trace_test.cpp
+  # Version tests ensure the compiled library reports the configured project identity.
   unit/version_test.cpp)
 target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
 
