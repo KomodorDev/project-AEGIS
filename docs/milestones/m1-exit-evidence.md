@@ -12,6 +12,12 @@ closed or merged.
 Gate IDs beginning with `M1-S` identify delivered scope. IDs beginning with `M1-E` map the roadmap's
 exit conditions.
 
+## How to read this record
+
+Scope rows connect each promise to implementation and tests. Exit-gate rows summarize the strongest
+evidence currently available, while the final section keeps remote CI, review and merge facts
+explicitly separate from local proof.
+
 ## Scope evidence
 
 | Gate | Delivered behavior | Implementation and tests |

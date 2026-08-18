@@ -88,6 +88,9 @@ Prepare the workshop before building the robot: choose the tools, make automatic
 `codex/m1-domain-kernel`. [M1 exit evidence](milestones/m1-exit-evidence.md) records the local proof;
 remote CI, review, and integration into `dev` remain pending, so the milestone is not closed.
 
+This status reports delivered code separately from milestone closure: implementation can be locally
+complete while remote and integration evidence is still outstanding.
+
 ### Outcome
 
 AEGIS can represent its identities, units, organization, permissions and decision provenance without venue-native types or ambiguous arithmetic.

@@ -66,6 +66,9 @@ The expected later areas remain:
 These rules matter more than the folder names: they prevent venue details and runtime wiring from
 leaking into reusable domain behavior.
 
+Read each rule as an allowed compile-time direction, not as permission to reach through another
+component's immutable API and mutate its state.
+
 - `model` is a leaf and does not depend on another AEGIS subsystem.
 - `organization` depends only on `model`.
 - M1 `market_data` and `execution` declarations depend on `model` and `organization`, but not on one

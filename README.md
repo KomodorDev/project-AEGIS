@@ -15,6 +15,9 @@ Current milestone evidence is mapped in
 
 ## What M1 provides
 
+These are configuration and evidence capabilities, not active trading services. Each item is usable
+without credentials, networking or a runtime event loop.
+
 - Validated nominal identifiers, typed clocks, sequences and revisions, stable result/error values,
   deterministic test providers, and restart-namespaced production order identities.
 - Exact checked fixed-point price, quantity and notional arithmetic with explicit rounding, plus
