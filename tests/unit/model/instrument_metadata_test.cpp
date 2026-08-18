@@ -15,8 +15,13 @@ concept HasContractValue = requires(InstrumentMetadata metadata, Quantity quanti
   metadata.contract_value(quantity, scale, RoundingMode::Exact);
 };
 
+enum LegacyScale { LegacyScaleZero = 0 };
+
 static_assert(!HasContractValue<double>);
 static_assert(!HasContractValue<long double>);
+static_assert(!HasContractValue<bool>);
+static_assert(!HasContractValue<LegacyScale>);
+static_assert(HasContractValue<int>);
 
 template <typename Value> [[nodiscard]] Value parsed(std::string_view text) {
   auto result = Value::parse_ascii(text);
@@ -72,6 +77,12 @@ TEST_CASE("the reference inverse metadata is a revisioned fixture with declared 
       metadata.value().contract_value(parsed<Quantity>("1.5"), 1U, RoundingMode::Exact);
   REQUIRE_FALSE(fractional);
   CHECK(fractional.error().code == DomainErrorCode::MisalignedQuantity);
+
+  const auto negative_scale =
+      metadata.value().contract_value(parsed<Quantity>("1"), -1, RoundingMode::Exact);
+  REQUIRE_FALSE(negative_scale);
+  CHECK(negative_scale.error() ==
+        DomainError::at_field(DomainErrorCode::InvalidScale, "contract_value"));
 }
 
 TEST_CASE("metadata validates exact tick and contract-step alignment", "[model][metadata]") {

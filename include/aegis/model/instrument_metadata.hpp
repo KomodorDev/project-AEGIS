@@ -6,9 +6,11 @@
 #include "aegis/model/identifier.hpp"
 #include "aegis/model/time.hpp"
 
+#include <concepts>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace aegis::model {
@@ -86,14 +88,26 @@ public:
 
   // Converts declared contracts to the multiplier's declared currency. It deliberately takes no
   // price: inverse face value must not be computed through a generic price-times-quantity shortcut.
-  [[nodiscard]] Result<Notional> contract_value(Quantity contracts, std::uint64_t target_scale,
-                                                RoundingMode rounding) const;
+  template <std::integral Scale>
+    requires(!std::same_as<std::remove_cvref_t<Scale>, bool>)
+  [[nodiscard]] Result<Notional> contract_value(Quantity contracts, Scale target_scale,
+                                                RoundingMode rounding) const {
+    if (!std::in_range<std::uint64_t>(target_scale)) {
+      return Result<Notional>::failure(
+          DomainError::at_field(DomainErrorCode::InvalidScale, "contract_value"));
+    }
+    return contract_value_validated(contracts, static_cast<std::uint64_t>(target_scale), rounding);
+  }
   template <typename Scale>
     requires std::floating_point<std::remove_cvref_t<Scale>>
   [[nodiscard]] Result<Notional> contract_value(Quantity, Scale, RoundingMode) const = delete;
   [[nodiscard]] std::string_view contract_value_currency() const noexcept;
 
 private:
+  [[nodiscard]] Result<Notional> contract_value_validated(Quantity contracts,
+                                                          std::uint64_t target_scale,
+                                                          RoundingMode rounding) const;
+
   explicit InstrumentMetadata(InstrumentMetadataParams params) : params_{std::move(params)} {}
 
   InstrumentMetadataParams params_;

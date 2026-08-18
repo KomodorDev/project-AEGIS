@@ -140,8 +140,9 @@ Result<Quantity> InstrumentMetadata::quantize_quantity(Quantity quantity,
   return remap_numeric_error(quantity.quantize(params_.quantity_step, rounding), "quantity");
 }
 
-Result<Notional> InstrumentMetadata::contract_value(Quantity contracts, std::uint64_t target_scale,
-                                                    RoundingMode rounding) const {
+Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts,
+                                                              std::uint64_t target_scale,
+                                                              RoundingMode rounding) const {
   const auto aligned = validate_quantity_alignment(contracts);
   if (!aligned) {
     return Result<Notional>::failure(aligned.error());

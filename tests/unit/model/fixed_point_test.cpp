@@ -31,6 +31,8 @@ template <typename Scale>
 concept HasScaledDivide =
     requires(FixedPoint value, Scale scale) { value.divide(value, scale, RoundingMode::Exact); };
 
+enum LegacyScale { LegacyScaleZero = 0 };
+
 static_assert(!std::is_same_v<Price, Quantity>);
 static_assert(!std::is_same_v<Quantity, Notional>);
 static_assert(!std::is_convertible_v<Price, Quantity>);
@@ -44,12 +46,19 @@ static_assert(!HasFromScaled<Notional, double, double>);
 static_assert(!HasFromScaled<Price, long double, int>);
 static_assert(!HasFromScaled<FixedPoint, bool, int>);
 static_assert(!HasFromScaled<Price, bool, int>);
+static_assert(!HasFromScaled<FixedPoint, int, bool>);
+static_assert(!HasFromScaled<Price, int, LegacyScale>);
+static_assert(HasFromScaled<FixedPoint, int, int>);
 static_assert(HasFromScaled<FixedPoint, std::uint64_t, int>);
 static_assert(HasFromScaled<Price, std::uint64_t, int>);
 static_assert(!HasRescale<FixedPoint, double>);
 static_assert(!HasRescale<Price, long double>);
+static_assert(!HasRescale<FixedPoint, bool>);
+static_assert(!HasRescale<Price, LegacyScale>);
 static_assert(!HasScaledMultiply<float>);
 static_assert(!HasScaledDivide<long double>);
+static_assert(!HasScaledMultiply<bool>);
+static_assert(!HasScaledDivide<LegacyScale>);
 static_assert(!HasProductOperator<Price, Quantity>);
 
 [[nodiscard]] FixedPoint decimal(std::string_view text) {
@@ -104,6 +113,10 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto invalid_scale = FixedPoint::from_scaled(1, 19U);
   REQUIRE_FALSE(invalid_scale);
   CHECK(invalid_scale.error().code == DomainErrorCode::InvalidScale);
+
+  const auto negative_scale = FixedPoint::from_scaled(1, -1);
+  REQUIRE_FALSE(negative_scale);
+  CHECK(negative_scale.error().code == DomainErrorCode::InvalidScale);
 
   const auto formerly_wrapped_scale = FixedPoint::from_scaled(1, std::uint64_t{256U});
   REQUIRE_FALSE(formerly_wrapped_scale);
@@ -256,6 +269,11 @@ TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-poi
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::InvalidScale);
   }
+
+  const auto negative_scale = decimal("1").rescale(-1, RoundingMode::Exact);
+  REQUIRE_FALSE(negative_scale);
+  CHECK(negative_scale.error() ==
+        DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
 }
 
 } // namespace

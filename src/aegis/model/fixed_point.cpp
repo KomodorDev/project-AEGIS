@@ -557,7 +557,8 @@ Result<FixedPoint> FixedPoint::checked_subtract(FixedPoint other) const {
   return Result<FixedPoint>::success(canonical(coefficient.value(), result_scale));
 }
 
-Result<FixedPoint> FixedPoint::rescale(std::uint64_t target_scale, RoundingMode rounding) const {
+Result<FixedPoint> FixedPoint::rescale_validated(std::uint64_t target_scale,
+                                                 RoundingMode rounding) const {
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
@@ -587,8 +588,8 @@ Result<FixedPoint> FixedPoint::rescale(std::uint64_t target_scale, RoundingMode 
   return Result<FixedPoint>::success(canonical(coefficient.value(), validated_scale));
 }
 
-Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint64_t target_scale,
-                                        RoundingMode rounding) const {
+Result<FixedPoint> FixedPoint::multiply_validated(FixedPoint other, std::uint64_t target_scale,
+                                                  RoundingMode rounding) const {
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
@@ -650,8 +651,8 @@ Result<FixedPoint> FixedPoint::multiply(FixedPoint other, std::uint64_t target_s
   return Result<FixedPoint>::success(canonical(coefficient.value(), result_scale));
 }
 
-Result<FixedPoint> FixedPoint::divide(FixedPoint divisor, std::uint64_t target_scale,
-                                      RoundingMode rounding) const {
+Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_t target_scale,
+                                                RoundingMode rounding) const {
   if (!is_valid_rounding_mode(rounding)) {
     return Result<FixedPoint>::failure(invalid_rounding_error());
   }
