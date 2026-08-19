@@ -9,6 +9,7 @@
 namespace aegis::model {
 namespace {
 
+// --------------------------------------------------------
 // Currency identifiers are deliberately narrower than general IDs: 3-12 uppercase ASCII letters
 // or digits, beginning with a letter, keep unit comparisons deterministic and locale-free.
 [[nodiscard]] bool valid_currency(std::string_view value) noexcept {
@@ -24,13 +25,13 @@ namespace {
   }
   return true;
 }
-
+// --------------------------------------------------------
 // Metadata construction failures share one stable code and identify the first invalid field.
 [[nodiscard]] Result<InstrumentMetadata> invalid_metadata(std::string field) {
   return Result<InstrumentMetadata>::failure(
       DomainError::at_field(DomainErrorCode::InvalidMetadata, std::move(field)));
 }
-
+// --------------------------------------------------------
 // Preserve arithmetic failure semantics while translating the generic numeric field to the public
 // metadata operation that the caller invoked.
 template <typename T>
@@ -42,10 +43,14 @@ template <typename T>
   error.context.field = std::move(field);
   return Result<T>::failure(std::move(error));
 }
+// --------------------------------------------------------
 
 } // namespace
 
+// --------------------------------------------------------
+// Validate authored metadata in stable failure order before publishing an immutable snapshot.
 Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams params) {
+  // ++++++++++++++++++++++++++++++++++++++++
   // This order is a compatibility contract: callers always receive the first canonical failure.
   // Phase 1: validate currency grammar and the fundamental base/quote distinction.
   if (!valid_currency(params.base_currency)) {
@@ -60,7 +65,7 @@ Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams p
   if (params.base_currency == params.quote_currency) {
     return invalid_metadata("instrument.quote_currency");
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Phase 2: validate enum assignments and the style-specific multiplier and settlement units.
   if (params.contract_style != ContractStyle::Linear &&
       params.contract_style != ContractStyle::Inverse) {
@@ -85,7 +90,7 @@ Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams p
       params.settlement_currency != params.base_currency) {
     return invalid_metadata("instrument.settlement_currency");
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Phase 3: prove scales and positive increments are representable in the decimal kernel.
   if (params.price_scale > FixedPoint::maximum_scale) {
     return invalid_metadata("instrument.price_scale");
@@ -104,7 +109,7 @@ Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams p
       params.minimum_quantity.scale() > params.quantity_scale) {
     return invalid_metadata("instrument.minimum_quantity");
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Phase 4: require the minimum to lie on the quantity step and the contract multiplier to be
   // positive before accepting the snapshot.
   const auto minimum_aligned = params.minimum_quantity.is_multiple_of(params.quantity_step);
@@ -114,11 +119,12 @@ Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams p
   if (params.contract_multiplier.coefficient() <= 0) {
     return invalid_metadata("instrument.contract_multiplier");
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Ownership transfers only after every field has passed in canonical order.
   return Result<InstrumentMetadata>::success(InstrumentMetadata{std::move(params)});
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Distinguish a numeric-kernel failure from a valid price that simply misses the declared tick.
 Result<void> InstrumentMetadata::validate_price_alignment(Price price) const {
   const auto aligned = price.is_multiple_of(params_.tick_size);
@@ -132,7 +138,7 @@ Result<void> InstrumentMetadata::validate_price_alignment(Price price) const {
   }
   return Result<void>::success();
 }
-
+// --------------------------------------------------------
 // Quantity alignment mirrors price alignment but reports the quantity-specific decision error.
 Result<void> InstrumentMetadata::validate_quantity_alignment(Quantity quantity) const {
   const auto aligned = quantity.is_multiple_of(params_.quantity_step);
@@ -147,28 +153,31 @@ Result<void> InstrumentMetadata::validate_quantity_alignment(Quantity quantity) 
   }
   return Result<void>::success();
 }
-
+// --------------------------------------------------------
 // Quantization delegates exact arithmetic to the metadata-owned increment and remaps error context.
 Result<Price> InstrumentMetadata::quantize_price(Price price, RoundingMode rounding) const {
   return remap_numeric_error(price.quantize(params_.tick_size, rounding), "price");
 }
-
+// --------------------------------------------------------
+// Quantity quantization applies the same policy through the metadata-owned quantity step.
 Result<Quantity> InstrumentMetadata::quantize_quantity(Quantity quantity,
                                                        RoundingMode rounding) const {
   return remap_numeric_error(quantity.quantize(params_.quantity_step, rounding), "quantity");
 }
-
+// --------------------------------------------------------
 // The public constrained overload has normalized scale signedness and width; this helper keeps
 // quantity alignment, arithmetic, and error remapping in one non-templated implementation path.
 Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts,
                                                               std::uint64_t target_scale,
                                                               RoundingMode rounding) const {
+  // ++++++++++++++++++++++++++++++++++++++++
   // Reject off-step contract counts before privileged access combines nominal Quantity and Notional
   // kernels; callers cannot reach this cross-domain multiplication directly.
   const auto aligned = validate_quantity_alignment(contracts);
   if (!aligned) {
     return Result<Notional>::failure(aligned.error());
   }
+  // ++++++++++++++++++++++++++++++++++++++++
   // Keep the target scale wide until the decimal kernel has checked its maximum; narrowing earlier
   // would let inputs such as 256 wrap into an apparently valid scale.
   auto converted = contracts.fixed_point().multiply(params_.contract_multiplier.fixed_point(),
@@ -179,8 +188,9 @@ Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts
     return Result<Notional>::failure(std::move(error));
   }
   return Result<Notional>::success(Notional{converted.value()});
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // The multiplier declaration, not market price or settlement currency, determines face-value
 // currency.
 std::string_view InstrumentMetadata::contract_value_currency() const noexcept {
@@ -189,5 +199,6 @@ std::string_view InstrumentMetadata::contract_value_currency() const noexcept {
   }
   return params_.quote_currency;
 }
+// --------------------------------------------------------
 
 } // namespace aegis::model

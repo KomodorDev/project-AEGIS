@@ -25,7 +25,7 @@ constexpr std::array<std::uint32_t, 64U> round_constants{
     0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U, 0x90befffaU, 0xa4506cebU, 0xbef9a3f7U,
     0xc67178f2U,
 };
-
+// --------------------------------------------------------
 // Explicit big-endian loads and stores make message and digest bytes independent of host endian.
 [[nodiscard]] constexpr std::uint32_t
 load_big_endian_word(std::span<const std::byte, 4U> bytes) noexcept {
@@ -34,27 +34,31 @@ load_big_endian_word(std::span<const std::byte, 4U> bytes) noexcept {
          (std::to_integer<std::uint32_t>(bytes[2U]) << 8U) |
          std::to_integer<std::uint32_t>(bytes[3U]);
 }
-
+// --------------------------------------------------------
+// Store one digest word in network order without exposing host representation.
 void store_big_endian_word(std::uint32_t word, std::span<std::byte, 4U> destination) noexcept {
   destination[0U] = static_cast<std::byte>((word >> 24U) & 0xffU);
   destination[1U] = static_cast<std::byte>((word >> 16U) & 0xffU);
   destination[2U] = static_cast<std::byte>((word >> 8U) & 0xffU);
   destination[3U] = static_cast<std::byte>(word & 0xffU);
 }
+// --------------------------------------------------------
 
 } // namespace
 
+// --------------------------------------------------------
 // Initialize the eight working words to the SHA-256 initial hash values from FIPS 180-4.
 Sha256::Sha256() noexcept
     : state_{0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
              0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U} {}
-
+// --------------------------------------------------------
 // Streaming updates preserve chunk-boundary independence while retaining at most one partial block.
 void Sha256::update(std::span<const std::byte> bytes) noexcept {
+  // ++++++++++++++++++++++++++++++++++++++++
   // Count original stream bytes across chunk boundaries; unsigned arithmetic supplies SHA-256's
   // specified modulo-2^64 length behavior.
   byte_count_ += static_cast<std::uint64_t>(bytes.size());
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Complete a previously buffered block before consuming directly from the new input.
   if (buffered_bytes_ != 0U) {
     const auto available = block_size - buffered_bytes_;
@@ -70,24 +74,26 @@ void Sha256::update(std::span<const std::byte> bytes) noexcept {
     compress(std::span<const std::byte, block_size>{buffer_});
     buffered_bytes_ = 0U;
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Compress full caller-owned blocks without copying them through the tail buffer.
   while (bytes.size() >= block_size) {
     compress(std::span<const std::byte, block_size>{bytes.data(), block_size});
     bytes = bytes.subspan(block_size);
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Retain only the final partial block for the next update or finalization.
   std::copy(bytes.begin(), bytes.end(), buffer_.begin());
   buffered_bytes_ = bytes.size();
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Finalization applies standard padding to a snapshot and returns canonical digest bytes.
 Sha256Digest Sha256::finalize() const noexcept {
+  // ++++++++++++++++++++++++++++++++++++++++
   // Snapshot state so callers may inspect a prefix digest and then continue updating the original.
   auto final_hash = *this;
   const auto bit_count = final_hash.byte_count_ * 8U;
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Append the mandatory one bit and enough zeroes to leave eight bytes in the final block. Inputs
   // at or beyond byte 56 require a second padding block.
   std::array<std::byte, block_size> padding{};
@@ -95,7 +101,7 @@ Sha256Digest Sha256::finalize() const noexcept {
   const auto padding_size = final_hash.buffered_bytes_ < 56U ? 56U - final_hash.buffered_bytes_
                                                              : 120U - final_hash.buffered_bytes_;
   final_hash.update(std::span<const std::byte>{padding.data(), padding_size});
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Append the pre-padding message length as the required 64-bit big-endian bit count.
   std::array<std::byte, 8U> encoded_bit_count{};
   for (std::size_t index = 0U; index < encoded_bit_count.size(); ++index) {
@@ -103,7 +109,7 @@ Sha256Digest Sha256::finalize() const noexcept {
     encoded_bit_count[index] = static_cast<std::byte>((bit_count >> shift) & 0xffU);
   }
   final_hash.update(encoded_bit_count);
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Serialize working words in canonical network order rather than exposing host representation.
   Sha256Digest digest{};
   for (std::size_t index = 0U; index < final_hash.state_.size(); ++index) {
@@ -111,10 +117,12 @@ Sha256Digest Sha256::finalize() const noexcept {
                           std::span<std::byte, 4U>{digest.data() + (index * 4U), 4U});
   }
   return digest;
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // One compression step transforms exactly one 512-bit block into the eight-word chaining state.
 void Sha256::compress(std::span<const std::byte, block_size> block) noexcept {
+  // ++++++++++++++++++++++++++++++++++++++++
   // Seed the schedule from 16 encoded input words, then expand it to all 64 rounds.
   std::array<std::uint32_t, 64U> schedule{};
   for (std::size_t index = 0U; index < 16U; ++index) {
@@ -129,7 +137,7 @@ void Sha256::compress(std::span<const std::byte, block_size> block) noexcept {
                            std::rotr(schedule[index - 2U], 19) ^ (schedule[index - 2U] >> 10U);
     schedule[index] = schedule[index - 16U] + sigma_zero + schedule[index - 7U] + sigma_one;
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Work on a local copy so the prior chaining state remains available for feed-forward.
   auto a = state_[0U];
   auto b = state_[1U];
@@ -139,7 +147,7 @@ void Sha256::compress(std::span<const std::byte, block_size> block) noexcept {
   auto f = state_[5U];
   auto g = state_[6U];
   auto h = state_[7U];
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Apply the 64 SHA-256 choice, majority, rotation, and modular-addition rounds.
   for (std::size_t index = 0U; index < schedule.size(); ++index) {
     const auto sum_one = std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
@@ -158,7 +166,7 @@ void Sha256::compress(std::span<const std::byte, block_size> block) noexcept {
     b = a;
     a = temporary_one + temporary_two;
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Feed the completed block back into the chaining state for the next block or final digest.
   state_[0U] += a;
   state_[1U] += b;
@@ -168,15 +176,16 @@ void Sha256::compress(std::span<const std::byte, block_size> block) noexcept {
   state_[5U] += f;
   state_[6U] += g;
   state_[7U] += h;
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Keep one-shot hashing a thin composition of the streaming contract.
 Sha256Digest sha256(std::span<const std::byte> bytes) noexcept {
   Sha256 hash;
   hash.update(bytes);
   return hash.finalize();
 }
-
+// --------------------------------------------------------
 // Encode each digest nibble through a fixed lowercase table, producing exactly 64 characters.
 Sha256Hex sha256_hex(const Sha256Digest& digest) noexcept {
   constexpr std::array<char, 16U> digits{'0', '1', '2', '3', '4', '5', '6', '7',
@@ -190,5 +199,6 @@ Sha256Hex sha256_hex(const Sha256Digest& digest) noexcept {
   }
   return encoded;
 }
+// --------------------------------------------------------
 
 } // namespace aegis::model

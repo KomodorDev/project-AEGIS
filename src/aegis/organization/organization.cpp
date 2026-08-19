@@ -15,6 +15,7 @@ namespace {
 using model::DomainError;
 using model::DomainErrorCode;
 
+// --------------------------------------------------------
 // Both helpers require canonical ID order. That precondition makes duplicate error positions stable
 // across input permutations and permits allocation-free relationship lookup.
 template <typename Record, typename IdAccessor>
@@ -28,7 +29,8 @@ template <typename Record, typename IdAccessor>
   }
   return model::Result<void>::success();
 }
-
+// --------------------------------------------------------
+// Resolve one canonical record without allocating or maintaining a secondary index.
 template <typename Record, typename Id>
 [[nodiscard]] const Record* find_by_id(const std::vector<Record>& records, const Id& id) noexcept {
   const auto found =
@@ -39,12 +41,16 @@ template <typename Record, typename Id>
   }
   return &*found;
 }
+// --------------------------------------------------------
 
 } // namespace
 
+// --------------------------------------------------------
+// Validate the complete peer-firm hierarchy and publish canonical registrations and attribution.
 model::Result<Organization> Organization::create(model::OrganizationRevision revision,
                                                  std::vector<Firm> firms, std::vector<Desk> desks,
                                                  std::vector<BotRegistration> bots) {
+  // ++++++++++++++++++++++++++++++++++++++++
   // Reject missing hierarchy levels from root to leaf so simultaneous defects have stable priority.
   if (firms.empty()) {
     return model::Result<Organization>::failure(
@@ -58,7 +64,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
     return model::Result<Organization>::failure(
         DomainError::at_field(DomainErrorCode::EmptyCollection, "organization.bots"));
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Canonicalize every level before reporting duplicates or collection indices.
   std::sort(firms.begin(), firms.end(),
             [](const Firm& lhs, const Firm& rhs) { return lhs.id < rhs.id; });
@@ -66,7 +72,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
             [](const Desk& lhs, const Desk& rhs) { return lhs.id < rhs.id; });
   std::sort(bots.begin(), bots.end(),
             [](const BotRegistration& lhs, const BotRegistration& rhs) { return lhs.id < rhs.id; });
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Typed identifiers must be unique within their own hierarchy level.
   const auto firm_duplicates =
       reject_duplicate_ids(firms, "organization.firms.id",
@@ -86,7 +92,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
   if (!bot_duplicates) {
     return model::Result<Organization>::failure(bot_duplicates.error());
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Prove upward references before checking whether every parent has descendants.
   for (std::size_t index = 0U; index < desks.size(); ++index) {
     if (find_by_id(firms, desks[index].firm_id) == nullptr) {
@@ -100,7 +106,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
           DomainErrorCode::DanglingReference, "organization.bots.desk_id", index));
     }
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // A published organization is operationally complete: every firm has a desk and every desk a bot.
   for (std::size_t index = 0U; index < firms.size(); ++index) {
     const bool has_desk = std::any_of(desks.begin(), desks.end(), [&](const Desk& desk) {
@@ -120,7 +126,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
           DomainErrorCode::InvalidRelationship, "organization.desks.bots", index));
     }
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Materialize transitive firm ownership only after all parent links are known to be safe.
   std::vector<BotAttribution> attributions;
   attributions.reserve(bots.size());
@@ -132,8 +138,9 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
 
   return model::Result<Organization>::success(Organization{
       revision, std::move(firms), std::move(desks), std::move(bots), std::move(attributions)});
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Attributions inherit canonical bot-ID order, so lookup never needs a secondary index.
 const BotAttribution* Organization::find_bot(const model::BotId& bot_id) const noexcept {
   const auto found =
@@ -146,5 +153,6 @@ const BotAttribution* Organization::find_bot(const model::BotId& bot_id) const n
   }
   return &*found;
 }
+// --------------------------------------------------------
 
 } // namespace aegis::organization
