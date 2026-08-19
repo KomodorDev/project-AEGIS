@@ -20,7 +20,7 @@ option(AEGIS_WARNINGS_AS_ERRORS "Treat warnings in AEGIS-owned targets as errors
 option(AEGIS_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 option(AEGIS_ENABLE_UNDEFINED_SANITIZER "Enable UndefinedBehaviorSanitizer" OFF)
 option(AEGIS_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
-option(AEGIS_BUILD_BENCHMARKS "Build the M0 benchmark harness" ON)
+option(AEGIS_BUILD_BENCHMARKS "Build the named M0 and M2 benchmark workloads" ON)
 
 # Load reusable project policies from cmake/ProjectOptions.cmake and create their interface targets.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
