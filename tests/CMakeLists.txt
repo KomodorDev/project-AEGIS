@@ -68,3 +68,11 @@ target_link_libraries(aegis_m1_reference_scenario_tests PRIVATE aegis_test_suppo
                                                                 Catch2::Catch2WithMain)
 aegis_configure_owned_target(aegis_m1_reference_scenario_tests)
 catch_discover_tests(aegis_m1_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)
+
+# Replay the complete M2 validity table through both owner drivers and compare canonical evidence.
+add_executable(aegis_m2_reference_scenario_tests
+               deterministic_scenarios/m2_reference_scenario_test.cpp)
+target_link_libraries(aegis_m2_reference_scenario_tests PRIVATE aegis_test_support
+                                                                Catch2::Catch2WithMain)
+aegis_configure_owned_target(aegis_m2_reference_scenario_tests)
+catch_discover_tests(aegis_m2_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)
