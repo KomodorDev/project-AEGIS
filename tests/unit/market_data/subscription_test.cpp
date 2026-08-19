@@ -22,6 +22,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   }
   return std::move(parsed).value();
 }
+
 // --------------------------------------------------------
 // Build the valid organization on which every observation grant depends.
 [[nodiscard]] organization::Organization reference_organization() {
@@ -38,6 +39,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   }
   return std::move(result).value();
 }
+
 // --------------------------------------------------------
 // Build one canonical order-book observation grant for the reference bot and instrument.
 [[nodiscard]] market_data::Subscription subscription(std::string_view subscription_id) {
@@ -46,16 +48,19 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
       id<model::BotId>("bot.deribit-btc-perpetual-reference"), id<model::VenueId>("deribit"),
       id<model::InstrumentId>("BTC-USD-PERPETUAL"), market_data::SubscriptionChannel::OrderBook};
 }
+
 // --------------------------------------------------------
 // Supply the complete venue-instrument catalog required by the reference grant.
 [[nodiscard]] std::vector<market_data::VenueInstrumentPair> venue_instruments() {
   return {{id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")}};
 }
+
 // --------------------------------------------------------
 // Accepted cases lock canonical grants while preserving the deliberate validity of an empty
 // section.
 TEST_CASE("subscriptions are sorted by ID and preserve explicit order-book grants",
           "[market_data][subscription]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Author two valid grants out of order against a complete dependency catalog.
   const auto organization = reference_organization();
@@ -67,6 +72,7 @@ TEST_CASE("subscriptions are sorted by ID and preserve explicit order-book grant
       model::SubscriptionRevision::initial(), {second, first}, organization,
       {{id<model::VenueId>("deribit"), id<model::InstrumentId>("ETH-USD-PERPETUAL")},
        {id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")}});
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Verify canonical publication, revision ownership, and indexed lookup behavior.
   REQUIRE(result);
@@ -76,8 +82,10 @@ TEST_CASE("subscriptions are sorted by ID and preserve explicit order-book grant
   CHECK(result.value().revision() == model::SubscriptionRevision::initial());
   CHECK(result.value().find(id<model::SubscriptionId>("subscription.a-book")) != nullptr);
   CHECK(result.value().find(id<model::SubscriptionId>("subscription.missing")) == nullptr);
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Observation is optional, so an explicitly empty section remains a valid configuration.
 TEST_CASE("an empty subscription section is valid", "[market_data][subscription]") {
@@ -88,9 +96,11 @@ TEST_CASE("an empty subscription section is valid", "[market_data][subscription]
   REQUIRE(result);
   CHECK(result.value().subscriptions().empty());
 }
+
 // --------------------------------------------------------
 // Subscription IDs and observation meaning are independent uniqueness contracts.
 TEST_CASE("subscription IDs and semantic keys must both be unique", "[market_data][subscription]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Duplicate authored identifiers fail at the canonical duplicate position.
   const auto organization = reference_organization();
@@ -103,6 +113,7 @@ TEST_CASE("subscription IDs and semantic keys must both be unique", "[market_dat
   CHECK(duplicate_id.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
                                      "subscriptions.id", 1U));
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Distinct IDs cannot disguise duplicate bot/venue/instrument/channel meaning.
   const auto duplicate_key = market_data::SubscriptionConfiguration::create(
@@ -113,8 +124,10 @@ TEST_CASE("subscription IDs and semantic keys must both be unique", "[market_dat
   CHECK(duplicate_key.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
                                      "subscriptions.semantic_key", 1U));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Permission catalogs must fail with canonical indices before any subscription is evaluated.
 TEST_CASE("subscription dependency pairs reject duplicates after canonical sorting",
@@ -134,9 +147,11 @@ TEST_CASE("subscription dependency pairs reject duplicates after canonical sorti
                                                        "subscriptions.known_venue_instruments",
                                                        2U));
 }
+
 // --------------------------------------------------------
 // Reference, relationship, and channel failures remain distinct for actionable startup diagnostics.
 TEST_CASE("subscriptions reject every dangling reference", "[market_data][subscription]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // A grant cannot name a bot absent from the validated organization.
   const auto organization = reference_organization();
@@ -148,6 +163,7 @@ TEST_CASE("subscriptions reject every dangling reference", "[market_data][subscr
       model::SubscriptionRevision::initial(), {unknown_bot}, organization, pairs);
   REQUIRE_FALSE(bot_result);
   CHECK(bot_result.error().context.field == "subscriptions.bot_id");
+
   // ++++++++++++++++++++++++++++++++++++++++
   // A grant cannot name a venue absent from the known pair catalog.
   auto unknown_venue = subscription("subscription.unknown-venue");
@@ -156,6 +172,7 @@ TEST_CASE("subscriptions reject every dangling reference", "[market_data][subscr
       model::SubscriptionRevision::initial(), {unknown_venue}, organization, pairs);
   REQUIRE_FALSE(venue_result);
   CHECK(venue_result.error().context.field == "subscriptions.venue_id");
+
   // ++++++++++++++++++++++++++++++++++++++++
   // A grant cannot name an instrument absent from the known pair catalog.
   auto unknown_instrument = subscription("subscription.unknown-instrument");
@@ -164,8 +181,10 @@ TEST_CASE("subscriptions reject every dangling reference", "[market_data][subscr
       model::SubscriptionRevision::initial(), {unknown_instrument}, organization, pairs);
   REQUIRE_FALSE(instrument_result);
   CHECK(instrument_result.error().context.field == "subscriptions.instrument_id");
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Independently known venues and instruments do not authorize an undeclared pair.
 TEST_CASE("subscriptions require an explicitly known venue and instrument pair",
@@ -183,6 +202,7 @@ TEST_CASE("subscriptions require an explicitly known venue and instrument pair",
   CHECK(result.error() == model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
                                                        "subscriptions.venue_instrument", 0U));
 }
+
 // --------------------------------------------------------
 // Unassigned channel values fail closed instead of silently acquiring observation authority.
 TEST_CASE("M1 accepts only the assigned order-book channel", "[market_data][subscription]") {
@@ -197,6 +217,7 @@ TEST_CASE("M1 accepts only the assigned order-book channel", "[market_data][subs
   CHECK(result.error() == model::DomainError::at_index(model::DomainErrorCode::InvalidValue,
                                                        "subscriptions.channel", 0U));
 }
+
 // --------------------------------------------------------
 
 } // namespace

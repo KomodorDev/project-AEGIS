@@ -32,12 +32,14 @@ template <typename Value>
   }
   return model::Result<void>::success();
 }
+
 // --------------------------------------------------------
 // Test membership in a dependency catalog that its caller has already canonicalized.
 template <typename Value>
 [[nodiscard]] bool contains(const std::vector<Value>& values, const Value& value) noexcept {
   return std::binary_search(values.begin(), values.end(), value);
 }
+
 // --------------------------------------------------------
 // Staged existence checks distinguish unknown components from a known but ungranted pair, keeping
 // dangling-reference and invalid-relationship failures semantically distinct.
@@ -46,6 +48,7 @@ template <typename Value>
   return std::any_of(pairs.begin(), pairs.end(),
                      [&](const VenueInstrumentPair& pair) { return pair.first == venue_id; });
 }
+
 // --------------------------------------------------------
 // Check instrument existence independently of its venue pairing for precise failure reporting.
 [[nodiscard]] bool contains_instrument(const std::vector<VenueInstrumentPair>& pairs,
@@ -53,6 +56,7 @@ template <typename Value>
   return std::any_of(pairs.begin(), pairs.end(),
                      [&](const VenueInstrumentPair& pair) { return pair.second == instrument_id; });
 }
+
 // --------------------------------------------------------
 
 } // namespace
@@ -64,6 +68,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
                                   std::vector<Subscription> subscriptions,
                                   const organization::Organization& organization,
                                   std::vector<VenueInstrumentPair> known_venue_instruments) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Catalog defects take precedence because every subscription depends on an unambiguous source.
   const auto dependency_duplicates =
@@ -71,6 +76,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
   if (!dependency_duplicates) {
     return model::Result<SubscriptionConfiguration>::failure(dependency_duplicates.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonical subscription order stabilizes both duplicate positions and the published snapshot.
   std::sort(subscriptions.begin(), subscriptions.end(),
@@ -82,6 +88,7 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
           DomainError::at_index(DomainErrorCode::DuplicateIdentifier, "subscriptions.id", index));
     }
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve dependencies and the assigned channel before enforcing uniqueness of grant meaning.
   using SemanticKey =
@@ -122,8 +129,10 @@ SubscriptionConfiguration::create(model::SubscriptionRevision revision,
 
   return model::Result<SubscriptionConfiguration>::success(
       SubscriptionConfiguration{revision, std::move(subscriptions)});
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Factory canonicalization makes lower_bound sufficient without a mutable secondary index.
 const Subscription*
@@ -138,6 +147,7 @@ SubscriptionConfiguration::find(const model::SubscriptionId& id) const noexcept 
   }
   return &*found;
 }
+
 // --------------------------------------------------------
 
 } // namespace aegis::market_data

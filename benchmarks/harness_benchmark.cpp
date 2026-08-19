@@ -10,9 +10,11 @@ namespace {
 // --------------------------------------------------------
 // Execute a stable, intentionally trivial mutation once per iteration selected by the runner.
 void harness_noop(benchmark::State& state) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Initialize the value whose mutation supplies the intentionally tiny workload.
   std::uint64_t token = 0;
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Interesting syntax: [[maybe_unused]] documents that the range value drives timing only.
   // DoNotOptimize and ClobberMemory stop the optimizer from deleting/reordering the workload.
@@ -21,11 +23,14 @@ void harness_noop(benchmark::State& state) {
     token ^= 0x9e3779b97f4a7c15ULL;
     benchmark::ClobberMemory();
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Report iterations as processed items so benchmark throughput metadata remains meaningful.
   state.SetItemsProcessed(state.iterations());
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 
 } // namespace
@@ -33,7 +38,9 @@ void harness_noop(benchmark::State& state) {
 // --------------------------------------------------------
 // Register a stable workload ID and report its duration in nanoseconds.
 BENCHMARK(harness_noop)->Name("BENCH-M0-HARNESS-001/harness.noop")->Unit(benchmark::kNanosecond);
+
 // --------------------------------------------------------
 // Interesting syntax: this macro generates main() and starts every registered benchmark.
 BENCHMARK_MAIN();
+
 // --------------------------------------------------------

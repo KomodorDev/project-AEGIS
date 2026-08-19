@@ -18,51 +18,63 @@ namespace aegis::configuration {
 // The schema version is part of the canonical byte prefix; changing it is a compatibility decision,
 // not an implementation detail.
 inline constexpr std::uint16_t canonical_configuration_schema_version = 1U;
+
 // ########################################################################
 // M1 deliberately supports only the credential-free reference environment. Adding another
 // assigned value changes the configuration semantics and therefore requires an explicit decision.
 enum class VenueEnvironment : std::uint8_t {
   Testnet = 1,
 };
+
 // ########################################################################
 // Venue definitions deliberately contain no endpoints or credentials in the M1 rulebook.
 struct VenueDefinition {
   model::VenueId id;
   VenueEnvironment environment;
+
   // --------------------------------------------------------
   // Structural equality compares the complete credential-free venue definition.
   friend bool operator==(const VenueDefinition&, const VenueDefinition&) = default;
+
   // --------------------------------------------------------
 };
+
 // ########################################################################
 // A logical account is owned by one peer firm at one venue; it is not a venue credential container.
 struct LogicalAccountVenueBinding {
   model::LogicalAccountId logical_account_id;
   model::FirmId firm_id;
   model::VenueId venue_id;
+
   // --------------------------------------------------------
   // Structural equality compares account identity, firm ownership, and venue binding.
   friend bool operator==(const LogicalAccountVenueBinding&,
                          const LogicalAccountVenueBinding&) = default;
+
   // --------------------------------------------------------
 };
+
 // ########################################################################
 // ObserveOnly is configuration, not an execution capability. Later milestones may add explicitly
 // assigned modes without changing the fact that execution requires a separate enabled route.
 enum class StrategyMode : std::uint8_t {
   ObserveOnly = 1,
 };
+
 // ########################################################################
 // Settings must agree with immutable bot registration, while ObserveOnly remains non-executing.
 struct BotStrategySettings {
   model::BotId bot_id;
   model::StrategyId strategy_id;
   StrategyMode mode;
+
   // --------------------------------------------------------
   // Structural equality compares the bot, strategy, and assigned non-executing mode.
   friend bool operator==(const BotStrategySettings&, const BotStrategySettings&) = default;
+
   // --------------------------------------------------------
 };
+
 // ########################################################################
 // These are authoring parameters, not a published partially validated configuration. Every
 // collection is copied into a canonically sorted immutable value only if the whole snapshot passes.
@@ -87,88 +99,108 @@ struct StartupConfigurationParams {
   model::RouteRevision route_revision;
   std::vector<execution::ExecutionRoute> routes;
 };
+
 // ########################################################################
 // Successful creation publishes one immutable unit whose validated sections, canonical bytes,
 // fingerprint, and revision provenance cannot be observed in a partially updated combination.
 class StartupConfiguration {
 public:
+
   // --------------------------------------------------------
   // Validate all sections and atomically seal their canonical bytes, fingerprint, and provenance.
   [[nodiscard]] static model::Result<StartupConfiguration>
   create(StartupConfigurationParams params);
+
   // --------------------------------------------------------
   // Return the revision of the complete accepted startup configuration.
   [[nodiscard]] model::ConfigurationRevision revision() const noexcept { return revision_; }
+
   // --------------------------------------------------------
   // Borrow the validated immutable organization section.
   [[nodiscard]] const organization::Organization& organization() const noexcept {
     return organization_;
   }
+
   // --------------------------------------------------------
   // Return the revision of the strategy-settings section.
   [[nodiscard]] model::StrategyConfigurationRevision
   strategy_configuration_revision() const noexcept {
     return strategy_configuration_revision_;
   }
+
   // --------------------------------------------------------
   // Borrow canonical bot strategy settings.
   [[nodiscard]] const std::vector<BotStrategySettings>& strategy_settings() const noexcept {
     return strategy_settings_;
   }
+
   // --------------------------------------------------------
   // Borrow canonical credential-free venue definitions.
   [[nodiscard]] const std::vector<VenueDefinition>& venues() const noexcept { return venues_; }
+
   // --------------------------------------------------------
   // Borrow canonical logical-account ownership and venue bindings.
   [[nodiscard]] const std::vector<LogicalAccountVenueBinding>& logical_accounts() const noexcept {
     return logical_accounts_;
   }
+
   // --------------------------------------------------------
   // Borrow canonical validated instrument metadata.
   [[nodiscard]] const std::vector<model::InstrumentMetadata>& instrument_metadata() const noexcept {
     return instrument_metadata_;
   }
+
   // --------------------------------------------------------
   // Borrow the validated immutable subscription section.
   [[nodiscard]] const market_data::SubscriptionConfiguration& subscriptions() const noexcept {
     return subscriptions_;
   }
+
   // --------------------------------------------------------
   // Borrow the validated immutable execution-route section.
   [[nodiscard]] const execution::ExecutionRouteConfiguration& routes() const noexcept {
     return routes_;
   }
+
   // --------------------------------------------------------
   // Borrow the schema-versioned canonical bytes used for fingerprinting.
   [[nodiscard]] const std::vector<std::byte>& canonical_bytes() const noexcept {
     return canonical_bytes_;
   }
+
   // --------------------------------------------------------
   // Borrow the SHA-256 identity of the canonical bytes.
   [[nodiscard]] const ConfigurationFingerprint& fingerprint() const noexcept {
     return fingerprint_;
   }
+
   // --------------------------------------------------------
   // Borrow the complete revision provenance derived from this same snapshot.
   [[nodiscard]] const ConfigurationProvenance& provenance() const noexcept { return provenance_; }
+
   // --------------------------------------------------------
   // Resolve one immutable venue definition by nominal venue identity.
   [[nodiscard]] const VenueDefinition* find_venue(const model::VenueId& venue_id) const noexcept;
+
   // --------------------------------------------------------
   // Resolve one immutable account ownership/venue binding by nominal account identity.
   [[nodiscard]] const LogicalAccountVenueBinding*
   find_logical_account(const model::LogicalAccountId& logical_account_id) const noexcept;
+
   // --------------------------------------------------------
   // Resolve one immutable strategy setting by nominal bot identity.
   [[nodiscard]] const BotStrategySettings*
   find_strategy_settings(const model::BotId& bot_id) const noexcept;
+
   // --------------------------------------------------------
   // Resolve metadata by its canonical venue/instrument key.
   [[nodiscard]] const model::InstrumentMetadata*
   find_instrument_metadata(const model::VenueId& venue_id,
                            const model::InstrumentId& instrument_id) const noexcept;
+
   // --------------------------------------------------------
 private:
+
   // --------------------------------------------------------
   // Only create may assemble the sealed snapshot, keeping every derived identity synchronized.
   StartupConfiguration(model::ConfigurationRevision revision,
@@ -190,6 +222,7 @@ private:
         subscriptions_{std::move(subscriptions)}, routes_{std::move(routes)},
         canonical_bytes_{std::move(canonical_bytes)}, fingerprint_{std::move(fingerprint)},
         provenance_{std::move(provenance)} {}
+
   // --------------------------------------------------------
   model::ConfigurationRevision revision_;
   organization::Organization organization_;
@@ -204,5 +237,6 @@ private:
   ConfigurationFingerprint fingerprint_;
   ConfigurationProvenance provenance_;
 };
+
 // ########################################################################
 } // namespace aegis::configuration

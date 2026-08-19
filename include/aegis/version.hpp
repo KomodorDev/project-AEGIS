@@ -9,12 +9,15 @@
 
 // Keep public symbols under the project namespace to avoid collisions with application code.
 namespace aegis {
+
 // --------------------------------------------------------
 // [[nodiscard]] warns if callers discard the immutable project name; noexcept promises it cannot
 // throw.
 [[nodiscard]] std::string_view project_name() noexcept;
+
 // --------------------------------------------------------
 // Return the immutable project version without allocation or exceptions.
 [[nodiscard]] std::string_view project_version() noexcept;
+
 // --------------------------------------------------------
 } // namespace aegis

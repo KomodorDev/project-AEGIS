@@ -12,16 +12,19 @@ namespace {
 [[nodiscard]] bool is_lower_alphanumeric(char character) noexcept {
   return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
 }
+
 // --------------------------------------------------------
 // Apply the equivalent locale-independent predicate to the uppercase identifier grammars.
 [[nodiscard]] bool is_upper_alphanumeric(char character) noexcept {
   return (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9');
 }
+
 // --------------------------------------------------------
 // Validate a token as non-empty alphanumeric segments separated by one accepted byte.
 template <typename IsAlphanumeric>
 [[nodiscard]] bool is_segmented_token(std::string_view value, char separator,
                                       IsAlphanumeric is_alphanumeric) noexcept {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Endpoints must be data, and the scan then rules out adjacent separators and foreign bytes.
   if (value.empty() || !is_alphanumeric(value.front()) || !is_alphanumeric(value.back())) {
@@ -43,12 +46,15 @@ template <typename IsAlphanumeric>
     previous_was_separator = false;
   }
   return true;
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Validate prefixed firm, desk, and bot identifiers under their shared slug grammar.
 [[nodiscard]] bool is_organization_identifier(std::string_view value,
                                               std::string_view prefix) noexcept {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // The stable prefix counts toward the limit; only the remaining slug may contain dot or dash
   // separators, with the same non-empty-segment invariant as other token grammars.
@@ -56,6 +62,7 @@ template <typename IsAlphanumeric>
   if (value.size() > maximum_size || !value.starts_with(prefix)) {
     return false;
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate the prefix-stripped slug endpoints before scanning its internal separators.
   const auto slug = value.substr(prefix.size());
@@ -79,11 +86,14 @@ template <typename IsAlphanumeric>
     previous_was_separator = false;
   }
   return true;
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Accept printable venue-native adapter identifiers without locale-sensitive classification.
 [[nodiscard]] bool is_adapter_identifier(std::string_view value) noexcept {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Adapter identifiers preserve venue punctuation but reject controls, non-ASCII bytes, and values
   // too large for the fixed configuration contract.
@@ -101,8 +111,10 @@ template <typename IsAlphanumeric>
     }
   }
   return true;
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 
 } // namespace
@@ -111,6 +123,7 @@ template <typename IsAlphanumeric>
 // Dispatch each public identifier family to its exact accepted grammar and size bound.
 bool is_valid_identifier(std::string_view value, IdentifierGrammar grammar,
                          std::string_view prefix) noexcept {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Keep dispatch exhaustive and fail closed if an unassigned enum value reaches this boundary.
   switch (grammar) {
@@ -124,8 +137,10 @@ bool is_valid_identifier(std::string_view value, IdentifierGrammar grammar,
     return is_adapter_identifier(value);
   }
   return false;
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 
 } // namespace aegis::model::detail

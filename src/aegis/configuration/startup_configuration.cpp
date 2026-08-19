@@ -40,6 +40,7 @@ enum class ConfigurationTag : std::uint16_t {
   RouteRevision = 13,
   Routes = 14,
 };
+
 // ########################################################################
 
 // --------------------------------------------------------
@@ -47,6 +48,7 @@ enum class ConfigurationTag : std::uint16_t {
 [[nodiscard]] constexpr std::uint16_t tag(ConfigurationTag value) noexcept {
   return static_cast<std::uint16_t>(value);
 }
+
 // --------------------------------------------------------
 
 // ########################################################################
@@ -54,6 +56,7 @@ enum class ConfigurationTag : std::uint16_t {
 // a general serializer and accepts only the primitives required by ADR-0005.
 class CanonicalConfigurationWriter final {
 public:
+
   // --------------------------------------------------------
   // Append already validated ASCII bytes without a length prefix.
   [[nodiscard]] bool append_ascii_raw(std::string_view value) {
@@ -65,6 +68,7 @@ public:
     }
     return true;
   }
+
   // --------------------------------------------------------
   // Append one raw byte after proving the backing buffer can grow.
   [[nodiscard]] bool append_byte(std::uint8_t value) {
@@ -74,12 +78,14 @@ public:
     bytes_.push_back(std::byte{value});
     return true;
   }
+
   // --------------------------------------------------------
   // Encode one unsigned 16-bit integer in portable big-endian order.
   [[nodiscard]] bool append_u16(std::uint16_t value) {
     return append_byte(static_cast<std::uint8_t>((value >> 8U) & 0xffU)) &&
            append_byte(static_cast<std::uint8_t>(value & 0xffU));
   }
+
   // --------------------------------------------------------
   // Encode one unsigned 32-bit integer in portable big-endian order.
   [[nodiscard]] bool append_u32(std::uint32_t value) {
@@ -88,6 +94,7 @@ public:
            append_byte(static_cast<std::uint8_t>((value >> 8U) & 0xffU)) &&
            append_byte(static_cast<std::uint8_t>(value & 0xffU));
   }
+
   // --------------------------------------------------------
   // Encode one unsigned 64-bit integer in portable big-endian order.
   [[nodiscard]] bool append_u64(std::uint64_t value) {
@@ -103,6 +110,7 @@ public:
     }
     return true;
   }
+
   // --------------------------------------------------------
   // Append an opaque byte span without assigning schema meaning.
   [[nodiscard]] bool append_bytes(std::span<const std::byte> value) {
@@ -112,6 +120,7 @@ public:
     bytes_.insert(bytes_.end(), value.begin(), value.end());
     return true;
   }
+
   // --------------------------------------------------------
   // Encode a tagged field as tag, 32-bit payload length, and payload bytes.
   [[nodiscard]] bool append_field(std::uint16_t field_tag, std::span<const std::byte> payload) {
@@ -121,6 +130,7 @@ public:
     return append_u16(field_tag) && append_u32(static_cast<std::uint32_t>(payload.size())) &&
            append_bytes(payload);
   }
+
   // --------------------------------------------------------
   // Encode validated ASCII directly as one tagged field.
   [[nodiscard]] bool append_ascii_field(std::uint16_t field_tag, std::string_view value) {
@@ -132,18 +142,21 @@ public:
     }
     return append_ascii_raw(value);
   }
+
   // --------------------------------------------------------
   // Encode one byte as a tagged fixed-shape payload.
   [[nodiscard]] bool append_u8_field(std::uint16_t field_tag, std::uint8_t value) {
     const std::array payload{std::byte{value}};
     return append_field(field_tag, payload);
   }
+
   // --------------------------------------------------------
   // Encode one big-endian 64-bit integer as a tagged field.
   [[nodiscard]] bool append_u64_field(std::uint16_t field_tag, std::uint64_t value) {
     CanonicalConfigurationWriter payload;
     return payload.append_u64(value) && append_field(field_tag, payload.bytes());
   }
+
   // --------------------------------------------------------
   // Encode a decimal coefficient and scale with an invariant two's-complement coefficient width.
   [[nodiscard]] bool append_decimal_field(std::uint16_t field_tag, std::int64_t coefficient,
@@ -154,6 +167,7 @@ public:
     return payload.append_u64(static_cast<std::uint64_t>(coefficient)) &&
            payload.append_byte(scale) && append_field(field_tag, payload.bytes());
   }
+
   // --------------------------------------------------------
   // Prefix an opaque nested value with its portable 32-bit byte length.
   [[nodiscard]] bool append_length_prefixed(std::span<const std::byte> value) {
@@ -162,11 +176,13 @@ public:
     }
     return append_u32(static_cast<std::uint32_t>(value.size())) && append_bytes(value);
   }
+
   // --------------------------------------------------------
   // Encode a collection as count plus individually length-prefixed canonical records.
   template <typename Records, typename Encode>
   [[nodiscard]] bool append_sequence_field(std::uint16_t field_tag, const Records& records,
                                            Encode encode) {
+
     // ++++++++++++++++++++++++++++++++++++++++
     // Validate and emit the fixed-width record count before encoding individual records.
     if (records.size() > maximum_u32_size) {
@@ -176,6 +192,7 @@ public:
     if (!payload.append_u32(static_cast<std::uint32_t>(records.size()))) {
       return false;
     }
+
     // ++++++++++++++++++++++++++++++++++++++++
     // Encode each record independently so its canonical byte length is explicit in the sequence.
     for (const auto& record : records) {
@@ -185,15 +202,19 @@ public:
       }
     }
     return append_field(field_tag, payload.bytes());
+
     // ++++++++++++++++++++++++++++++++++++++++
   }
+
   // --------------------------------------------------------
   // Expose a read-only view for composing nested writers without transferring ownership.
   [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
+
   // --------------------------------------------------------
   // Interesting syntax: the && qualifier permits destructive extraction only from a disposable
   // writer, so an encoder cannot accidentally drain a writer it intends to keep using.
   [[nodiscard]] std::vector<std::byte> take_bytes() && { return std::move(bytes_); }
+
   // --------------------------------------------------------
 
 private:
@@ -205,15 +226,18 @@ private:
   [[nodiscard]] bool can_grow(std::size_t additional_size) const noexcept {
     return additional_size <= bytes_.max_size() - bytes_.size();
   }
+
   // --------------------------------------------------------
 
   std::vector<std::byte> bytes_;
 };
+
 // ########################################################################
 
 // ########################################################################
 // Nested record encoders assign field tags and order explicitly; changing either changes schema 1.
 using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
+
 // ########################################################################
 
 // --------------------------------------------------------
@@ -225,6 +249,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
   }
   return EncodedRecord::success(std::move(writer));
 }
+
 // --------------------------------------------------------
 // Encode a firm record under its schema-1 field assignments.
 [[nodiscard]] EncodedRecord encode_firm(const organization::Firm& firm) {
@@ -232,6 +257,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
   const bool success = writer.append_ascii_field(1U, firm.id.value());
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode a desk record and its owning firm under fixed schema-1 field assignments.
 [[nodiscard]] EncodedRecord encode_desk(const organization::Desk& desk) {
@@ -240,6 +266,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_ascii_field(2U, desk.firm_id.value());
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode a bot record with its desk and immutable strategy references.
 [[nodiscard]] EncodedRecord encode_bot(const organization::BotRegistration& bot) {
@@ -249,6 +276,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_ascii_field(3U, bot.strategy_id.value());
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode one bot's validated strategy settings and assigned observation mode.
 [[nodiscard]] EncodedRecord encode_strategy_settings(const BotStrategySettings& settings) {
@@ -258,6 +286,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_u8_field(3U, static_cast<std::uint8_t>(settings.mode));
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode a credential-free venue identity and environment assignment.
 [[nodiscard]] EncodedRecord encode_venue(const VenueDefinition& venue) {
@@ -266,6 +295,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_u8_field(2U, static_cast<std::uint8_t>(venue.environment));
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode a logical account together with its owning firm and connected venue.
 [[nodiscard]] EncodedRecord encode_logical_account(const LogicalAccountVenueBinding& binding) {
@@ -275,6 +305,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_ascii_field(3U, binding.venue_id.value());
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode the complete validated economic metadata snapshot in schema field order.
 [[nodiscard]] EncodedRecord encode_instrument_metadata(const model::InstrumentMetadata& metadata) {
@@ -302,6 +333,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                                   metadata.contract_multiplier().scale());
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode an observation grant without introducing execution authority.
 [[nodiscard]] EncodedRecord encode_subscription(const market_data::Subscription& subscription) {
@@ -313,6 +345,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_u8_field(5U, static_cast<std::uint8_t>(subscription.channel));
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Encode an explicit execution grant including logical account and assigned state.
 [[nodiscard]] EncodedRecord encode_route(const execution::ExecutionRoute& route) {
@@ -325,6 +358,7 @@ using EncodedRecord = model::Result<CanonicalConfigurationWriter>;
                        writer.append_u8_field(6U, static_cast<std::uint8_t>(route.state));
   return encoded_record(std::move(writer), success);
 }
+
 // --------------------------------------------------------
 // Magic, schema version, top-level tag order, and already-canonical collections form the complete
 // configuration fingerprint preimage.
@@ -338,6 +372,7 @@ encode_configuration(model::ConfigurationRevision revision,
                      const std::vector<model::InstrumentMetadata>& instrument_metadata,
                      const market_data::SubscriptionConfiguration& subscriptions,
                      const execution::ExecutionRouteConfiguration& routes) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit the schema identity and every validated collection in its fixed top-level tag order.
   CanonicalConfigurationWriter writer;
@@ -367,6 +402,7 @@ encode_configuration(model::ConfigurationRevision revision,
                                    subscriptions.subscriptions(), encode_subscription) &&
       writer.append_u64_field(tag(ConfigurationTag::RouteRevision), routes.revision().value()) &&
       writer.append_sequence_field(tag(ConfigurationTag::Routes), routes.routes(), encode_route);
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish bytes only when the full preimage fits every canonical length boundary.
   if (!success) {
@@ -374,8 +410,10 @@ encode_configuration(model::ConfigurationRevision revision,
         DomainError::at_field(DomainErrorCode::EncodingOverflow, "configuration.encoding"));
   }
   return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Startup validators canonicalize before using these duplicate and relationship lookup helpers.
 template <typename Record, typename IdAccessor>
@@ -390,6 +428,7 @@ template <typename Record, typename IdAccessor>
   }
   return model::Result<void>::success();
 }
+
 // --------------------------------------------------------
 // Resolve a venue from its already canonical validated catalog.
 [[nodiscard]] bool contains_venue(const std::vector<VenueDefinition>& venues,
@@ -399,6 +438,7 @@ template <typename Record, typename IdAccessor>
       [](const VenueDefinition& venue, const model::VenueId& target) { return venue.id < target; });
   return found != venues.end() && found->id == venue_id;
 }
+
 // --------------------------------------------------------
 // Resolve a peer firm from the organization's canonical root collection.
 [[nodiscard]] bool contains_firm(const organization::Organization& organization,
@@ -409,6 +449,7 @@ template <typename Record, typename IdAccessor>
       [](const organization::Firm& firm, const model::FirmId& target) { return firm.id < target; });
   return found != firms.end() && found->id == firm_id;
 }
+
 // --------------------------------------------------------
 // Resolve the immutable strategy declaration for one canonical bot registration.
 [[nodiscard]] const organization::BotRegistration*
@@ -420,6 +461,7 @@ find_bot_registration(const organization::Organization& organization,
                                          const model::BotId& target) { return bot.id < target; });
   return found != bots.end() && found->id == bot_id ? &*found : nullptr;
 }
+
 // --------------------------------------------------------
 // Resolve one bot's canonical startup strategy settings without a secondary index.
 [[nodiscard]] const BotStrategySettings*
@@ -432,11 +474,13 @@ find_settings(const std::vector<BotStrategySettings>& settings,
                        });
   return found != settings.end() && found->bot_id == bot_id ? &*found : nullptr;
 }
+
 // --------------------------------------------------------
 // Strategy settings must uniquely cover every registered bot and repeat its immutable strategy.
 [[nodiscard]] model::Result<std::vector<BotStrategySettings>>
 validate_strategy_settings(std::vector<BotStrategySettings> settings,
                            const organization::Organization& organization) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonical bot order fixes duplicate and relationship error positions.
   std::sort(settings.begin(), settings.end(),
@@ -447,6 +491,7 @@ validate_strategy_settings(std::vector<BotStrategySettings> settings,
   if (!duplicates) {
     return model::Result<std::vector<BotStrategySettings>>::failure(duplicates.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate each authored setting against the corresponding immutable bot registration.
   for (std::size_t index = 0U; index < settings.size(); ++index) {
@@ -464,6 +509,7 @@ validate_strategy_settings(std::vector<BotStrategySettings> settings,
           DomainError::at_index(DomainErrorCode::InvalidValue, "strategy_settings.mode", index));
     }
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Completeness is checked after individual settings are known to be valid registrations.
   const auto& bots = organization.bots();
@@ -474,12 +520,15 @@ validate_strategy_settings(std::vector<BotStrategySettings> settings,
     }
   }
   return model::Result<std::vector<BotStrategySettings>>::success(std::move(settings));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // M1 requires at least one unique credential-free venue with an explicitly assigned environment.
 [[nodiscard]] model::Result<std::vector<VenueDefinition>>
 validate_venues(std::vector<VenueDefinition> venues) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Establish non-empty canonical identity before inspecting assigned environments.
   if (venues.empty()) {
@@ -494,6 +543,7 @@ validate_venues(std::vector<VenueDefinition> venues) {
   if (!duplicates) {
     return model::Result<std::vector<VenueDefinition>>::failure(duplicates.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // M1 accepts only explicitly testnet-scoped venues.
   for (std::size_t index = 0U; index < venues.size(); ++index) {
@@ -503,14 +553,17 @@ validate_venues(std::vector<VenueDefinition> venues) {
     }
   }
   return model::Result<std::vector<VenueDefinition>>::success(std::move(venues));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Logical account IDs are globally unique and must resolve both their owning firm and venue.
 [[nodiscard]] model::Result<std::vector<LogicalAccountVenueBinding>>
 validate_logical_accounts(std::vector<LogicalAccountVenueBinding> bindings,
                           const std::vector<VenueDefinition>& venues,
                           const organization::Organization& organization) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonicalize and reject identity aliases before resolving any relationships.
   std::sort(bindings.begin(), bindings.end(), [](const auto& lhs, const auto& rhs) {
@@ -524,6 +577,7 @@ validate_logical_accounts(std::vector<LogicalAccountVenueBinding> bindings,
   if (!duplicates) {
     return model::Result<std::vector<LogicalAccountVenueBinding>>::failure(duplicates.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve both parent references before publishing secret-free account bindings.
   for (std::size_t index = 0U; index < bindings.size(); ++index) {
@@ -537,13 +591,16 @@ validate_logical_accounts(std::vector<LogicalAccountVenueBinding> bindings,
     }
   }
   return model::Result<std::vector<LogicalAccountVenueBinding>>::success(std::move(bindings));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Metadata has both a normalized venue/instrument key and a venue-native key; neither may alias.
 [[nodiscard]] model::Result<std::vector<model::InstrumentMetadata>>
 validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metadata_params,
                              const std::vector<VenueDefinition>& venues) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Require and canonicalize the normalized venue/instrument identities first.
   if (metadata_params.empty()) {
@@ -560,6 +617,7 @@ validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metada
           DomainErrorCode::DuplicateIdentifier, "instrument_metadata.venue_instrument", index));
     }
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Once normalized keys are canonical, validate native identity and delegate domain-specific
   // fields.
@@ -587,8 +645,10 @@ validate_instrument_metadata(std::vector<model::InstrumentMetadataParams> metada
     metadata.push_back(std::move(validated).value());
   }
   return model::Result<std::vector<model::InstrumentMetadata>>::success(std::move(metadata));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Permission factories receive dependency catalogs derived only from already validated metadata.
 [[nodiscard]] std::vector<market_data::VenueInstrumentPair>
@@ -600,6 +660,7 @@ venue_instrument_pairs(const std::vector<model::InstrumentMetadata>& metadata) {
   }
   return pairs;
 }
+
 // --------------------------------------------------------
 // Retain validated firm ownership in the secret-free projection so ExecutionRouteConfiguration
 // remains the public same-firm authorization boundary.
@@ -613,6 +674,7 @@ execution_account_bindings(const std::vector<LogicalAccountVenueBinding>& bindin
   }
   return result;
 }
+
 // --------------------------------------------------------
 // The provenance projection preserves metadata's canonical composite-key order for later lookup.
 [[nodiscard]] std::vector<InstrumentMetadataRevisionEntry>
@@ -625,6 +687,7 @@ metadata_revision_entries(const std::vector<model::InstrumentMetadata>& metadata
   }
   return entries;
 }
+
 // --------------------------------------------------------
 
 } // namespace
@@ -633,6 +696,7 @@ metadata_revision_entries(const std::vector<model::InstrumentMetadata>& metadata
 // Validate every startup section in compatibility order and publish its evidence atomically.
 model::Result<StartupConfiguration>
 StartupConfiguration::create(StartupConfigurationParams params) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Section validation order is a compatibility contract: organization, strategy settings,
   // venues, logical accounts, metadata, subscriptions, routes, then canonical encoding.
@@ -665,6 +729,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
   if (!metadata) {
     return model::Result<StartupConfiguration>::failure(metadata.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive permission catalogs from accepted sections rather than accepting parallel authoring
   // data.
@@ -675,6 +740,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
   if (!subscriptions) {
     return model::Result<StartupConfiguration>::failure(subscriptions.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Route validation receives firm-owned accounts directly; no weaker post-validation is required.
   auto routes = execution::ExecutionRouteConfiguration::create(
@@ -685,6 +751,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
   if (!routes) {
     return model::Result<StartupConfiguration>::failure(routes.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Only a fully valid rulebook is eligible for canonical encoding; no partial bytes are published.
   auto canonical_bytes = encode_configuration(
@@ -694,6 +761,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
   if (!canonical_bytes) {
     return model::Result<StartupConfiguration>::failure(canonical_bytes.error());
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Hash those exact bytes once and bind the resulting identity to every contributing revision.
   ConfigurationFingerprint fingerprint{model::sha256(canonical_bytes.value())};
@@ -706,6 +774,7 @@ StartupConfiguration::create(StartupConfigurationParams params) {
       routes.value().revision(),
       metadata_revision_entries(metadata.value()),
   };
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish validated sections and all derived evidence together as one immutable value.
   return model::Result<StartupConfiguration>::success(StartupConfiguration{
@@ -722,8 +791,10 @@ StartupConfiguration::create(StartupConfigurationParams params) {
       std::move(fingerprint),
       std::move(provenance),
   });
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // All lookup collections retain factory canonical order, permitting allocation-free binary search.
 const VenueDefinition*
@@ -733,6 +804,7 @@ StartupConfiguration::find_venue(const model::VenueId& venue_id) const noexcept 
       [](const VenueDefinition& venue, const model::VenueId& target) { return venue.id < target; });
   return found != venues_.end() && found->id == venue_id ? &*found : nullptr;
 }
+
 // --------------------------------------------------------
 // Resolve a logical account from the canonical validated account bindings.
 const LogicalAccountVenueBinding* StartupConfiguration::find_logical_account(
@@ -746,12 +818,14 @@ const LogicalAccountVenueBinding* StartupConfiguration::find_logical_account(
              ? &*found
              : nullptr;
 }
+
 // --------------------------------------------------------
 // Delegate bot-setting lookup to the same canonical helper used during completeness validation.
 const BotStrategySettings*
 StartupConfiguration::find_strategy_settings(const model::BotId& bot_id) const noexcept {
   return find_settings(strategy_settings_, bot_id);
 }
+
 // --------------------------------------------------------
 // Resolve metadata by its canonical venue/instrument composite key.
 const model::InstrumentMetadata* StartupConfiguration::find_instrument_metadata(
@@ -768,6 +842,7 @@ const model::InstrumentMetadata* StartupConfiguration::find_instrument_metadata(
   }
   return &*found;
 }
+
 // --------------------------------------------------------
 
 } // namespace aegis::configuration

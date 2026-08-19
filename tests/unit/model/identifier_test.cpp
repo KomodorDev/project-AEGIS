@@ -37,11 +37,13 @@ TEST_CASE("reference configuration identifiers satisfy their nominal grammars", 
   CHECK(RouteId::parse("route.deribit-testnet-btc-perpetual"));
   CHECK(VenueAccountId::parse("native-account:1234"));
 }
+
 // --------------------------------------------------------
 // Organization IDs combine a kind-specific prefix with bounded lowercase slug segments; failures
 // must also identify the exact nominal field.
 TEST_CASE("organizational identifiers reject wrong prefixes and malformed segments",
           "[model][id]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Exercise every malformed segment shape against the same stable error contract.
   constexpr std::array invalid_firms{
@@ -56,13 +58,16 @@ TEST_CASE("organizational identifiers reject wrong prefixes and malformed segmen
     CHECK(result.error().code == DomainErrorCode::InvalidIdentifier);
     CHECK(result.error().context.field == "firm_id");
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin both sides of the maximum accepted organizational identifier length.
   CHECK(FirmId::parse("firm.a.b-c0"));
   CHECK(FirmId::parse("firm." + std::string(59U, 'a')));
   CHECK_FALSE(FirmId::parse("firm." + std::string(60U, 'a')));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Venue and normalized-instrument grammars intentionally differ in case while sharing strict dash
 // segmentation and fixed byte limits.
@@ -81,6 +86,7 @@ TEST_CASE("venue and normalized instrument identifiers enforce case and separato
   CHECK_FALSE(InstrumentId::parse("BTC--USD"));
   CHECK_FALSE(InstrumentId::parse(std::string(65U, 'A')));
 }
+
 // --------------------------------------------------------
 // Adapter values may contain venue punctuation and spaces, but never controls, embedded NUL, or
 // bytes beyond the bounded printable-ASCII contract.
@@ -92,6 +98,7 @@ TEST_CASE("adapter identifiers accept only bounded printable ASCII", "[model][id
   CHECK_FALSE(VenueInstrumentId::parse(std::string{"BTC\nPERPETUAL"}));
   CHECK_FALSE(VenueAccountId::parse(std::string{"native\0account", 14U}));
 }
+
 // --------------------------------------------------------
 // Once accepted, an identifier exposes the exact validated bytes without a mutating escape hatch.
 TEST_CASE("valid identifiers expose immutable canonical bytes", "[model][id]") {
@@ -99,6 +106,7 @@ TEST_CASE("valid identifiers expose immutable canonical bytes", "[model][id]") {
   REQUIRE(parsed);
   CHECK(parsed.value().value() == "firm.aegis-lab");
 }
+
 // --------------------------------------------------------
 
 } // namespace

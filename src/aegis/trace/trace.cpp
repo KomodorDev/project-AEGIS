@@ -46,6 +46,7 @@ enum class RecordTag : std::uint16_t {
   InstrumentMetadataRevision = 0x0026,
   Payload = 0x0030,
 };
+
 // ########################################################################
 
 // --------------------------------------------------------
@@ -53,6 +54,7 @@ enum class RecordTag : std::uint16_t {
 [[nodiscard]] constexpr std::uint16_t tag(RecordTag value) noexcept {
   return static_cast<std::uint16_t>(value);
 }
+
 // --------------------------------------------------------
 
 // ########################################################################
@@ -60,6 +62,7 @@ enum class RecordTag : std::uint16_t {
 // it is intentionally not a general serialization API.
 class CanonicalTraceWriter final {
 public:
+
   // --------------------------------------------------------
   // Append one raw byte after proving the backing buffer can grow.
   [[nodiscard]] bool append_byte(std::uint8_t value) {
@@ -69,6 +72,7 @@ public:
     bytes_.push_back(std::byte{value});
     return true;
   }
+
   // --------------------------------------------------------
   // Append already validated ASCII bytes without a length prefix.
   [[nodiscard]] bool append_ascii(std::string_view value) {
@@ -80,6 +84,7 @@ public:
     }
     return true;
   }
+
   // --------------------------------------------------------
   // Append opaque canonical bytes without assigning new field meaning.
   [[nodiscard]] bool append_bytes(std::span<const std::byte> value) {
@@ -89,12 +94,14 @@ public:
     bytes_.insert(bytes_.end(), value.begin(), value.end());
     return true;
   }
+
   // --------------------------------------------------------
   // Encode one unsigned 16-bit integer in portable big-endian order.
   [[nodiscard]] bool append_u16(std::uint16_t value) {
     return append_byte(static_cast<std::uint8_t>((value >> 8U) & 0xffU)) &&
            append_byte(static_cast<std::uint8_t>(value & 0xffU));
   }
+
   // --------------------------------------------------------
   // Encode one unsigned 32-bit integer in portable big-endian order.
   [[nodiscard]] bool append_u32(std::uint32_t value) {
@@ -103,6 +110,7 @@ public:
            append_byte(static_cast<std::uint8_t>((value >> 8U) & 0xffU)) &&
            append_byte(static_cast<std::uint8_t>(value & 0xffU));
   }
+
   // --------------------------------------------------------
   // Encode one unsigned 64-bit integer in portable big-endian order.
   [[nodiscard]] bool append_u64(std::uint64_t value) {
@@ -118,6 +126,7 @@ public:
     }
     return true;
   }
+
   // --------------------------------------------------------
   // Encode a tagged field as tag, 32-bit payload length, and payload bytes.
   [[nodiscard]] bool append_field(std::uint16_t field_tag, std::span<const std::byte> payload) {
@@ -127,18 +136,21 @@ public:
     return append_u16(field_tag) && append_u32(static_cast<std::uint32_t>(payload.size())) &&
            append_bytes(payload);
   }
+
   // --------------------------------------------------------
   // Encode one big-endian 16-bit integer as a tagged field.
   [[nodiscard]] bool append_u16_field(std::uint16_t field_tag, std::uint16_t value) {
     CanonicalTraceWriter payload;
     return payload.append_u16(value) && append_field(field_tag, payload.bytes());
   }
+
   // --------------------------------------------------------
   // Encode one big-endian 64-bit integer as a tagged field.
   [[nodiscard]] bool append_u64_field(std::uint16_t field_tag, std::uint64_t value) {
     CanonicalTraceWriter payload;
     return payload.append_u64(value) && append_field(field_tag, payload.bytes());
   }
+
   // --------------------------------------------------------
   // Optional values always carry an explicit presence byte to preserve canonical field shape.
   [[nodiscard]] bool append_optional_u64_field(std::uint16_t field_tag,
@@ -152,17 +164,20 @@ public:
     }
     return append_field(field_tag, payload.bytes());
   }
+
   // --------------------------------------------------------
   // Encode an optional identifier with explicit presence and byte-length markers.
   template <typename Identifier>
   [[nodiscard]] bool append_optional_identifier_field(std::uint16_t field_tag,
                                                       const std::optional<Identifier>& identifier) {
+
     // ++++++++++++++++++++++++++++++++++++++++
     // Emit presence independently so absent and present identifiers retain the same field shape.
     CanonicalTraceWriter payload;
     if (!payload.append_byte(identifier.has_value() ? 1U : 0U)) {
       return false;
     }
+
     // ++++++++++++++++++++++++++++++++++++++++
     // Encode a present identifier as a checked length plus its validated ASCII bytes.
     if (identifier.has_value()) {
@@ -174,8 +189,10 @@ public:
       }
     }
     return append_field(field_tag, payload.bytes());
+
     // ++++++++++++++++++++++++++++++++++++++++
   }
+
   // --------------------------------------------------------
   // Prefix one encoded record with its portable 32-bit byte length.
   [[nodiscard]] bool append_length_prefixed(std::span<const std::byte> value) {
@@ -184,13 +201,16 @@ public:
     }
     return append_u32(static_cast<std::uint32_t>(value.size())) && append_bytes(value);
   }
+
   // --------------------------------------------------------
   // Expose a read-only view for composing nested writers without transferring ownership.
   [[nodiscard]] std::span<const std::byte> bytes() const noexcept { return bytes_; }
+
   // --------------------------------------------------------
   // Interesting syntax: the && qualifier permits destructive extraction only from a disposable
   // writer, so an encoder cannot accidentally drain a writer it intends to keep using.
   [[nodiscard]] std::vector<std::byte> take_bytes() && { return std::move(bytes_); }
+
   // --------------------------------------------------------
 
 private:
@@ -202,10 +222,12 @@ private:
   [[nodiscard]] bool can_grow(std::size_t additional_size) const noexcept {
     return additional_size <= bytes_.max_size() - bytes_.size();
   }
+
   // --------------------------------------------------------
 
   std::vector<std::byte> bytes_;
 };
+
 // ########################################################################
 
 // --------------------------------------------------------
@@ -216,6 +238,7 @@ private:
          !subjects.venue_id && !subjects.logical_account_id && !subjects.instrument_id &&
          !subjects.subscription_id && !subjects.route_id;
 }
+
 // --------------------------------------------------------
 // Require exactly the organization and strategy subjects carried by bot attribution events.
 [[nodiscard]] bool is_exact_bot_attribution(const TraceSubjects& subjects) noexcept {
@@ -223,6 +246,7 @@ private:
          !subjects.venue_id && !subjects.logical_account_id && !subjects.instrument_id &&
          !subjects.subscription_id && !subjects.route_id;
 }
+
 // --------------------------------------------------------
 // Require exactly the bot, venue, instrument, and subscription subjects for observation grants.
 [[nodiscard]] bool is_exact_subscription(const TraceSubjects& subjects) noexcept {
@@ -230,6 +254,7 @@ private:
          subjects.venue_id && !subjects.logical_account_id && subjects.instrument_id &&
          subjects.subscription_id && !subjects.route_id;
 }
+
 // --------------------------------------------------------
 // Require exactly the bot, venue, account, instrument, and route subjects for execution grants.
 [[nodiscard]] bool is_exact_route(const TraceSubjects& subjects) noexcept {
@@ -237,18 +262,21 @@ private:
          subjects.venue_id && subjects.logical_account_id && subjects.instrument_id &&
          !subjects.subscription_id && subjects.route_id;
 }
+
 // --------------------------------------------------------
 // Construct the stable trace-schema error used by exact-shape validation failures.
 [[nodiscard]] model::Result<void> invalid_record(std::string_view field) {
   return model::Result<void>::failure(
       DomainError::at_field(DomainErrorCode::InvalidValue, std::string{field}));
 }
+
 // --------------------------------------------------------
 // M1 binds each kind to one subject/provenance/payload schema: subscription byte 1 means OrderBook,
 // while route byte 0/1 carries the assigned disabled/enabled state.
 [[nodiscard]] model::Result<void> validate_event(TraceEventKind kind, const TraceSubjects& subjects,
                                                  const TraceProvenance& provenance,
                                                  const TracePayload& payload) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Dispatch each assigned event kind to its exact subject, provenance, and payload shape.
   switch (kind) {
@@ -281,12 +309,15 @@ private:
     return invalid_record("trace.kind");
   }
   return model::Result<void>::success();
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Every record emits every tag in fixed order, including absent optionals, before any payload
 // bytes.
 [[nodiscard]] model::Result<std::vector<std::byte>> encode_record(const TraceRecord& record) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Project record state into the optional primitive forms used by schema-1 fields.
   CanonicalTraceWriter writer;
@@ -297,6 +328,7 @@ private:
           ? std::optional<std::uint64_t>{provenance.instrument_metadata_revision->value()}
           : std::nullopt;
   const auto& fingerprint = provenance.configuration_fingerprint.bytes();
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit magic, version, identity, provenance, and payload fields in their assigned tag order.
   const bool success =
@@ -329,6 +361,7 @@ private:
       writer.append_optional_u64_field(tag(RecordTag::InstrumentMetadataRevision),
                                        metadata_revision) &&
       writer.append_field(tag(RecordTag::Payload), record.payload().bytes());
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish a record only when the complete canonical encoding fits its bounded writer.
   if (!success) {
@@ -336,8 +369,10 @@ private:
         DomainError::at_field(DomainErrorCode::EncodingOverflow, "trace.record_encoding"));
   }
   return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 
 } // namespace
@@ -354,6 +389,7 @@ model::Result<TracePayload> TracePayload::copy_from(std::span<const std::byte> b
   payload.size_ = bytes.size();
   return model::Result<TracePayload>::success(std::move(payload));
 }
+
 // --------------------------------------------------------
 // The caller supplies any already-resolved instrument revision; this projection performs no lookup.
 TraceProvenance
@@ -367,37 +403,45 @@ TraceProvenance::from(const configuration::ConfigurationProvenance& provenance,
                          provenance.route_revision(),
                          metadata_revision};
 }
+
 // --------------------------------------------------------
 // Reserve the declared hard bound once so accepted appends do not grow storage beyond it.
 TraceSink::TraceSink(std::uint32_t capacity) : capacity_{capacity} { records_.reserve(capacity_); }
+
 // --------------------------------------------------------
 // Validate and append one record atomically while preserving the accepted prefix on failure.
 model::Result<void> TraceSink::append(TraceEventKind kind, TraceSubjects subjects,
                                       TraceProvenance provenance, TracePayload payload) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Capacity has deterministic precedence and leaves the existing prefix byte-for-byte unchanged.
   if (records_.size() >= capacity_) {
     return model::Result<void>::failure(DomainError::at_index(
         DomainErrorCode::TraceCapacityExceeded, "trace.records", records_.size()));
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Schema validation happens before ordinal assignment or mutation.
   auto validation = validate_event(kind, subjects, provenance, payload);
   if (!validation) {
     return validation;
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Commit a one-based ordinal only for the record that is about to join the accepted prefix.
   const auto ordinal = TraceOrdinal{static_cast<std::uint64_t>(records_.size()) + 1U};
   records_.push_back(
       TraceRecord{ordinal, kind, std::move(subjects), std::move(provenance), std::move(payload)});
   return model::Result<void>::success();
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // A stream is magic + version + count followed by length-prefixed canonical records in append
 // order.
 model::Result<std::vector<std::byte>> TraceSink::canonical_bytes() const {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit the stream envelope before appending each accepted record in ordinal order.
   CanonicalTraceWriter writer;
@@ -410,6 +454,7 @@ model::Result<std::vector<std::byte>> TraceSink::canonical_bytes() const {
       break;
     }
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish bytes only when both the envelope and every nested record encoded completely.
   if (!success) {
@@ -417,8 +462,10 @@ model::Result<std::vector<std::byte>> TraceSink::canonical_bytes() const {
         DomainError::at_field(DomainErrorCode::EncodingOverflow, "trace.stream_encoding"));
   }
   return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // The trace identity is exactly SHA-256 over canonical_bytes(); encoding failures propagate
 // unchanged.
@@ -429,6 +476,7 @@ model::Result<model::Sha256Digest> TraceSink::digest() const {
   }
   return model::Result<model::Sha256Digest>::success(model::sha256(encoded.value()));
 }
+
 // --------------------------------------------------------
 
 } // namespace aegis::trace

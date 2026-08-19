@@ -9,6 +9,10 @@ IndentWidth: 2
 DerivePointerAlignment: false
 PointerAlignment: Left
 
+# Preserve authored spacing after access-control labels so divider gaps survive formatting without
+# forcing unrelated declarations to gain an empty line.
+EmptyLineAfterAccessModifier: Leave
+
 # Regroup and case-sensitively sort includes so dependency ordering is deterministic.
 IncludeBlocks: Regroup
 SortIncludes: CaseSensitive

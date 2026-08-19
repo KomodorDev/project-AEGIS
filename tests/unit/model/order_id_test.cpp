@@ -18,9 +18,11 @@ namespace aegis::model::detail {
 // Interesting syntax: the declared friend proxy exposes only the private entropy seam needed to
 // force startup failures; ordinary callers still see only ProductionOrderIdProvider::create().
 struct ProductionOrderIdProviderTestAccess {
+
   // ########################################################################
   // Names the exact fail-closed entropy seam used only by the friend test proxy.
   using EntropyFillCallback = bool (*)(OrderNamespace::Bytes&) noexcept;
+
   // ########################################################################
 
   // --------------------------------------------------------
@@ -29,8 +31,10 @@ struct ProductionOrderIdProviderTestAccess {
   create_with_entropy(EntropyFillCallback entropy_fill) {
     return ProductionOrderIdProvider::create_with_entropy(entropy_fill);
   }
+
   // --------------------------------------------------------
 };
+
 // ########################################################################
 
 } // namespace aegis::model::detail
@@ -49,6 +53,7 @@ using namespace aegis::model;
   }
   return OrderNamespace{bytes};
 }
+
 // --------------------------------------------------------
 // Byte widths are part of the persisted ID contract, not implementation-dependent object sizes.
 static_assert(OrderNamespace::byte_size == 16U);
@@ -69,15 +74,19 @@ static_assert(!HasOrderProviderFactory<double>);
 static_assert(!HasOrderProviderFactory<bool>);
 static_assert(!HasOrderProviderFactory<char>);
 static_assert(HasOrderProviderFactory<signed char>);
+
 // ########################################################################
+
 // --------------------------------------------------------
 // This golden vector pins namespace placement, big-endian counter encoding, and increment order.
 TEST_CASE("deterministic order IDs use canonical namespace and big-endian counter bytes",
           "[model][order-id]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin the namespace bytes independently before they are combined with a counter.
   const auto order_namespace = sequential_namespace();
   CHECK(order_namespace.to_hex() == "000102030405060708090a0b0c0d0e0f");
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Generate consecutive identities from an explicitly injected starting counter.
   auto created = DeterministicOrderIdProvider::create(order_namespace, 1U);
@@ -88,15 +97,19 @@ TEST_CASE("deterministic order IDs use canonical namespace and big-endian counte
   const auto second = provider.next();
   REQUIRE(first);
   REQUIRE(second);
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Verify namespace placement and big-endian increment order in the persisted hex form.
   CHECK(first.value().to_hex() == "000102030405060708090a0b0c0d0e0f0000000000000001");
   CHECK(second.value().to_hex() == "000102030405060708090a0b0c0d0e0f0000000000000002");
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Replay providers with identical injected state must reproduce the same next identity exactly.
 TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[model][order-id]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Seed two independent providers with identical namespace and counter state.
   auto first_created = DeterministicOrderIdProvider::create(sequential_namespace(), 42U);
@@ -105,6 +118,7 @@ TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[m
   REQUIRE(second_created);
   auto first_provider = std::move(first_created).value();
   auto second_provider = std::move(second_created).value();
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Their next values must be byte-for-byte equal for deterministic replay.
   const auto first = first_provider.next();
@@ -112,12 +126,15 @@ TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[m
   REQUIRE(first);
   REQUIRE(second);
   CHECK(first.value() == second.value());
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // A fresh namespace, rather than wall time or host identity, separates equal counters across
 // restart.
 TEST_CASE("different restart namespaces cannot collide at the same counter", "[model][order-id]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Hold the counter constant while changing only the injected restart namespace.
   auto before_restart_created = DeterministicOrderIdProvider::create(sequential_namespace(0U), 1U);
@@ -126,6 +143,7 @@ TEST_CASE("different restart namespaces cannot collide at the same counter", "[m
   REQUIRE(after_restart_created);
   auto before_restart = std::move(before_restart_created).value();
   auto after_restart = std::move(after_restart_created).value();
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Prove namespace separation alone prevents an identity collision.
   const auto before_id = before_restart.next();
@@ -133,12 +151,15 @@ TEST_CASE("different restart namespaces cannot collide at the same counter", "[m
   REQUIRE(before_id);
   REQUIRE(after_id);
   CHECK(before_id.value() != after_id.value());
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // Negative authored entry must map to InvalidValue at order_counter; narrow valid integers and
 // UINT64_MAX then exercise acceptance and final-value exhaustion without wrapping back to zero.
 TEST_CASE("order counters reject zero and fail after their final value", "[model][order-id]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject the reserved zero and signed-negative authored starting counters.
   const auto invalid = DeterministicOrderIdProvider::create(sequential_namespace(), 0U);
@@ -148,11 +169,13 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   const auto negative = DeterministicOrderIdProvider::create(sequential_namespace(), -1);
   REQUIRE_FALSE(negative);
   CHECK(negative.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Unsigned char is a supported numeric integer source despite sharing plain char's storage width.
   auto narrow_counter =
       DeterministicOrderIdProvider::create(sequential_namespace(), static_cast<unsigned char>(1));
   REQUIRE(narrow_counter);
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Permit the final representable counter exactly once, then fail without wrapping.
   auto created = DeterministicOrderIdProvider::create(sequential_namespace(),
@@ -168,8 +191,10 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == DomainErrorCode::CounterExhausted);
   CHECK(exhausted.error().context.field == "order_counter");
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 // The production smoke path proves the current platform can source a namespace and produce a full
 // canonical identity without exposing the random bytes as a test oracle.
@@ -182,17 +207,20 @@ TEST_CASE("the production provider obtains a supported operating-system namespac
   REQUIRE(order_id);
   CHECK(order_id.value().to_hex().size() == OrderId::byte_size * 2U);
 }
+
 // --------------------------------------------------------
 // Entropy failure must reject startup even if a source wrote plausible bytes, and a missing
 // callback must fail identically instead of selecting a fallback namespace.
 TEST_CASE("the production provider fails closed when its entropy source is unavailable",
           "[model][order-id]") {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Simulate a source that writes bytes but explicitly reports entropy acquisition failure.
   const auto unavailable = [](OrderNamespace::Bytes& destination) noexcept {
     destination.fill(0xa5U);
     return false;
   };
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Written bytes must never be accepted when the source reports failure.
   const auto created =
@@ -201,6 +229,7 @@ TEST_CASE("the production provider fails closed when its entropy source is unava
   REQUIRE_FALSE(created);
   CHECK(created.error() ==
         DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+
   // ++++++++++++++++++++++++++++++++++++++++
   // A missing callback must produce the same failure rather than choosing a weak fallback.
   const auto null_source =
@@ -208,8 +237,10 @@ TEST_CASE("the production provider fails closed when its entropy source is unava
   REQUIRE_FALSE(null_source);
   CHECK(null_source.error() ==
         DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 
 } // namespace

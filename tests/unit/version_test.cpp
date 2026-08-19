@@ -11,4 +11,5 @@ TEST_CASE("the compiled library reports its project identity", "[baseline]") {
   CHECK(aegis::project_name() == "AEGIS");
   CHECK(aegis::project_version() == "0.1.0");
 }
+
 // --------------------------------------------------------

@@ -28,6 +28,7 @@ TEST_CASE("a successful result exposes only its value", "[model][result]") {
   CHECK(static_cast<bool>(result));
   CHECK(result.value() == "accepted");
 }
+
 // --------------------------------------------------------
 // Collection failures must retain stable machine-readable location rather than depending on prose.
 TEST_CASE("a failed result preserves field and collection position", "[model][result]") {
@@ -41,6 +42,7 @@ TEST_CASE("a failed result preserves field and collection position", "[model][re
   REQUIRE(result.error().context.collection_index.has_value());
   CHECK(*result.error().context.collection_index == std::size_t{3U});
 }
+
 // --------------------------------------------------------
 // Command-style operations use the void specialization without weakening field-only error context.
 TEST_CASE("void results distinguish completion from failure", "[model][result]") {
@@ -54,6 +56,7 @@ TEST_CASE("void results distinguish completion from failure", "[model][result]")
   CHECK(failed.error().context.field == "route.enabled");
   CHECK_FALSE(failed.error().context.collection_index.has_value());
 }
+
 // --------------------------------------------------------
 
 } // namespace

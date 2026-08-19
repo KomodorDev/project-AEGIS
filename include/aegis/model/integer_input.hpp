@@ -7,6 +7,7 @@
 #include <type_traits>
 
 namespace aegis::model::detail {
+
 // ########################################################################
 // This alias-and-concept family defines the only portable integer source types accepted before
 // checked narrowing at public domain boundaries.
@@ -35,5 +36,6 @@ concept CheckedIntegerInput = std::same_as<UnqualifiedIntegerInput<Value>, signe
 template <typename Value>
 concept CheckedUnsignedIntegerInput =
     CheckedIntegerInput<Value> && std::unsigned_integral<UnqualifiedIntegerInput<Value>>;
+
 // ########################################################################
 } // namespace aegis::model::detail
