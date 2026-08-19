@@ -122,6 +122,11 @@ Give everything a clear name, label and measuring stick. The robot must never co
 
 ## M2 — Deterministic Runtime and Market-State Validity
 
+**Status:** In progress on the temporary stack recorded in the
+[M2 exit-evidence file](milestones/m2-exit-evidence.md). The executor and market-validity contracts
+are accepted in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
+[ADR-0007](decisions/0007-market-state-validity.md); implementation and exit evidence remain open.
+
 ### Outcome
 
 A credential-free recorded fixture travels through normalization and subscription dispatch into the correct strategy callback, but only when its market state is coherent and ready.

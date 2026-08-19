@@ -25,9 +25,10 @@ flowchart LR
     subgraph DP["Data plane — one dedicated thread and serialized executor"]
         direction LR
 
+        INGRESS["Bounded ingress<br/>admission, queue age and source fences"]
         SESSION["Venue and account sessions"]
         ADAPTER["Shared venue adapters<br/>parse, normalize and encode"]
-        MARKET["Normalized market-data core"]
+        MARKET["Transactional market-data core<br/>four-state validity"]
         DISPATCH["Subscription dispatcher"]
         BOT["Bot runtime and strategy"]
         ROUTES["Execution-route authorization"]
@@ -36,7 +37,8 @@ flowchart LR
         OMS["Order management system<br/>lifecycle and reconciliation"]
         INVENTORY["Immediate inventory and exposure"]
 
-        SESSION -->|"Native messages"| ADAPTER
+        SESSION -->|"Native messages"| INGRESS
+        INGRESS -->|"Serialized owner turn"| ADAPTER
         ADAPTER -->|"Normalized market event"| MARKET
         MARKET --> DISPATCH
         DISPATCH -->|"Synchronous callback"| BOT
@@ -86,6 +88,8 @@ Arrows show logical flow or dependency, not elapsed time. The distinction betwee
 The view preserves these invariants:
 
 - One serialized executor on one dedicated thread owns all mutable v1 data-plane state.
+- Bounded ingress coordinates immutable work and exposes loss; its synchronization state cannot
+  expose or mutate books, bots, strategies, diagnostics or traces from a producer.
 - There is no general-purpose queue, serialization boundary, remote call or executor hop between strategy submission and the inline risk decision.
 - A request cannot reach a venue session without route authorization, risk admission and OMS admission.
 - Exchange acknowledgements, rejections and fills pass through OMS reconciliation before inventory or bot-facing order events are updated.
@@ -164,7 +168,7 @@ value whose explicit reconciliation mapping begins in M7.
 | State | v1 owner | Update and observation rule |
 |---|---|---|
 | Venue connection, protocol and parser state | Data-plane executor | Updated only by serialized venue handlers; telemetry is reported asynchronously. |
-| Normalized market state and subscription dispatch | Data-plane executor | Updated and dispatched within run-to-completion callbacks. |
+| Normalized market state and subscription dispatch | Data-plane executor | A complete scratch candidate commits before `Ready` dispatch; non-ready transitions expose no book view. |
 | Bot and mutable strategy runtime state | Data-plane executor | Mutated only during serialized bot callbacks. |
 | Active subscription and route-authorization view | Data-plane executor | The installed runtime view is read inline; the configuration source and adoption protocol remain **Open**. |
 | OMS order lifecycle and reconciliation state | Data-plane executor | All submissions and exchange order events pass through the OMS on the same owner. |

@@ -1,17 +1,18 @@
 # AEGIS
 
-> **Purpose:** Give a new contributor the shortest safe path to understand and verify the M1 domain
-> kernel without mistaking it for a connected trading system.
+> **Purpose:** Give a new contributor the shortest safe path to understand the M1 domain kernel and
+> in-progress M2 deterministic runtime without mistaking either for a connected trading system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
-engine under development. M1 provides the dependency-light values and sealed startup rulebook on
-which later runtime behavior will rely. The reference slice remains deliberately narrow: one
-Deribit testnet account alias, one BTC inverse perpetual, one bot, and no exchange connectivity.
+engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
+is implementing a bounded serialized owner, recorded fixture playback, transactional market books,
+and Ready-only strategy dispatch. The reference slice remains deliberately narrow: one Deribit
+testnet account alias, one BTC inverse perpetual, one bot, and no exchange connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
-Current milestone evidence is mapped in
-[the M1 exit-evidence record](docs/milestones/m1-exit-evidence.md).
+Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md)
+and the in-progress [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md).
 
 ## What M1 provides
 
@@ -96,9 +97,12 @@ or production endpoint. The first market and account assumptions are described i
 - [Dedicated testnet account policy](docs/decisions/0003-dedicated-testnet-account.md)
 - [Deterministic domain value contracts](docs/decisions/0004-domain-value-contracts.md)
 - [Immutable configuration provenance](docs/decisions/0005-immutable-configuration-provenance.md)
+- [Bounded deterministic runtime](docs/decisions/0006-bounded-deterministic-runtime.md)
+- [Market-state validity](docs/decisions/0007-market-state-validity.md)
 - [Deribit BTC perpetual reference scenario](docs/reference-scenario.md)
 - [Correctness and performance budgets](docs/quality-budgets.md)
 - [Deribit public-protocol spike](docs/protocol-spikes/deribit-btc-perpetual.md)
 - [Repository layout and dependency rules](docs/architecture/repository-layout.md)
 - [M0 exit evidence](docs/milestones/m0-exit-evidence.md)
 - [M1 exit evidence](docs/milestones/m1-exit-evidence.md)
+- [M2 exit evidence](docs/milestones/m2-exit-evidence.md)

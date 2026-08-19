@@ -1,13 +1,16 @@
 # Repository Layout
 
-> **Purpose:** Describe the implemented M1 source and test ownership boundaries, the allowed
+> **Purpose:** Describe the implemented M1 and accepted M2 source/test ownership boundaries, allowed
 > dependency directions, and where later components should grow without empty scaffolding.
 
-**Status:** The directories and dependency rules used through M1 are implemented. Areas named for
-later milestones remain **Proposed** until their first real behavior is added. Runtime ownership
+**Status:** The directories and dependency rules used through M1 are implemented. M2 accepts the
+`runtime`, `strategy`, expanded `market_data`, and companion runtime-trace boundaries while their
+implementation is in progress. Areas named for later milestones remain **Proposed**. Runtime ownership
 follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md); M1 value and provenance
 boundaries follow [ADR-0004](../decisions/0004-domain-value-contracts.md) and
-[ADR-0005](../decisions/0005-immutable-configuration-provenance.md).
+[ADR-0005](../decisions/0005-immutable-configuration-provenance.md); M2 runtime and market ownership
+follow [ADR-0006](../decisions/0006-bounded-deterministic-runtime.md) and
+[ADR-0007](../decisions/0007-market-state-validity.md).
 
 Return to the [architecture overview](../architecture.md).
 
@@ -42,24 +45,29 @@ include/aegis/                 src/aegis/
 |---|---|
 | `model` | Dependency-light identifiers, stable results/errors, checked fixed-point values, typed time/revisions, order-ID providers, instrument metadata, and SHA-256. It must not become a miscellaneous dumping ground. |
 | `organization` | Immutable peer-firm, desk, bot, and derived attribution values. |
-| `market_data` | M1 subscription declarations only. Normalized events, market state, and dispatch begin in M2. |
+| `market_data` | Subscription declarations plus M2 recorded fixture, normalized update/event, transactional book, and validity contracts. It contains no venue networking. |
 | `execution` | M1 execution-route declarations and validation only. Order requests, authorization, risk, OMS, and transmission begin in M3. |
 | `configuration` | Atomic startup validation, canonical `AEGISCFG` encoding, SHA-256 identity, and revision provenance across the M1 sections. |
-| `trace` | Bounded structured M1 records plus canonical `AEGISTRS` encoding and digest; external reporting and persistence are excluded. |
+| `trace` | Bounded M1 `AEGISTRS` provenance and companion M2 `AEGISRTS` runtime evidence; external reporting and persistence are excluded. |
 
 Component-owned types stay with their component. A normalized market event will belong to
 `market_data`, an order request will belong to `execution`, and a risk mode will belong to `risk`.
 A type moves to `model` only when it is genuinely neutral and shared.
 
-The expected later areas remain:
+The following M2 areas are accepted and being implemented:
+
+| M2 area | Accepted responsibility |
+|---|---|
+| `strategy` | M2 strategy contract, configured bot runtime, Ready/state callbacks, and capability-limited bot context. Order submission begins in M3. |
+| `runtime` | M2 bounded admission, deterministic/dedicated drivers, lifecycle, and composition. Market validity remains in `market_data`. |
+
+The expected later areas remain proposed:
 
 | Proposed area | Intended responsibility |
 |---|---|
-| `strategy` | Strategy contract, configured bot runtime, and bot-bound submission context. |
 | `risk` | Risk modes and budgets, inline checks, reservations, and control-plane policy calculation. |
 | `inventory` | Fill-derived positions, exposure attribution, and bot/desk/firm aggregation. Durable ledger ownership and P&L placement remain open. |
 | `venues/<venue>` | Venue-native connectivity, parsing, symbol mapping, authentication, reconciliation, and order encoding. |
-| `runtime` | Process composition, lifecycle, and the serialized data-plane executor; it must not own domain rules. |
 
 ## Dependency Rules
 
@@ -71,8 +79,8 @@ component's immutable API and mutate its state.
 
 - `model` is a leaf and does not depend on another AEGIS subsystem.
 - `organization` depends only on `model`.
-- M1 `market_data` and `execution` declarations depend on `model` and `organization`, but not on one
-  another. `configuration` composes and cross-validates their immutable values.
+- `market_data` and `execution` depend on `model` and `organization`, but not on one another.
+  `configuration` composes and cross-validates their immutable values.
 - `trace` depends on `model` and immutable configuration provenance. It performs no file, database,
   network, or console I/O.
 - Venue-independent code never includes or exposes a venue-native message type.
@@ -80,7 +88,9 @@ component's immutable API and mutate its state.
   not depend on venue implementations.
 - Strategies consume normalized events and submit through a bot-bound execution boundary. They do
   not call adapters, sessions, or sockets.
-- `runtime` is the future composition root and may depend on subsystem implementations. Subsystems do
+- `strategy` consumes `market_data`, `model`, `organization`, and immutable provenance; it does not
+  depend on `execution` until M3 deliberately adds a bot-bound submission capability.
+- `runtime` is the composition root and may depend on subsystem implementations. Subsystems do
   not depend on `runtime` to find one another.
 - Control-plane and data-plane code exchange immutable values or snapshots. They do not share
   mutable domain objects.
