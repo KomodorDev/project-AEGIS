@@ -9,7 +9,7 @@
 #include <utility>
 
 namespace aegis::model {
-
+// ########################################################################
 // Values are persisted compatibility identifiers. The hundreds bands reserve primitive, metadata,
 // configuration, and encoding failures; add new codes explicitly and never renumber one.
 enum class DomainErrorCode : std::uint16_t {
@@ -38,31 +38,37 @@ enum class DomainErrorCode : std::uint16_t {
   EncodingOverflow = 300,
   TraceCapacityExceeded = 301,
 };
-
+// ########################################################################
 // Human prose is deliberately absent: callers receive a stable field key and optional position.
 struct DomainErrorContext {
   std::string field;
   std::optional<std::size_t> collection_index;
-
+  // --------------------------------------------------------
+  // Structural equality makes the complete machine-readable context comparable.
   friend bool operator==(const DomainErrorContext&, const DomainErrorContext&) = default;
+  // --------------------------------------------------------
 };
-
+// ########################################################################
 // Named factories make the presence or absence of collection position explicit at each failure
 // site, while structural equality lets deterministic tests compare the complete machine contract.
 struct DomainError {
   DomainErrorCode code;
   DomainErrorContext context;
-
+  // --------------------------------------------------------
+  // Create a failure attached to one named field without a collection position.
   [[nodiscard]] static DomainError at_field(DomainErrorCode code, std::string field) {
     return DomainError{code, DomainErrorContext{std::move(field), std::nullopt}};
   }
-
+  // --------------------------------------------------------
+  // Create a failure attached to one indexed element of a named collection.
   [[nodiscard]] static DomainError at_index(DomainErrorCode code, std::string field,
                                             std::size_t index) {
     return DomainError{code, DomainErrorContext{std::move(field), index}};
   }
-
+  // --------------------------------------------------------
+  // Structural equality compares the entire stable error contract.
   friend bool operator==(const DomainError&, const DomainError&) = default;
+  // --------------------------------------------------------
 };
-
+// ########################################################################
 } // namespace aegis::model

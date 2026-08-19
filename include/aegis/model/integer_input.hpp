@@ -7,7 +7,9 @@
 #include <type_traits>
 
 namespace aegis::model::detail {
-
+// ########################################################################
+// This alias-and-concept family defines the only portable integer source types accepted before
+// checked narrowing at public domain boundaries.
 // Interesting syntax: remove_cvref makes concept membership depend on the underlying source type,
 // not on whether a caller or requires-expression presents it through cv/ref qualification.
 template <typename Value> using UnqualifiedIntegerInput = std::remove_cvref_t<Value>;
@@ -33,5 +35,5 @@ concept CheckedIntegerInput = std::same_as<UnqualifiedIntegerInput<Value>, signe
 template <typename Value>
 concept CheckedUnsignedIntegerInput =
     CheckedIntegerInput<Value> && std::unsigned_integral<UnqualifiedIntegerInput<Value>>;
-
+// ########################################################################
 } // namespace aegis::model::detail
