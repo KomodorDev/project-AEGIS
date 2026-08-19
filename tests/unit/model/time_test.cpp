@@ -6,6 +6,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace {
@@ -23,6 +25,20 @@ template <typename Value>
 concept HasClockAdvance =
     requires(DeterministicClockProvider clock, Value value) { clock.advance(value); };
 
+template <typename Value>
+concept HasAdmissionOrdinalFactory = requires(Value value) { AdmissionOrdinal::from_value(value); };
+
+// --------------------------------------------------------
+// Exercise one nominal ordinal's terminal value without duplicating unchecked fixture arithmetic.
+template <typename Ordinal>
+void check_ordinal_exhaustion(DomainErrorCode code, std::string_view field) {
+  const auto maximum = Ordinal::from_value(std::numeric_limits<std::uint64_t>::max());
+  REQUIRE(maximum);
+  const auto exhausted = maximum.value().next();
+  REQUIRE_FALSE(exhausted);
+  CHECK(exhausted.error() == DomainError::at_field(code, std::string{field}));
+}
+
 // ########################################################################
 // Nominal time and revision domains must never become interchangeable even though their storage is
 // the same unsigned width.
@@ -33,6 +49,9 @@ static_assert(!std::is_same_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<InstrumentMetadataRevision, RouteRevision>);
 static_assert(!std::is_convertible_v<ConfigurationRevision, OrganizationRevision>);
 static_assert(!std::is_same_v<SessionEpoch, SequenceNumber>);
+static_assert(!std::is_same_v<AdmissionOrdinal, ReceiveSequence>);
+static_assert(!std::is_same_v<TurnOrdinal, CallbackOrdinal>);
+static_assert(!std::is_same_v<BookGeneration, BookRevision>);
 
 // ########################################################################
 // Non-fallible constructors accept unsigned char but reject all signed, bool, enum, floating, and
@@ -52,6 +71,8 @@ static_assert(HasRevisionFactory<signed char>);
 static_assert(!HasClockAdvance<char>);
 static_assert(!HasClockAdvance<bool>);
 static_assert(HasClockAdvance<unsigned char>);
+static_assert(!HasAdmissionOrdinalFactory<char>);
+static_assert(HasAdmissionOrdinalFactory<signed char>);
 
 // ########################################################################
 
@@ -162,6 +183,45 @@ TEST_CASE("installed revisions reject zero and fail on increment overflow", "[mo
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == DomainErrorCode::ArithmeticOverflow);
   CHECK(exhausted.error().context.field == "route_revision");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// M2 ordinals reject the zero absence sentinel, remain nominally distinct, and report their owning
+// subsystem's exhaustion code rather than wrapping.
+TEST_CASE("runtime and market ordinals are one based and checked", "[model][time][m2]") {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject absent and signed-negative admission positions before narrowing.
+  const auto zero = AdmissionOrdinal::from_value(0U);
+  const auto negative = AdmissionOrdinal::from_value(-1);
+  REQUIRE_FALSE(zero);
+  REQUIRE_FALSE(negative);
+  CHECK(zero.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "admission_ordinal"));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Pin initial and ordinary advancement across independent runtime and market domains.
+  CHECK(ReceiveSequence::initial().value() == 1U);
+  REQUIRE(TurnOrdinal::from_value(8U));
+  CHECK(TurnOrdinal::from_value(8U).value().next().value().value() == 9U);
+  CHECK(BookGeneration::initial().value() == 1U);
+  CHECK(BookRevision::initial().value() == 1U);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Exhaustion reports every owning domain and stable field while preserving the maximum ordinal.
+  check_ordinal_exhaustion<MarketSourceOrdinal>(DomainErrorCode::ExecutorCounterExhausted,
+                                                "market_source_ordinal");
+  check_ordinal_exhaustion<AdmissionOrdinal>(DomainErrorCode::ExecutorCounterExhausted,
+                                             "admission_ordinal");
+  check_ordinal_exhaustion<ReceiveSequence>(DomainErrorCode::ExecutorCounterExhausted,
+                                            "receive_sequence");
+  check_ordinal_exhaustion<TurnOrdinal>(DomainErrorCode::ExecutorCounterExhausted, "turn_ordinal");
+  check_ordinal_exhaustion<CallbackOrdinal>(DomainErrorCode::CallbackCounterExhausted,
+                                            "callback_ordinal");
+  check_ordinal_exhaustion<BookGeneration>(DomainErrorCode::MarketCounterExhausted,
+                                           "book_generation");
+  check_ordinal_exhaustion<BookRevision>(DomainErrorCode::MarketCounterExhausted, "book_revision");
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

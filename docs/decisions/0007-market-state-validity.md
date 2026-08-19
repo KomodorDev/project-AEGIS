@@ -43,11 +43,13 @@ M2 keeps raw, normalized, and strategy-facing values distinct:
    view.
 
 Source and receive sequences are nominally distinct even though both store unsigned 64-bit values.
-`BookGeneration` and `BookRevision` are also distinct. Zero means no committed book. The first valid
-snapshot assigns generation and revision one; every later valid snapshot increments both, while a
-valid delta increments only the globally monotonic revision. Revision does not reset at a new
-generation. Attempt, receive, owner-turn, and callback ordinals are likewise one-based; all counters
-fail before wrap.
+`BookGeneration` and `BookRevision` are also distinct. Production values are one-based and use
+optional absence before any commit. Primitive boundaries without a separate presence marker reserve
+zero for that absence; tagged `AEGISRTS` fields encode presence explicitly. The first valid snapshot
+assigns generation and revision one; every later valid snapshot increments both, while a valid delta
+increments only the globally monotonic revision. Revision does not reset at a new generation.
+Attempt, receive, owner-turn, and callback ordinals are likewise one-based; all counters fail before
+wrap.
 
 The repository-owned fixture begins with an assigned magic and schema version, has a strict ASCII
 grammar, rejects trailing or partial input, and carries no endpoint, credential, private session, or
@@ -66,7 +68,10 @@ depth is an immutable runtime-policy value with a compiled upper bound; the refe
 A snapshot describes the complete retained book and replaces the prior candidate. A delta contains
 absolute quantities; zero quantity deletes one price. Duplicate prices inside one update, invalid
 sides, non-positive retained quantities, misaligned values, excess levels or changes, and a crossed
-or locked final book reject the complete update.
+or locked final book reject the complete update. A coherent book may have either side empty; each
+optional best price is reported independently, and crossing is evaluated only when both sides exist.
+Normalized-update digest bytes sort `Bid` before `Ask` and exact price ascending within each side;
+this semantic-hash order is independent from the book's bid-descending/ask-ascending view order.
 
 Application copies the current book into fixed-capacity scratch state, applies every change,
 canonicalizes bid-descending and ask-ascending order, validates the final candidate and integrity

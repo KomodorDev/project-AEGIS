@@ -18,6 +18,7 @@ using namespace aegis::model;
 static_assert(!std::is_same_v<FirmId, DeskId>);
 static_assert(!std::is_same_v<LogicalAccountId, VenueAccountId>);
 static_assert(!std::is_same_v<InstrumentId, VenueInstrumentId>);
+static_assert(!std::is_same_v<MarketSourceId, VenueId>);
 static_assert(!std::is_convertible_v<FirmId, DeskId>);
 static_assert(!std::is_convertible_v<LogicalAccountId, VenueAccountId>);
 static_assert(!std::is_constructible_v<FirmId, std::string>);
@@ -36,6 +37,7 @@ TEST_CASE("reference configuration identifiers satisfy their nominal grammars", 
   CHECK(SubscriptionId::parse("subscription.deribit-btc-perpetual-book"));
   CHECK(RouteId::parse("route.deribit-testnet-btc-perpetual"));
   CHECK(VenueAccountId::parse("native-account:1234"));
+  CHECK(MarketSourceId::parse("source.deribit-btc-perpetual"));
 }
 
 // --------------------------------------------------------
@@ -66,6 +68,16 @@ TEST_CASE("organizational identifiers reject wrong prefixes and malformed segmen
   CHECK_FALSE(FirmId::parse("firm." + std::string(60U, 'a')));
 
   // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Market sources use their own prefixed nominal identity so a venue or adapter token cannot select
+// ingress state accidentally.
+TEST_CASE("market source identifiers retain a distinct configured-stream grammar", "[model][id]") {
+  CHECK(MarketSourceId::parse("source.deribit-btc-perpetual"));
+  CHECK_FALSE(MarketSourceId::parse("deribit-btc-perpetual"));
+  CHECK_FALSE(MarketSourceId::parse("source.Deribit"));
+  CHECK_FALSE(MarketSourceId::parse("source.deribit..btc"));
 }
 
 // --------------------------------------------------------

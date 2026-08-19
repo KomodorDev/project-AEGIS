@@ -64,6 +64,11 @@ struct RouteIdTag;
 struct VenueAccountIdTag;
 
 // ########################################################################
+// Market-source identifiers name one configured normalized ingress stream independently from its
+// venue and instrument key.
+struct MarketSourceIdTag;
+
+// ########################################################################
 // Traits bind each nominal tag to its validation grammar and stable error field.
 template <typename Tag> struct IdentifierTraits;
 
@@ -104,6 +109,10 @@ AEGIS_ORGANIZATION_ID_TRAITS(SubscriptionIdTag, "subscription.", "subscription_i
 // ########################################################################
 // Route traits bind the route prefix and stable field to the organization grammar.
 AEGIS_ORGANIZATION_ID_TRAITS(RouteIdTag, "route.", "route_id");
+
+// ########################################################################
+// Market-source traits bind the source prefix and stable field to the organization grammar.
+AEGIS_ORGANIZATION_ID_TRAITS(MarketSourceIdTag, "source.", "market_source_id");
 
 // ########################################################################
 #undef AEGIS_ORGANIZATION_ID_TRAITS
@@ -219,6 +228,7 @@ using VenueInstrumentId = Identifier<detail::VenueInstrumentIdTag>;
 using SubscriptionId = Identifier<detail::SubscriptionIdTag>;
 using RouteId = Identifier<detail::RouteIdTag>;
 using VenueAccountId = Identifier<detail::VenueAccountIdTag>;
+using MarketSourceId = Identifier<detail::MarketSourceIdTag>;
 
 // ########################################################################
 } // namespace aegis::model

@@ -12,7 +12,8 @@ namespace aegis::model {
 
 // ########################################################################
 // Values are persisted compatibility identifiers. The hundreds bands reserve primitive, metadata,
-// configuration, and encoding failures; add new codes explicitly and never renumber one.
+// configuration, encoding, runtime, market-data, and strategy failures; add new codes explicitly
+// and never renumber one.
 enum class DomainErrorCode : std::uint16_t {
   InvalidIdentifier = 1,
   InvalidValue = 2,
@@ -38,6 +39,33 @@ enum class DomainErrorCode : std::uint16_t {
 
   EncodingOverflow = 300,
   TraceCapacityExceeded = 301,
+
+  ExecutorWrongOwner = 400,
+  ExecutorReentryDetected = 401,
+  ExecutorNotBound = 402,
+  ExecutorClockRegression = 403,
+  ExecutorCounterExhausted = 404,
+
+  InvalidRuntimePolicy = 405,
+  RuntimeEvidenceExhausted = 406,
+  RuntimeSourceNotConfigured = 407,
+
+  InvalidMarketEvent = 500,
+  InvalidMarketState = 501,
+  MarketSequenceGap = 502,
+  MarketSequenceConflict = 503,
+  MarketMetadataMismatch = 504,
+  MarketIntegrityFailure = 505,
+  MarketBookInvalid = 506,
+  MarketBookCapacityExceeded = 507,
+  MarketNotReady = 508,
+  MarketCounterExhausted = 509,
+  DiagnosticCapacityExceeded = 510,
+
+  StrategyNotConfigured = 600,
+  DispatchCapacityExceeded = 601,
+  DispatchReentryDetected = 602,
+  CallbackCounterExhausted = 603,
 };
 
 // ########################################################################

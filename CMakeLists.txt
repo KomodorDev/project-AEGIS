@@ -38,6 +38,8 @@ add_library(
   # Data subscriptions and execution routes remain separate compiled permission boundaries.
   src/aegis/execution/execution_route.cpp
   src/aegis/market_data/subscription.cpp
+  # Normalized market events own venue-neutral input identity and post-commit callback contracts.
+  src/aegis/market_data/market_event.cpp
   # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.
   src/aegis/model/fixed_point.cpp
   # Identifier grammar is compiled; its Result and error primitives remain header-only.
@@ -52,8 +54,12 @@ add_library(
   src/aegis/model/time.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
+  # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
+  src/aegis/runtime/runtime_policy.cpp
   # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
   src/aegis/trace/trace.cpp
+  # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
+  src/aegis/trace/runtime_trace.cpp
   # Version reporting exposes the configured project identity without adding runtime dependencies.
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)

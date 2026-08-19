@@ -31,19 +31,29 @@ M2 adds one validated immutable runtime policy that references the sealed M1 con
 fingerprint. It has its own canonical `AEGISRTP` schema-one encoding and SHA-256 fingerprint, so
 replay evidence identifies capacity and freshness decisions without changing `AEGISCFG` schema one.
 
-The policy fixes, at minimum, pending ingress capacity, configured source capacity, maximum recorded
-frame bytes, maximum changes per market update, compiled and retained book depth, stale threshold,
-maximum matching callbacks per turn, diagnostic capacity, runtime-trace capacity, maximum turns per
-bounded drive, and the callback measurement budget. Every value is positive, mutually consistent,
-and validated before a runtime can be constructed. The callback budget is an observation threshold,
-not authority to preempt a running callback.
+`AEGISRTP` schema one fixes the compiled frame, normalized-change, and book-depth ceilings. A policy
+instance fixes, at minimum, pending ingress capacity, configured source capacity, maximum recorded
+frame bytes, maximum changes per market update, retained book depth, stale threshold, maximum
+matching callbacks per turn, diagnostic capacity, runtime-trace capacity, maximum turns per bounded
+drive, and the callback measurement budget. Every value is positive, mutually consistent, within
+the schema ceiling, and validated before a runtime can be constructed. Changing a compiled ceiling
+requires a schema decision. The callback budget is an observation threshold, not authority to
+preempt a running callback.
+
+Mutual consistency includes evidence feasibility. For the largest configured source fan-out of
+`g` matching subscription grants, runtime-trace capacity is at least `2 + 4g`: one input record,
+one state-transition record, two callbacks per grant, and one reserved first re-entry record per
+callback. Validation computes this relationship in a wide unsigned intermediate before comparing
+it with the configured capacity. This minimum proves that one recovery-snapshot turn is
+representable; the authored capacity must still cover the complete bounded replay scenario.
 
 The policy owns a canonical market-source registry sorted by validated `MarketSourceId`. Each entry
 maps one source to exactly one configured venue, instrument, venue instrument, order-book channel,
 and metadata revision, and receives a stable one-based source ordinal in that order. M2 permits only
 one source for a `(venue, instrument, channel)` key; redundant-feed arbitration requires a later
 decision. Source capacity is the registry size, so every possible discontinuity fence is allocated
-at construction.
+at construction. `MarketSourceId` is at most 64 bytes and uses the exact `source.` prefix followed by
+lowercase ASCII alphanumeric slug segments separated by `.` or `-`, with no empty segment.
 
 Dynamic policy adoption is outside M2. A runtime uses one sealed startup configuration and one
 runtime policy for its lifetime.
@@ -64,9 +74,11 @@ value is one of these ordinary admission decisions:
 Every ordinary attempt receives a monotonic ingress ordinal, including `CapacityExceeded` and
 `Closed`. Every successful admission additionally receives a distinct monotonic receive sequence
 and injected `ReceiveTimestamp`; its receipt exposes the attempt ordinal, sequence, pending depth,
-and configured capacity. Attempt- or receive-counter exhaustion and injected-clock failure are
-terminal `Result` errors that occur before another ordinal can be assigned; they fail the runtime
-closed and cannot be confused with an ordinary admission decision.
+and configured capacity. Attempt- or receive-counter exhaustion and an injected clock value that
+regresses from the executor's last observation are terminal `Result` errors that occur before
+another ordinal can be assigned; they fail the runtime closed and cannot be confused with an
+ordinary admission decision. Clock providers expose a non-fallible monotonic reading; a scripted
+clock-advance failure is returned to its controller before admission is attempted.
 
 Rejecting an attributable market frame is an integrity event, not ordinary telemetry. A
 construction-time table provides one preallocated discontinuity fence per configured source. On
@@ -144,7 +156,9 @@ Given those inputs, callback order and canonical runtime-trace bytes must match 
 Diagnostics are structured assigned values with fixed fields. Their sink has fixed capacity,
 preserves the accepted prefix, and exposes saturation explicitly. Admission rejection is always
 returned directly and source discontinuity is maintained independently, so a full diagnostic sink
-cannot conceal overload.
+cannot conceal overload. Ordinary admission failures are not appended to owner-local `AEGISRTS`
+from producer threads: replay input records their decisions and ordinals, while an attributable
+capacity loss becomes the owner's ordered `SourceDiscontinuity` disposition.
 
 Critical input-disposition, state-transition, and callback trace records are counted before a book
 commit. If the runtime trace cannot reserve the complete required record set, the turn changes no

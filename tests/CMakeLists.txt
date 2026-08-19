@@ -15,6 +15,8 @@ add_executable(
   # These tests prove an observation grant never synthesizes or enables execution permission.
   unit/execution/execution_route_test.cpp
   unit/market_data/subscription_test.cpp
+  # Market-event tests pin normalized ordering, duplicate identity, and sanitized state publication.
+  unit/market_data/market_event_test.cpp
   # These primitive tests pin stable Result/error contracts and nominal identifier grammar.
   unit/model/domain_error_result_test.cpp
   # Fixed-point tests pin canonical storage, explicit rounding, and overflow behavior.
@@ -31,8 +33,11 @@ add_executable(
   unit/model/time_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
+  # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
+  unit/runtime/runtime_policy_test.cpp
   # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
+  unit/trace/runtime_trace_test.cpp
   # Version tests ensure the compiled library reports the configured project identity.
   unit/version_test.cpp)
 target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
