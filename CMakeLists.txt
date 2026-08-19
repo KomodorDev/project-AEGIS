@@ -61,8 +61,10 @@ add_library(
   src/aegis/organization/organization.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
-  # Owner-local diagnostics retain only bounded fixed-field detail with explicit overwrite counts.
+  # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
   src/aegis/runtime/runtime_diagnostics.cpp
+  # Bot dispatch owns one strategy per bot and invokes canonical state-before-market callbacks.
+  src/aegis/runtime/bot_runtime.cpp
   # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
   src/aegis/trace/trace.cpp
   # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
