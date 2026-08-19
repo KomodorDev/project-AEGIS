@@ -24,6 +24,8 @@ RUN_NAME = f"{WORKLOAD_ID}/harness.noop"
 EXPECTED_AGGREGATES = {"mean", "median", "stddev", "cv"}
 
 
+# --------------------------------------------------------
+# Runs one repository-inspection command with strict failure propagation.
 def command_output(arguments: Sequence[str], *, cwd: Path) -> str:
     """Run a repository-inspection command and return trimmed standard output."""
 
@@ -38,12 +40,16 @@ def command_output(arguments: Sequence[str], *, cwd: Path) -> str:
     return completed.stdout.strip()
 
 
+# --------------------------------------------------------
+# Computes the canonical lowercase SHA-256 digest for one file.
 def sha256(path: Path) -> str:
     """Return the lowercase SHA-256 digest of one evidence or executable file."""
 
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+# --------------------------------------------------------
+# Loads evidence JSON while enforcing the object-shaped document contract.
 def read_json_object(path: Path) -> dict[str, Any]:
     """Load a JSON document and require an object at its root."""
 
@@ -53,6 +59,8 @@ def read_json_object(path: Path) -> dict[str, Any]:
     return document
 
 
+# --------------------------------------------------------
+# Converts failed evidence invariants into one consistent validation error.
 def require(condition: bool, message: str) -> None:
     """Raise one consistent validation error when an evidence invariant is false."""
 
@@ -60,6 +68,8 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
+# --------------------------------------------------------
+# Extracts one required nonempty string from an evidence object.
 def require_nonempty_string(document: dict[str, Any], key: str) -> str:
     """Return a required nonempty string field from a JSON object."""
 
@@ -70,6 +80,8 @@ def require_nonempty_string(document: dict[str, Any], key: str) -> str:
     return value
 
 
+# --------------------------------------------------------
+# Extracts a required nonempty list whose elements are nonempty strings.
 def require_string_list(document: dict[str, Any], key: str) -> list[str]:
     """Return a required nonempty list containing only nonempty strings."""
 
@@ -85,6 +97,8 @@ def require_string_list(document: dict[str, Any], key: str) -> list[str]:
     return value
 
 
+# --------------------------------------------------------
+# Defines the command-line contract and repository-relative result default.
 def parse_arguments() -> argparse.Namespace:
     """Accept an alternate result directory while defaulting to the repository output path."""
 
@@ -98,10 +112,13 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# --------------------------------------------------------
+# Validates the complete benchmark bundle and its repository provenance.
 def main() -> int:
     """Validate schema, hashes, workload identity, build mode, and repository provenance."""
 
-    # Resolve fixed bundle names from the same repository-relative default used by the runner.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Resolves fixed bundle names from the same repository-relative default used by the runner.
     arguments = parse_arguments()
     repository = Path(__file__).resolve().parents[1]
     results_dir = arguments.results_dir.resolve()
@@ -110,7 +127,8 @@ def main() -> int:
     raw = read_json_object(raw_path)
     manifest = read_json_object(manifest_path)
 
-    # Require the stable M0 identity and the optimized build properties promised by the docs.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Requires the stable M0 identity and optimized build properties promised by the docs.
     require(manifest.get("schema_version") == 1, "schema_version must equal 1")
     require(manifest.get("workload_id") == WORKLOAD_ID, "unexpected workload_id")
     require(manifest.get("build_preset") == "release", "build_preset must equal release")
@@ -119,7 +137,8 @@ def main() -> int:
     require(manifest.get("sample_count") == 3, "sample_count must equal 3")
     require(type(manifest.get("git_worktree_dirty")) is bool, "git_worktree_dirty must be boolean")
 
-    # Verify every required descriptive field is present, plus numeric host topology and memory.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Verifies required descriptive fields together with numeric host topology and memory.
     for key in (
         "generated_at_utc",
         "git_revision",
@@ -152,7 +171,8 @@ def main() -> int:
         "physical_core_count must be null or a positive integer",
     )
 
-    # Cross-check the raw file, recorded command, and executable against their cryptographic hashes.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Cross-checks the raw file, recorded commands, and executable against recorded hashes.
     require(manifest["benchmark_result"] == raw_path.name, "benchmark_result names the wrong file")
     require(manifest["benchmark_result_sha256"] == sha256(raw_path), "raw result SHA-256 mismatch")
     executable = Path(manifest["benchmark_executable"]).resolve()
@@ -176,7 +196,8 @@ def main() -> int:
         "benchmark_command writes to another result file",
     )
 
-    # Inspect Google Benchmark's own context so manifest claims cannot drift from the raw producer.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Inspects producer context so manifest claims cannot drift from the raw benchmark output.
     raw_context = raw.get("context")
     require(isinstance(raw_context, dict), "raw benchmark context must be an object")
     assert isinstance(raw_context, dict)
@@ -194,7 +215,8 @@ def main() -> int:
         "raw result names another executable",
     )
 
-    # Every aggregate must represent the one named workload and the configured repetition count.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Requires every aggregate to represent the named workload and configured repetition count.
     benchmarks = raw.get("benchmarks")
     require(isinstance(benchmarks, list) and bool(benchmarks), "raw benchmarks must be nonempty")
     assert isinstance(benchmarks, list)
@@ -218,7 +240,8 @@ def main() -> int:
         aggregates.add(aggregate)
     require(EXPECTED_AGGREGATES <= aggregates, "raw result is missing required aggregates")
 
-    # Finally, prove the manifest describes the repository state in which validation is running.
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Proves the manifest describes the exact repository state used for validation.
     require(
         manifest["git_revision"] == command_output(["git", "rev-parse", "HEAD"], cwd=repository),
         "git_revision does not match the current checkout",
@@ -236,9 +259,16 @@ def main() -> int:
         manifest["git_worktree_fingerprint_sha256"] == worktree_fingerprint(repository),
         "git_worktree_fingerprint_sha256 no longer matches checkout",
     )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Reports success only after every independent evidence invariant has passed.
     print(f"validated {WORKLOAD_ID} evidence in {results_dir}")
     return 0
 
+    # ++++++++++++++++++++++++++++++++++++++++
+
+
+# --------------------------------------------------------
 
 # Interesting syntax: raising SystemExit forwards main's status code to shells and CI runners.
 if __name__ == "__main__":
