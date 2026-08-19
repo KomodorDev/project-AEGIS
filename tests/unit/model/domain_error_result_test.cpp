@@ -13,10 +13,12 @@ using aegis::model::DomainError;
 using aegis::model::DomainErrorCode;
 using aegis::model::Result;
 
+// --------------------------------------------------------
 // Persisted numeric assignments must not drift when later milestones add new error categories.
 static_assert(static_cast<std::uint16_t>(DomainErrorCode::InvalidIdentifier) == 1U);
 static_assert(static_cast<std::uint16_t>(DomainErrorCode::TraceCapacityExceeded) == 301U);
 
+// --------------------------------------------------------
 // Successful results expose their value through both the explicit predicate and contextual boolean
 // conversion used by production validation chains.
 TEST_CASE("a successful result exposes only its value", "[model][result]") {
@@ -26,7 +28,7 @@ TEST_CASE("a successful result exposes only its value", "[model][result]") {
   CHECK(static_cast<bool>(result));
   CHECK(result.value() == "accepted");
 }
-
+// --------------------------------------------------------
 // Collection failures must retain stable machine-readable location rather than depending on prose.
 TEST_CASE("a failed result preserves field and collection position", "[model][result]") {
   auto result = Result<int>::failure(
@@ -39,7 +41,7 @@ TEST_CASE("a failed result preserves field and collection position", "[model][re
   REQUIRE(result.error().context.collection_index.has_value());
   CHECK(*result.error().context.collection_index == std::size_t{3U});
 }
-
+// --------------------------------------------------------
 // Command-style operations use the void specialization without weakening field-only error context.
 TEST_CASE("void results distinguish completion from failure", "[model][result]") {
   const auto completed = Result<void>::success();
@@ -52,5 +54,6 @@ TEST_CASE("void results distinguish completion from failure", "[model][result]")
   CHECK(failed.error().context.field == "route.enabled");
   CHECK_FALSE(failed.error().context.collection_index.has_value());
 }
+// --------------------------------------------------------
 
 } // namespace

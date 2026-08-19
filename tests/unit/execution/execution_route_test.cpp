@@ -15,6 +15,7 @@ namespace {
 
 using namespace aegis;
 
+// --------------------------------------------------------
 // Invalid literals fail fast because they indicate a broken typed test fixture, not a domain case.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view value) {
   auto parsed = Identifier::parse(value);
@@ -23,8 +24,8 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   }
   return std::move(parsed).value();
 }
-
-// The base fixtures describe one valid disabled route and its complete dependency catalogs.
+// --------------------------------------------------------
+// Build the single-firm organization used by ordinary route-validation cases.
 [[nodiscard]] organization::Organization reference_organization() {
   auto result = organization::Organization::create(
       model::OrganizationRevision::initial(),
@@ -39,7 +40,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   }
   return std::move(result).value();
 }
-
+// --------------------------------------------------------
 // Both owners are valid peer firms, ensuring ownership rejection is not a dangling-reference
 // shortcut.
 [[nodiscard]] organization::Organization two_firm_organization() {
@@ -62,7 +63,8 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
   }
   return std::move(result).value();
 }
-
+// --------------------------------------------------------
+// Build one disabled reference route whose ID can vary without changing authorization meaning.
 [[nodiscard]] execution::ExecutionRoute route(std::string_view route_id) {
   return execution::ExecutionRoute{id<model::RouteId>(route_id),
                                    id<model::BotId>("bot.deribit-btc-perpetual-reference"),
@@ -71,19 +73,23 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
                                    id<model::InstrumentId>("BTC-USD-PERPETUAL"),
                                    execution::ExecutionRouteState::Disabled};
 }
-
+// --------------------------------------------------------
+// Supply the complete venue-instrument dependency catalog for the reference route.
 [[nodiscard]] std::vector<execution::VenueInstrumentPair> venue_instruments() {
   return {{id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")}};
 }
-
+// --------------------------------------------------------
+// Supply the firm-owned account binding required by the reference route.
 [[nodiscard]] std::vector<execution::LogicalAccountVenueBinding> account_bindings() {
   return {{id<model::LogicalAccountId>("account.deribit-testnet-aegis"),
            id<model::FirmId>("firm.aegis-lab"), id<model::VenueId>("deribit")}};
 }
-
+// --------------------------------------------------------
 // Accepted cases lock canonical publication and prove subscriptions cannot create route authority.
 TEST_CASE("the reference route is explicit, canonical, and disabled by default",
           "[execution][route]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Author two valid routes out of order with deliberately different state and instrument.
   const auto organization = reference_organization();
   auto second = route("route.z-disabled");
   second.state = execution::ExecutionRouteState::Enabled;
@@ -95,7 +101,8 @@ TEST_CASE("the reference route is explicit, canonical, and disabled by default",
       {{id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL")},
        {id<model::VenueId>("deribit"), id<model::InstrumentId>("ETH-USD-PERPETUAL")}},
       account_bindings());
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Verify canonical publication, explicit state, revision ownership, and indexed lookup.
   REQUIRE(result);
   REQUIRE(result.value().routes().size() == 2U);
   CHECK(result.value().routes()[0U].id == id<model::RouteId>("route.a-disabled"));
@@ -104,9 +111,13 @@ TEST_CASE("the reference route is explicit, canonical, and disabled by default",
   CHECK(result.value().revision() == model::RouteRevision::initial());
   CHECK(result.value().find(id<model::RouteId>("route.a-disabled")) != nullptr);
   CHECK(result.value().find(id<model::RouteId>("route.missing")) == nullptr);
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
+// A valid observation grant leaves the independently configured execution route set empty.
 TEST_CASE("a subscription never creates or enables an execution route", "[execution][route]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Establish an accepted subscription for the same bot, venue, and instrument.
   const auto organization = reference_organization();
   const auto subscriptions = market_data::SubscriptionConfiguration::create(
       model::SubscriptionRevision::initial(),
@@ -117,15 +128,19 @@ TEST_CASE("a subscription never creates or enables an execution route", "[execut
           market_data::SubscriptionChannel::OrderBook}},
       organization, venue_instruments());
   REQUIRE(subscriptions);
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Prove route publication remains empty without an explicit execution grant.
   const auto routes = execution::ExecutionRouteConfiguration::create(
       model::RouteRevision::initial(), {}, organization, venue_instruments(), account_bindings());
   REQUIRE(routes);
   CHECK(routes.value().routes().empty());
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Route IDs and authorization meaning are independently unique; state cannot duplicate a grant.
 TEST_CASE("route IDs and semantic keys must both be unique", "[execution][route]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject an authored route identifier repeated at the canonical duplicate position.
   const auto organization = reference_organization();
   const auto existing = route("route.a");
 
@@ -135,7 +150,8 @@ TEST_CASE("route IDs and semantic keys must both be unique", "[execution][route]
   REQUIRE_FALSE(duplicate_id);
   CHECK(duplicate_id.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier, "routes.id", 1U));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // State differences cannot disguise duplicate bot/venue/account/instrument authorization.
   auto same_key = route("route.z");
   same_key.state = execution::ExecutionRouteState::Enabled;
   const auto duplicate_key = execution::ExecutionRouteConfiguration::create(
@@ -145,11 +161,14 @@ TEST_CASE("route IDs and semantic keys must both be unique", "[execution][route]
   CHECK(duplicate_key.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
                                      "routes.semantic_key", 1U));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Permission catalogs must fail with canonical indices before any individual route is evaluated.
 TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
           "[execution][route]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject a duplicate venue-instrument dependency at its canonical sorted position.
   const auto organization = reference_organization();
   const execution::VenueInstrumentPair duplicate_instrument{
       id<model::VenueId>("deribit"), id<model::InstrumentId>("ETH-USD-PERPETUAL")};
@@ -164,11 +183,11 @@ TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
   CHECK(duplicate_instrument_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
                                      "routes.known_venue_instruments", 2U));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject one account ID with conflicting owners before lookup could choose either binding.
   const execution::LogicalAccountVenueBinding duplicate_account{
       id<model::LogicalAccountId>("account.z"), id<model::FirmId>("firm.aegis-lab"),
       id<model::VenueId>("deribit")};
-  // One account ID with two owners must fail before either owner could be selected by lookup.
   auto conflicting_owner = duplicate_account;
   conflicting_owner.firm_id = id<model::FirmId>("firm.aegis-subsidiary");
   const auto duplicate_account_result = execution::ExecutionRouteConfiguration::create(
@@ -181,11 +200,14 @@ TEST_CASE("route dependency catalogs reject duplicates after canonical sorting",
   CHECK(duplicate_account_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
                                      "routes.known_account_bindings", 2U));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Reference, relationship, and enum failures remain distinct so configuration defects are
 // actionable.
 TEST_CASE("execution routes reject every dangling reference", "[execution][route]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A route cannot name a bot absent from the validated organization.
   const auto organization = reference_organization();
 
   auto unknown_bot = route("route.unknown-bot");
@@ -195,7 +217,8 @@ TEST_CASE("execution routes reject every dangling reference", "[execution][route
       account_bindings());
   REQUIRE_FALSE(bot_result);
   CHECK(bot_result.error().context.field == "routes.bot_id");
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A route cannot name a venue absent from its dependency catalogs.
   auto unknown_venue = route("route.unknown-venue");
   unknown_venue.venue_id = id<model::VenueId>("unknown");
   const auto venue_result = execution::ExecutionRouteConfiguration::create(
@@ -203,7 +226,8 @@ TEST_CASE("execution routes reject every dangling reference", "[execution][route
       account_bindings());
   REQUIRE_FALSE(venue_result);
   CHECK(venue_result.error().context.field == "routes.venue_id");
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A route cannot name a logical account absent from the binding catalog.
   auto unknown_account = route("route.unknown-account");
   unknown_account.logical_account_id = id<model::LogicalAccountId>("account.unknown");
   const auto account_result = execution::ExecutionRouteConfiguration::create(
@@ -211,7 +235,8 @@ TEST_CASE("execution routes reject every dangling reference", "[execution][route
       account_bindings());
   REQUIRE_FALSE(account_result);
   CHECK(account_result.error().context.field == "routes.logical_account_id");
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A route cannot name an instrument absent from its dependency catalogs.
   auto unknown_instrument = route("route.unknown-instrument");
   unknown_instrument.instrument_id = id<model::InstrumentId>("ETH-USD-PERPETUAL");
   const auto instrument_result = execution::ExecutionRouteConfiguration::create(
@@ -219,10 +244,14 @@ TEST_CASE("execution routes reject every dangling reference", "[execution][route
       account_bindings());
   REQUIRE_FALSE(instrument_result);
   CHECK(instrument_result.error().context.field == "routes.instrument_id");
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
+// Known objects confer authority only through explicitly declared pair and ownership relations.
 TEST_CASE("routes require an explicit venue-instrument pair and account-venue binding",
           "[execution][route]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Independently known venues and instruments cannot authorize an undeclared pair.
   const auto organization = reference_organization();
   auto mismatched_instrument = route("route.mismatched-instrument");
   mismatched_instrument.instrument_id = id<model::InstrumentId>("ETH-USD-PERPETUAL");
@@ -235,7 +264,8 @@ TEST_CASE("routes require an explicit venue-instrument pair and account-venue bi
   CHECK(pair_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
                                      "routes.venue_instrument", 0U));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // An account bound to another venue cannot authorize this route.
   const auto account_result = execution::ExecutionRouteConfiguration::create(
       model::RouteRevision::initial(), {route("route.mismatched-account")}, organization,
       venue_instruments(),
@@ -245,7 +275,7 @@ TEST_CASE("routes require an explicit venue-instrument pair and account-venue bi
   CHECK(account_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
                                      "routes.account_venue", 0U));
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Exact account_firm failure proves the public route factory owns the authorization decision.
   const auto multi_firm = two_firm_organization();
   const auto firm_result = execution::ExecutionRouteConfiguration::create(
@@ -257,8 +287,10 @@ TEST_CASE("routes require an explicit venue-instrument pair and account-venue bi
   CHECK(firm_result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
                                      "routes.account_firm", 0U));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
+// Unassigned route-state values fail closed instead of silently acquiring execution authority.
 TEST_CASE("execution routes reject unassigned state values", "[execution][route]") {
   const auto organization = reference_organization();
   auto invalid = route("route.invalid-state");
@@ -272,5 +304,6 @@ TEST_CASE("execution routes reject unassigned state values", "[execution][route]
   CHECK(result.error() ==
         model::DomainError::at_index(model::DomainErrorCode::InvalidValue, "routes.state", 0U));
 }
+// --------------------------------------------------------
 
 } // namespace

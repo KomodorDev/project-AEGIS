@@ -12,6 +12,7 @@ namespace {
 
 using namespace aegis::model;
 
+// ########################################################################
 // Interesting syntax: this requires-expression proves that nominal values expose no generic product
 // operator, without adding an intentionally ill-formed expression to the test translation unit.
 template <typename Left, typename Right>
@@ -37,10 +38,10 @@ concept HasScaledMultiply =
 template <typename Scale>
 concept HasScaledDivide =
     requires(FixedPoint value, Scale scale) { value.divide(value, scale, RoundingMode::Exact); };
-
+// ########################################################################
 // Model a legacy unscoped enum that would otherwise convert implicitly to an integer scale.
 enum LegacyScale { LegacyScaleZero = 0 };
-
+// ########################################################################
 // Price, Quantity, and Notional are compile-time domains rather than aliases of one interchangeable
 // decimal type.
 static_assert(!std::is_same_v<Price, Quantity>);
@@ -85,40 +86,49 @@ static_assert(!HasScaledDivide<LegacyScale>);
 static_assert(!HasScaledMultiply<char>);
 static_assert(!HasScaledDivide<wchar_t>);
 static_assert(!HasProductOperator<Price, Quantity>);
-
+// ########################################################################
+// --------------------------------------------------------
 // Parse every fixture literal through the production path so malformed test data fails immediately.
 [[nodiscard]] FixedPoint decimal(std::string_view text) {
   auto result = FixedPoint::parse_ascii(text);
   REQUIRE(result);
   return result.value();
 }
-
+// --------------------------------------------------------
 // Canonical storage removes representational differences without changing exact numeric ordering.
 TEST_CASE("decimal parsing is strict and storage is canonical", "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Canonicalize redundant leading and fractional zeros while retaining the exact value.
   const auto value = decimal("0012.3400");
   CHECK(value.coefficient() == 1234);
   CHECK(value.scale() == 2U);
   CHECK(value.to_string() == "12.34");
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Collapse every signed zero representation to the unique scale-zero value.
   const auto zero = decimal("-0.000");
   CHECK(zero.coefficient() == 0);
   CHECK(zero.scale() == 0U);
   CHECK(zero.to_string() == "0");
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Numeric equality and ordering ignore representational differences after canonicalization.
   CHECK(decimal("1.0") == decimal("1"));
   CHECK(decimal("-0.10") < decimal("0"));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // The parser accepts only ordinary decimal notation and distinguishes syntax, scale, and range
 // errors.
 TEST_CASE("decimal parsing rejects non-ordinary notation and representation overflow",
           "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject empty, incomplete, signed-plus, exponent, locale, and whitespace notation uniformly.
   for (const auto text : {"", "-", ".1", "1.", "+1", "1e2", "NaN", " 1", "1,2"}) {
     const auto result = FixedPoint::parse_ascii(text);
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::InvalidDecimal);
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Distinguish excessive authored scale from general decimal syntax failure.
   const auto excessive_scale = FixedPoint::parse_ascii("0.0000000000000000001");
   REQUIRE_FALSE(excessive_scale);
   CHECK(excessive_scale.error().code == DomainErrorCode::InvalidScale);
@@ -126,7 +136,8 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto excessive_textual_scale = FixedPoint::parse_ascii("1.0000000000000000000");
   REQUIRE_FALSE(excessive_textual_scale);
   CHECK(excessive_textual_scale.error().code == DomainErrorCode::InvalidScale);
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Accept both signed coefficient limits exactly.
   CHECK(decimal("9223372036854775807").coefficient() == std::numeric_limits<std::int64_t>::max());
   CHECK(decimal("-9223372036854775808").coefficient() == std::numeric_limits<std::int64_t>::min());
 
@@ -138,12 +149,15 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   // remain after the redundant zero is removed.
   CHECK(decimal("922337203685477580.70") == decimal("922337203685477580.7"));
   CHECK(decimal("-922337203685477580.80") == decimal("-922337203685477580.8"));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject coefficients immediately outside the signed representation range.
   for (const auto text : {"9223372036854775808", "-9223372036854775809"}) {
     const auto result = FixedPoint::parse_ascii(text);
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::ArithmeticOverflow);
   }
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Validate scale inputs at their authored sign and width before stored-scale narrowing.
   const auto invalid_scale = FixedPoint::from_scaled(1, 19U);
   REQUIRE_FALSE(invalid_scale);
   CHECK(invalid_scale.error().code == DomainErrorCode::InvalidScale);
@@ -157,7 +171,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto formerly_wrapped_scale = FixedPoint::from_scaled(1, std::uint64_t{256U});
   REQUIRE_FALSE(formerly_wrapped_scale);
   CHECK(formerly_wrapped_scale.error().code == DomainErrorCode::InvalidScale);
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // UINT64_MAX guards the former unsafe coefficient narrowing while the adjacent signed maximum
   // proves a wide source is accepted when its value is representable.
   const auto maximum_unsigned_coefficient =
@@ -171,24 +185,27 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   REQUIRE(maximum_signed_as_unsigned);
   CHECK(maximum_signed_as_unsigned.value().coefficient() ==
         std::numeric_limits<std::int64_t>::max());
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Nominal wrappers must preserve the same overflow code while replacing the generic kernel field.
   const auto invalid_price = Price::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
   REQUIRE_FALSE(invalid_price);
   CHECK(invalid_price.error() ==
         DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "price"));
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Instantiating both narrow signed and unsigned source types proves supported character-width
   // integers compile through std::in_range and preserve exact value semantics at runtime.
   const auto narrow_integers =
       FixedPoint::from_scaled(static_cast<signed char>(12), static_cast<unsigned char>(1));
   REQUIRE(narrow_integers);
   CHECK(narrow_integers.value() == decimal("1.2"));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Cross-scale addition and subtraction remain exact through both signed overflow boundaries.
 TEST_CASE("addition and subtraction preserve exact cross-scale values and fail on overflow",
           "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve exact values while aligning unlike scales for addition and subtraction.
   const auto sum = decimal("1.2").checked_add(decimal("0.03"));
   REQUIRE(sum);
   CHECK(sum.value() == decimal("1.23"));
@@ -196,7 +213,8 @@ TEST_CASE("addition and subtraction preserve exact cross-scale values and fail o
   const auto difference = decimal("1.2").checked_subtract(decimal("2.03"));
   REQUIRE(difference);
   CHECK(difference.value() == decimal("-0.83"));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject overflow in both signed directions rather than wrapping coefficients.
   const auto add_overflow = decimal("9223372036854775807").checked_add(decimal("1"));
   REQUIRE_FALSE(add_overflow);
   CHECK(add_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
@@ -204,33 +222,41 @@ TEST_CASE("addition and subtraction preserve exact cross-scale values and fail o
   const auto subtract_overflow = decimal("-9223372036854775808").checked_subtract(decimal("1"));
   REQUIRE_FALSE(subtract_overflow);
   CHECK(subtract_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Every directional policy is explicit, including signed floor/ceiling and ties-to-even behavior.
 TEST_CASE("rescaling requires an explicit policy and handles every signed direction",
           "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Exact rescaling rejects discarded information rather than selecting an implicit policy.
   const auto exact = decimal("1.25").rescale(1U, RoundingMode::Exact);
   REQUIRE_FALSE(exact);
   CHECK(exact.error().code == DomainErrorCode::PrecisionLoss);
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Pin every directional and ties-to-even policy for positive values.
   CHECK(decimal("1.25").rescale(1U, RoundingMode::TowardZero).value() == decimal("1.2"));
   CHECK(decimal("1.25").rescale(1U, RoundingMode::AwayFromZero).value() == decimal("1.3"));
   CHECK(decimal("1.25").rescale(1U, RoundingMode::Floor).value() == decimal("1.2"));
   CHECK(decimal("1.25").rescale(1U, RoundingMode::Ceiling).value() == decimal("1.3"));
   CHECK(decimal("1.25").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("1.2"));
   CHECK(decimal("1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("1.4"));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Pin the corresponding sign-sensitive behavior for negative values.
   CHECK(decimal("-1.25").rescale(1U, RoundingMode::TowardZero).value() == decimal("-1.2"));
   CHECK(decimal("-1.25").rescale(1U, RoundingMode::AwayFromZero).value() == decimal("-1.3"));
   CHECK(decimal("-1.25").rescale(1U, RoundingMode::Floor).value() == decimal("-1.3"));
   CHECK(decimal("-1.25").rescale(1U, RoundingMode::Ceiling).value() == decimal("-1.2"));
   CHECK(decimal("-1.25").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("-1.2"));
   CHECK(decimal("-1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("-1.4"));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Target-scaled products and quotients preserve exact results and report precision or range
 // failures.
 TEST_CASE("multiplication and division are target-scaled and checked", "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve an exact target-scaled product and reject a genuinely overflowing product.
   const auto product = decimal("0.2").multiply(decimal("0.5"), 1U, RoundingMode::Exact);
   REQUIRE(product);
   CHECK(product.value() == decimal("0.1"));
@@ -239,7 +265,7 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
       decimal("9223372036854775807").multiply(decimal("2"), 0U, RoundingMode::Exact);
   REQUIRE_FALSE(product_overflow);
   CHECK(product_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Requesting maximum precision cannot create insignificant zeros that overflow a boundary value.
   const auto maximum_product =
       decimal("9223372036854775807").multiply(decimal("1"), 18U, RoundingMode::Exact);
@@ -251,7 +277,8 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
       decimal("-9223372036854775808").multiply(decimal("1"), 18U, RoundingMode::Exact);
   REQUIRE(minimum_product);
   CHECK(minimum_product.value() == decimal("-9223372036854775808"));
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve an exact quotient and make non-terminating precision policy explicit.
   const auto quotient = decimal("1").divide(decimal("8"), 3U, RoundingMode::Exact);
   REQUIRE(quotient);
   CHECK(quotient.value() == decimal("0.125"));
@@ -262,7 +289,7 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
   CHECK(decimal("1").divide(decimal("3"), 2U, RoundingMode::TowardZero).value() == decimal("0.33"));
   CHECK(decimal("-1").divide(decimal("3"), 2U, RoundingMode::Floor).value() == decimal("-0.34"));
   CHECK(decimal("-1").divide(decimal("3"), 2U, RoundingMode::Ceiling).value() == decimal("-0.33"));
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Long division must normalize its scratch quotient before checking the signed coefficient bound.
   const auto maximum_quotient =
       decimal("9223372036854775807").divide(decimal("1"), 18U, RoundingMode::Exact);
@@ -280,19 +307,24 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
       decimal("-9223372036854775808").divide(decimal("-1"), 18U, RoundingMode::Exact);
   REQUIRE_FALSE(minimum_negated);
   CHECK(minimum_negated.error().code == DomainErrorCode::ArithmeticOverflow);
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Division by zero remains a distinct domain failure after all range-boundary cases.
   const auto division_by_zero = decimal("1").divide(decimal("0"), 2U, RoundingMode::Exact);
   REQUIRE_FALSE(division_by_zero);
   CHECK(division_by_zero.error().code == DomainErrorCode::DivisionByZero);
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Alignment and quantization work across unequal scales without introducing binary-float error.
 TEST_CASE("multiple tests and quantization are exact across different scales",
           "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Determine exact divisibility after aligning unlike decimal scales.
   CHECK(decimal("1.2").is_multiple_of(decimal("0.3")).value());
   CHECK(decimal("0.5").is_multiple_of(decimal("0.25")).value());
   CHECK_FALSE(decimal("0.6").is_multiple_of(decimal("0.25")).value());
-
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Quantize both signs with explicit floor and ceiling policies.
   CHECK(decimal("1.24").quantize(decimal("0.05"), RoundingMode::Floor).value() == decimal("1.2"));
   CHECK(decimal("1.24").quantize(decimal("0.05"), RoundingMode::Ceiling).value() ==
         decimal("1.25"));
@@ -300,8 +332,9 @@ TEST_CASE("multiple tests and quantization are exact across different scales",
         decimal("-1.25"));
   CHECK(decimal("-1.24").quantize(decimal("0.05"), RoundingMode::Ceiling).value() ==
         decimal("-1.2"));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
-
+// --------------------------------------------------------
 // Unknown rounding enumerators fail closed across every precision-changing operation.
 TEST_CASE("unassigned rounding modes fail instead of selecting an implicit policy",
           "[model][fixed-point]") {
@@ -316,9 +349,11 @@ TEST_CASE("unassigned rounding modes fail instead of selecting an implicit polic
     CHECK(result.error().context.field == "rounding_mode");
   }
 }
-
+// --------------------------------------------------------
 // Every scale-changing API rejects a wide value before narrowing it to the stored scale type.
 TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-point]") {
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Apply the same wide-scale firewall to rescaling, multiplication, and division.
   constexpr auto invalid_scale = std::uint64_t{256U};
   for (const auto& result :
        {decimal("1").rescale(invalid_scale, RoundingMode::Exact),
@@ -327,13 +362,15 @@ TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-poi
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::InvalidScale);
   }
-
+  // ++++++++++++++++++++++++++++++++++++++++
   // Rescaling also preserves a signed target until validation, so -1 cannot wrap to an unsigned
   // scale before the domain error is selected.
   const auto negative_scale = decimal("1").rescale(-1, RoundingMode::Exact);
   REQUIRE_FALSE(negative_scale);
   CHECK(negative_scale.error() ==
         DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
+  // ++++++++++++++++++++++++++++++++++++++++
 }
+// --------------------------------------------------------
 
 } // namespace
