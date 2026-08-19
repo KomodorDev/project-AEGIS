@@ -65,11 +65,14 @@ to weakest:
 
 Apply the boundaries as follows:
 
+- Leave exactly one blank line immediately before every divider, including opening, closing, shared
+  and internal-step dividers. This spacing rule also applies to the final divider before a namespace
+  close or end of file.
 - Put the opening divider first and the explanatory comment immediately after it. The description
   must explain responsibility, invariant or intent before the declaration or code it governs.
-- Close every governed block with the same divider immediately after it. The final class, function
-  or algorithm phase in a file must also have an explicit closing divider; reaching a namespace
-  close or end of file is not an implicit close.
+- Close every governed block with the same divider, separated from the governed code by the required
+  blank line. The final class, function or algorithm phase in a file must also have an explicit
+  closing divider; reaching a namespace close or end of file is not an implicit close.
 - Use the class/type divider for `class`, `struct`, `union` and `enum class` definitions or forward
   declarations, and for named concept/type-alias contract groups. Continue to use method/function
   dividers for functions declared or defined inside class-like types.
@@ -79,38 +82,47 @@ Apply the boundaries as follows:
   encoding, commit or other meaningful phases need to be distinguished. Close the final phase
   before the function's closing brace.
 - Adjacent blocks at the same level may share one divider as the previous block's close and the next
-  block's open. In that case, put the next block's description immediately after the shared divider.
+  block's open. Put the required blank line before that shared divider, then put the next block's
+  description immediately after it.
 - Keep namespace-closing comments outside the class/function boundary they contain.
 
 Example:
 
 ```cpp
+
 // ########################################################################
 // Owns validated orders and preserves canonical insertion order.
 class OrderBook final {
 public:
+
   // --------------------------------------------------------
   // Validates and inserts one order without partial mutation.
   [[nodiscard]] Result<void> add(Order order);
+
   // --------------------------------------------------------
 };
+
 // ########################################################################
 
 // --------------------------------------------------------
 // Validates and inserts one order without partial mutation.
 Result<void> OrderBook::add(Order order) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject invalid input before changing owned state.
   auto validation = validate(order);
   if (!validation) {
     return validation;
   }
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Commit only after every fallible operation has succeeded.
   orders_.push_back(std::move(order));
   return Result<void>::success();
+
   // ++++++++++++++++++++++++++++++++++++++++
 }
+
 // --------------------------------------------------------
 ```
 
