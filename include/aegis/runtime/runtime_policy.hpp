@@ -121,6 +121,12 @@ public:
   [[nodiscard]] model::MarketSourceOrdinal ordinal() const noexcept { return ordinal_; }
 
   // --------------------------------------------------------
+  // Return the exact order-book grant count derived from the sealed startup configuration.
+  [[nodiscard]] std::uint32_t matching_subscription_count() const noexcept {
+    return matching_subscription_count_;
+  }
+
+  // --------------------------------------------------------
   // Return the fixed M2 observation channel without storing a caller-selectable value.
   [[nodiscard]] static constexpr market_data::SubscriptionChannel channel() noexcept {
     return market_data::SubscriptionChannel::OrderBook;
@@ -141,12 +147,15 @@ private:
 
   // --------------------------------------------------------
   // Pair one validated definition with the ordinal derived from final canonical order.
-  RuntimeSource(RuntimeSourceDefinition definition, model::MarketSourceOrdinal ordinal)
-      : definition_{std::move(definition)}, ordinal_{ordinal} {}
+  RuntimeSource(RuntimeSourceDefinition definition, model::MarketSourceOrdinal ordinal,
+                std::uint32_t matching_subscription_count)
+      : definition_{std::move(definition)}, ordinal_{ordinal},
+        matching_subscription_count_{matching_subscription_count} {}
 
   // --------------------------------------------------------
   RuntimeSourceDefinition definition_;
   model::MarketSourceOrdinal ordinal_;
+  std::uint32_t matching_subscription_count_;
 };
 
 // ########################################################################

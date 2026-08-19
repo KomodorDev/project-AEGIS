@@ -164,6 +164,7 @@ TEST_CASE("runtime policy seals positive bounds and configured source provenance
   CHECK(policy.source_capacity() == 1U);
   REQUIRE(policy.sources().size() == 1U);
   CHECK(policy.sources().front().ordinal() == model::MarketSourceOrdinal::initial());
+  CHECK(policy.sources().front().matching_subscription_count() == 1U);
   CHECK(policy.sources().front().definition() == reference_source());
 
   // ++++++++++++++++++++++++++++++++++++++++

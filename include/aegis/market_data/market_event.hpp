@@ -414,13 +414,8 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
-  // Revalidate the final commit receipt immediately before constructing callback input.
-  [[nodiscard]] static model::Result<MarketEvent> create_after_commit(NormalizedMarketUpdate update,
-                                                                      MarketCommitContext context);
-
-  // --------------------------------------------------------
-  // Restrict construction to complete post-commit invariant validation.
-  MarketEvent(NormalizedMarketUpdate update, MarketCommitContext context)
+  // Publish only fields the transactional owner already validated before its no-fail commit.
+  MarketEvent(NormalizedMarketUpdate update, MarketCommitContext context) noexcept
       : update_{std::move(update)}, context_{context} {}
 
   // --------------------------------------------------------
@@ -488,13 +483,8 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
-  // Revalidate an owner-produced profile immediately before strategy publication.
-  [[nodiscard]] static model::Result<MarketStateEvent>
-  create_transition(MarketStateEventFields fields);
-
-  // --------------------------------------------------------
-  // Restrict construction to complete transition validation.
-  explicit MarketStateEvent(MarketStateEventFields fields) : fields_{std::move(fields)} {}
+  // Publish only a profile the transactional owner validated before trace or state mutation.
+  explicit MarketStateEvent(MarketStateEventFields fields) noexcept : fields_{std::move(fields)} {}
 
   // --------------------------------------------------------
   MarketStateEventFields fields_;

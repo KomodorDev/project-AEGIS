@@ -421,7 +421,7 @@ private:
 }
 
 // --------------------------------------------------------
-// The only transition without a previous state is runtime initialization into Synchronizing.
+// Startup omits a previous state; explicit owner resynchronization alone may repeat Synchronizing.
 [[nodiscard]] bool has_valid_transition_states(const RuntimeTraceFields& fields) noexcept {
   if (fields.state == RuntimeMarketState::Unspecified) {
     return false;
@@ -429,7 +429,8 @@ private:
   if (fields.previous_state == RuntimeMarketState::Unspecified) {
     return fields.state == RuntimeMarketState::Synchronizing;
   }
-  return fields.previous_state != fields.state;
+  return fields.previous_state != fields.state ||
+         (fields.state == RuntimeMarketState::Synchronizing && has_owner_state_context(fields));
 }
 
 // --------------------------------------------------------

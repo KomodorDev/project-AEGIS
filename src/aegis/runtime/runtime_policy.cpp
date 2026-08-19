@@ -495,7 +495,8 @@ RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
     if (!ordinal) {
       return model::Result<RuntimePolicy>::failure(ordinal.error());
     }
-    sources.push_back(RuntimeSource{std::move(params.sources[index]), ordinal.value()});
+    sources.push_back(RuntimeSource{std::move(params.sources[index]), ordinal.value(),
+                                    static_cast<std::uint32_t>(validation.value())});
   }
 
   // ++++++++++++++++++++++++++++++++++++++++

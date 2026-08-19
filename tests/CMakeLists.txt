@@ -17,6 +17,8 @@ add_executable(
   unit/market_data/subscription_test.cpp
   # Market-event tests pin normalized ordering, duplicate identity, and sanitized state publication.
   unit/market_data/market_event_test.cpp
+  # Book-state tests pin transactional commit, continuity, readiness, and exact trace preflight.
+  unit/market_data/market_state_machine_test.cpp
   # Fixture tests pin strict parsing, bounded failure, and policy-backed source normalization.
   unit/market_data/recorded_fixture_test.cpp
   # These primitive tests pin stable Result/error contracts and nominal identifier grammar.

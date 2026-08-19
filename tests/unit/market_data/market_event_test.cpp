@@ -509,6 +509,22 @@ TEST_CASE("MarketStateEvent validates sanitized readiness transitions",
   REQUIRE(initial);
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Explicit owner resynchronization alone may publish Synchronizing while already there.
+  const auto owner_resynchronization = market_data::validate_market_state_transition(state_fields(
+      market_data::MarketReadiness::Synchronizing, market_data::MarketReadiness::Synchronizing));
+  REQUIRE(owner_resynchronization);
+
+  auto envelope_same_state = state_fields(market_data::MarketReadiness::Synchronizing,
+                                          market_data::MarketReadiness::Synchronizing);
+  envelope_same_state.session_epoch = model::SessionEpoch{7U};
+  envelope_same_state.receive_sequence = model::ReceiveSequence::initial();
+  envelope_same_state.receive_timestamp = model::ReceiveTimestamp{50U};
+  envelope_same_state.admission_ordinal = model::AdmissionOrdinal::initial();
+  const auto rejected_envelope = market_data::validate_market_state_transition(envelope_same_state);
+  REQUIRE_FALSE(rejected_envelope);
+  CHECK(rejected_envelope.error().context.field == "market_state.transition");
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // A Ready transition must carry a paired coherent book identity and may retain receive context.
   auto ready_fields = state_fields(market_data::MarketReadiness::Ready,
                                    market_data::MarketReadiness::Synchronizing);
@@ -524,7 +540,7 @@ TEST_CASE("MarketStateEvent validates sanitized readiness transitions",
   REQUIRE(ready);
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Initial non-Synchronizing publication and same-state notification are both incoherent.
+  // Initial non-Synchronizing publication and every other same-state notification are incoherent.
   const auto invalid_initial = market_data::validate_market_state_transition(
       state_fields(market_data::MarketReadiness::Invalid));
   REQUIRE_FALSE(invalid_initial);

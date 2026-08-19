@@ -321,47 +321,11 @@ NormalizedMarketUpdate::create(NormalizedMarketUpdateFields fields, std::size_t 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
-// --------------------------------------------------------
-// Publish a Ready event only when integrity, timing, and committed-book identities are coherent.
-model::Result<MarketEvent> MarketEvent::create_after_commit(NormalizedMarketUpdate update,
-                                                            MarketCommitContext context) {
-
-  // ++++++++++++++++++++++++++++++++++++++++
-  // A rejected integrity decision is valid normalized input but can never become a market callback.
-  if (update.integrity().verdict != IntegrityVerdict::Accepted) {
-    return model::Result<MarketEvent>::failure(invalid_event(
-        model::DomainErrorCode::MarketIntegrityFailure, "market_event.integrity_verdict"));
-  }
-
-  // ++++++++++++++++++++++++++++++++++++++++
-  // Reject a regressing owner clock rather than publishing misleading post-commit timing.
-  const auto delay =
-      model::processing_delay(context.processing_timestamp, update.receive_timestamp());
-  if (!delay) {
-    return model::Result<MarketEvent>::failure(invalid_event(
-        model::DomainErrorCode::InvalidMarketEvent, "market_event.processing_timestamp"));
-  }
-
-  // ++++++++++++++++++++++++++++++++++++++++
-  // A global commit revision cannot precede the count of snapshot generations it contains.
-  if (context.book_revision.value() < context.book_generation.value()) {
-    return model::Result<MarketEvent>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketEvent, "market_event.book_revision"));
-  }
-
-  // ++++++++++++++++++++++++++++++++++++++++
-  // Publish the complete value only after every Ready-event invariant has succeeded.
-  return model::Result<MarketEvent>::success(MarketEvent{std::move(update), context});
-
-  // ++++++++++++++++++++++++++++++++++++++++
-}
-
-// --------------------------------------------------------
 // Validate one sanitized transition profile without granting strategy-publication authority.
 model::Result<void> validate_market_state_transition(const MarketStateEventFields& fields) {
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Validate assigned states, initial-transition meaning, and actual state change first.
+  // Validate assigned states and the unique initial-transition destination first.
   if (!is_valid(fields.readiness) ||
       (fields.previous_readiness.has_value() && !is_valid(fields.previous_readiness.value()))) {
     return model::Result<void>::failure(
@@ -372,13 +336,6 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
     return model::Result<void>::failure(invalid_event(model::DomainErrorCode::InvalidMarketState,
                                                       "market_state.previous_readiness"));
   }
-  if (fields.previous_readiness.has_value() &&
-      fields.previous_readiness.value() == fields.readiness) {
-    return model::Result<void>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.transition"));
-  }
-
-  // ++++++++++++++++++++++++++++++++++++++++
   // Exactly one complete owner, update, envelope, or discontinuity profile must be present.
   const bool owner_context = has_owner_transition_context(fields);
   const bool update_context = has_update_transition_context(fields);
@@ -387,6 +344,15 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
   if (!owner_context && !update_context && !envelope_context && !discontinuity_context) {
     return model::Result<void>::failure(
         invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.input_context"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Explicit owner resynchronization is the sole observable same-state publication.
+  if (fields.previous_readiness.has_value() &&
+      fields.previous_readiness.value() == fields.readiness &&
+      !(fields.readiness == MarketReadiness::Synchronizing && owner_context)) {
+    return model::Result<void>::failure(
+        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.transition"));
   }
   if (fields.receive_timestamp.has_value()) {
     const auto delay =
@@ -447,16 +413,6 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
   return model::Result<void>::success();
 
   // ++++++++++++++++++++++++++++++++++++++++
-}
-
-// --------------------------------------------------------
-// Revalidate owner-produced fields before publishing the sanitized strategy event.
-model::Result<MarketStateEvent> MarketStateEvent::create_transition(MarketStateEventFields fields) {
-  const auto validation = validate_market_state_transition(fields);
-  if (!validation) {
-    return model::Result<MarketStateEvent>::failure(validation.error());
-  }
-  return model::Result<MarketStateEvent>::success(MarketStateEvent{std::move(fields)});
 }
 
 // --------------------------------------------------------

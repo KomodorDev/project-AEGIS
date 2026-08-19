@@ -40,6 +40,9 @@ add_library(
   src/aegis/market_data/subscription.cpp
   # Normalized market events own venue-neutral input identity and post-commit callback contracts.
   src/aegis/market_data/market_event.cpp
+  # Fixed-capacity books publish only complete Ready views through one transactional state owner.
+  src/aegis/market_data/order_book.cpp
+  src/aegis/market_data/market_state_machine.cpp
   # Recorded fixtures parse bounded credential-free bytes before policy-backed normalization.
   src/aegis/market_data/recorded_fixture.cpp
   # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.

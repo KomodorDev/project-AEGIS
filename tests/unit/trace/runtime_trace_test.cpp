@@ -259,6 +259,18 @@ TEST_CASE("runtime trace event vocabulary and shapes are explicit", "[trace][run
                          initial_state_transition_fields(true)));
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Explicit owner resynchronization deliberately records Synchronizing to Synchronizing for both
+  // transition and attributed callback shapes.
+  auto owner_resynchronization = initial_state_transition_fields(false);
+  owner_resynchronization.previous_state = trace::RuntimeMarketState::Synchronizing;
+  REQUIRE(initial.append(trace::RuntimeTraceEventKind::MarketStateTransition,
+                         std::move(owner_resynchronization)));
+  auto owner_resynchronization_callback = initial_state_transition_fields(true);
+  owner_resynchronization_callback.previous_state = trace::RuntimeMarketState::Synchronizing;
+  REQUIRE(initial.append(trace::RuntimeTraceEventKind::StateCallback,
+                         std::move(owner_resynchronization_callback)));
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Nested owner drive from a callback retains that callback's exact attribution.
   auto callback_reentry = owner_reentry_fields();
   callback_reentry.callback_ordinal = ordinal<model::CallbackOrdinal>(4U);
@@ -443,6 +455,16 @@ TEST_CASE("runtime input dispositions enforce deterministic context profiles",
   synchronizing_to_invalid_owner.previous_state = trace::RuntimeMarketState::Synchronizing;
   synchronizing_to_invalid_owner.state = trace::RuntimeMarketState::Invalid;
   reject_transition_and_callback(std::move(synchronizing_to_invalid_owner));
+
+  auto envelope_same_synchronizing = envelope_disposition_fields(
+      trace::RuntimeInputDisposition::SessionReset, trace::RuntimeMarketState::Synchronizing);
+  envelope_same_synchronizing.input_disposition = trace::RuntimeInputDisposition::Unspecified;
+  envelope_same_synchronizing.previous_state = trace::RuntimeMarketState::Synchronizing;
+  reject_transition_and_callback(std::move(envelope_same_synchronizing));
+
+  auto update_same_ready = state_transition_fields(false);
+  update_same_ready.previous_state = trace::RuntimeMarketState::Ready;
+  reject_transition_and_callback(std::move(update_same_ready));
   CHECK(rejected.size() == 0U);
 
   // ++++++++++++++++++++++++++++++++++++++++
