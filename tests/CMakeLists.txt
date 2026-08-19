@@ -42,6 +42,8 @@ add_executable(
   # Diagnostics and bot tests pin accepted-prefix detail and canonical strategy dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
   unit/runtime/bot_runtime_test.cpp
+  # Executor tests pin bounded admission, fence ordering, owner turns, and driver equivalence.
+  unit/runtime/serialized_executor_test.cpp
   # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
   unit/trace/runtime_trace_test.cpp

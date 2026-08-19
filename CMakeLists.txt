@@ -28,6 +28,9 @@ include(ProjectOptions)
 
 aegis_create_project_options()
 
+# Resolve the standard thread runtime used by the dedicated serialized-owner driver.
+find_package(Threads REQUIRED)
+
 # Build the AEGIS library and provide the namespaced alias consumers should link against.
 add_library(
   aegis
@@ -65,6 +68,9 @@ add_library(
   src/aegis/runtime/runtime_diagnostics.cpp
   # Bot dispatch owns one strategy per bot and invokes canonical state-before-market callbacks.
   src/aegis/runtime/bot_runtime.cpp
+  # Both runtime drivers share one bounded attempt-ordered serialized turn processor.
+  src/aegis/runtime/serialized_executor.cpp
+  src/aegis/runtime/dedicated_executor_driver.cpp
   # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
   src/aegis/trace/trace.cpp
   # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
@@ -78,6 +84,7 @@ target_include_directories(
   aegis
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_definitions(aegis PRIVATE AEGIS_PROJECT_VERSION="${PROJECT_VERSION}")
+target_link_libraries(aegis PRIVATE Threads::Threads)
 aegis_configure_owned_target(aegis)
 
 # Enable CTest and CMake's pinned source-dependency mechanism.
