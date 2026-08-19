@@ -40,6 +40,8 @@ add_library(
   src/aegis/market_data/subscription.cpp
   # Normalized market events own venue-neutral input identity and post-commit callback contracts.
   src/aegis/market_data/market_event.cpp
+  # Recorded fixtures parse bounded credential-free bytes before policy-backed normalization.
+  src/aegis/market_data/recorded_fixture.cpp
   # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.
   src/aegis/model/fixed_point.cpp
   # Identifier grammar is compiled; its Result and error primitives remain header-only.
