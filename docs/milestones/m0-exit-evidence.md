@@ -3,11 +3,17 @@
 > **Purpose:** Map every M0 promise to a concrete artifact or reproducible command, while keeping
 > local evidence distinct from the remote CI evidence required for milestone closure.
 
-**Status:** Local and required remote CI evidence complete on 2026-08-18. M0 remains unintegrated
-until [PR #6](https://github.com/KomodorDev/project-AEGIS/pull/6) is approved and merged into `dev`.
+**Status:** Complete and integrated into `dev` at merge commit `d2efad6` on 2026-08-18 through
+[PR #6](https://github.com/KomodorDev/project-AEGIS/pull/6).
 
 Gate IDs beginning with `M0-S` identify delivered scope; IDs beginning with `M0-E` identify the exit
 conditions that must be evidenced before M0 can close.
+
+## How to read this record
+
+The scope table identifies the artifact that delivered each M0 promise. The exit-gate table then
+separates locally reproducible proof from remote CI or operating-contract evidence, so a local pass
+cannot accidentally be reported as platform-wide or integration proof.
 
 ## Scope evidence
 

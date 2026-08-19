@@ -1,5 +1,8 @@
 # Components and Domain Ownership
 
+> **Purpose:** Assign each logical responsibility and mutable-state boundary to an architectural
+> owner without prematurely fixing C++ class, process or deployment structure.
+
 This document expands the [architecture overview](../architecture.md). It describes logical responsibilities and state ownership, not final C++ classes, APIs, object layouts, processes or deployment units.
 
 ## Status Legend
@@ -130,20 +133,26 @@ classDiagram
 
 A `Subscription` selects one venue/instrument pair. An `ExecutionRoute` grants one venue/account/instrument combination. These are distinct: consuming an instrument does not grant permission to trade it.
 
+The startup configuration contains one or more independent `Firm` roots. Every desk belongs to one
+firm and every bot belongs to one desk; M1 introduces no parent-company object or cross-firm
+aggregation.
+
 Each bot owns a configured runtime instance of a reusable strategy implementation. Reuse describes the strategy design; it does not mean that mutable strategy state is shared between bots. The authoritative registration for `BotId` determines its desk and firm; strategy code cannot change that identity.
 
 `SharedVenueAdapter` represents venue-wide protocol infrastructure used by all authorized bots. `AccountSession` represents authenticated private connectivity associated with one venue account. The number and specialization of sessions per account remain **Open**.
+The configured account is a logical alias; an adapter-reported venue account identity is a distinct
+value whose explicit reconciliation mapping begins in M7.
 
 | Concept | Responsibility |
 |---|---|
-| Firm | Root of organizational attribution and aggregate firm risk, inventory and P&L. |
+| Firm | One root of organizational attribution and aggregate firm risk, inventory and P&L. |
 | Desk | Groups bots and carries desk-level attribution and allocated risk capacity. |
 | Bot | A configured runtime strategy instance with immutable organizational identity. |
 | Strategy | Reusable, venue-agnostic decision logic invoked through normalized events and capabilities. |
 | Subscription | Declares normalized market data a bot consumes. |
 | ExecutionRoute | Grants permission to trade one venue/account/instrument combination. |
 | Venue | Identifies an exchange and its native protocol boundary. |
-| Account | Identifies venue-specific authenticated trading authority. |
+| Account | Identifies the logical configuration alias for venue-specific authenticated trading authority. |
 | Instrument | Identifies the normalized instrument used by subscriptions, orders and attribution. |
 | SharedVenueAdapter | Translates between native venue messages and exchange-neutral AEGIS types. |
 | AccountSession | Maintains authenticated private connectivity and initiates asynchronous writes. |

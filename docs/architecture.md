@@ -26,6 +26,8 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [ADR-0001: Serialized data-plane execution and state ownership](decisions/0001-serialized-data-plane-execution.md)
 - [ADR-0002: Initial delivery toolchain](decisions/0002-delivery-toolchain.md)
 - [ADR-0003: Dedicated Deribit testnet account](decisions/0003-dedicated-testnet-account.md)
+- [ADR-0004: Deterministic domain value contracts](decisions/0004-domain-value-contracts.md)
+- [ADR-0005: Immutable configuration provenance](decisions/0005-immutable-configuration-provenance.md)
 - [M0 reference scenario](reference-scenario.md)
 - [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
@@ -72,7 +74,13 @@ Bots never communicate with exchanges directly. Every order must pass inline thr
 
 ## Organizational Hierarchy
 
-AEGIS represents the trading activity of an entire firm.
+This hierarchy defines immutable attribution and future aggregation boundaries. It does not imply
+that firms, desks or bots are mutable runtime containers, nor does it create authority between peer
+firm roots.
+
+One AEGIS startup configuration represents one or more independently attributed firms. Each firm is
+an organizational root, allowing subsidiaries to remain distinct without introducing a parent
+`Company` entity or cross-firm aggregation in M1.
 
 - **Firm**
   - Contains one or more desks.
@@ -101,7 +109,8 @@ Example:
   - **Cross-Asset Desk**
     - BTC Futures Basis Bot
 
-Every order and fill is attributed to a bot. Bot-level activity is aggregated through the organizational hierarchy:
+Every order and fill is attributed to a bot. Bot-level activity is aggregated only through that
+bot's organizational hierarchy:
 
 ```text
 Bot inventory → Desk inventory → Firm inventory
@@ -219,10 +228,13 @@ An execution route grants a bot permission to trade a specific instrument throug
 ```cpp
 struct ExecutionRoute {
     Venue venue;
-    AccountId account;
+    LogicalAccountId account;
     InstrumentId instrument;
 };
 ```
+
+The logical account is a stable configuration alias. It is not interchangeable with a venue-native
+account identifier reported during authenticated reconciliation.
 
 The engine rejects any order request for which the bot has no configured execution route.
 

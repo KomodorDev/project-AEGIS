@@ -1,8 +1,41 @@
-# Purpose: compile and register M0 unit tests with CTest.
+# Purpose: compile and register AEGIS unit tests with CTest.
+
+# Keep the exact accepted startup inputs in one owned fixture library so unit and scenario evidence
+# cannot silently diverge on configuration provenance.
+add_library(aegis_test_support STATIC support/reference_configuration.cpp)
+target_include_directories(aegis_test_support PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/support)
+target_link_libraries(aegis_test_support PUBLIC aegis::aegis)
+aegis_configure_owned_target(aegis_test_support)
 
 # Link the AEGIS public target and Catch2's variant that supplies the test-program main().
-add_executable(aegis_unit_tests unit/version_test.cpp)
-target_link_libraries(aegis_unit_tests PRIVATE aegis::aegis Catch2::Catch2WithMain)
+add_executable(
+  aegis_unit_tests
+  # Startup tests bind atomic validation to its canonical bytes, revisions, and golden fingerprint.
+  unit/configuration/startup_configuration_test.cpp
+  # These tests prove an observation grant never synthesizes or enables execution permission.
+  unit/execution/execution_route_test.cpp
+  unit/market_data/subscription_test.cpp
+  # These primitive tests pin stable Result/error contracts and nominal identifier grammar.
+  unit/model/domain_error_result_test.cpp
+  # Fixed-point tests pin canonical storage, explicit rounding, and overflow behavior.
+  unit/model/fixed_point_test.cpp
+  # Identifier tests enforce the nominal grammar and immutable validated-value boundary.
+  unit/model/identifier_test.cpp
+  # Metadata tests prove deterministic validation order and declared-unit conversion boundaries.
+  unit/model/instrument_metadata_test.cpp
+  # Clock and order-ID tests share deterministic providers to pin replay and boundary behavior.
+  unit/model/order_id_test.cpp
+  # SHA-256 tests use published vectors to protect the canonical provenance fingerprint primitive.
+  unit/model/sha256_test.cpp
+  # Time tests prove nominal clock separation, checked deltas, revisions, and injected progression.
+  unit/model/time_test.cpp
+  # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
+  unit/organization/organization_test.cpp
+  # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
+  unit/trace/trace_test.cpp
+  # Version tests ensure the compiled library reports the configured project identity.
+  unit/version_test.cpp)
+target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
 
 # Treat test code as owned code, so it receives the project's strict compiler policies.
 aegis_configure_owned_target(aegis_unit_tests)
@@ -10,3 +43,12 @@ aegis_configure_owned_target(aegis_unit_tests)
 # Catch2's helper asks the built test executable for its cases and registers each with CTest.
 include(Catch)
 catch_discover_tests(aegis_unit_tests PROPERTIES LABELS unit)
+
+# Keep deterministic replay and accepted-prefix capacity evidence visible as a milestone gate rather
+# than hiding the full reference scenario among isolated unit cases.
+add_executable(aegis_m1_reference_scenario_tests
+               deterministic_scenarios/m1_reference_scenario_test.cpp)
+target_link_libraries(aegis_m1_reference_scenario_tests PRIVATE aegis_test_support
+                                                                Catch2::Catch2WithMain)
+aegis_configure_owned_target(aegis_m1_reference_scenario_tests)
+catch_discover_tests(aegis_m1_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)

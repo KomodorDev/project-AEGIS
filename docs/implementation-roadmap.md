@@ -1,5 +1,8 @@
 # AEGIS Implementation Roadmap
 
+> **Purpose:** Sequence AEGIS delivery by externally meaningful capability gates while preserving
+> the accepted safety and ownership constraints at every intermediate milestone.
+
 **Status: Proposed.** This roadmap turns the accepted [architecture](architecture.md) and [serialized data-plane decision](decisions/0001-serialized-data-plane-execution.md) into capability-based delivery milestones. Milestones are completion gates, not calendar estimates. Independent delivery-sequencing and trading-safety reviews have been incorporated.
 
 ## Delivery Strategy
@@ -81,6 +84,13 @@ Prepare the workshop before building the robot: choose the tools, make automatic
 
 ## M1 — Domain Kernel and Immutable Provenance
 
+**Implementation status (2026-08-18):** Implemented as a coherent multi-commit slice on
+`codex/m1-domain-kernel`. [M1 exit evidence](milestones/m1-exit-evidence.md) records the local proof;
+remote CI, review, and integration into `dev` remain pending, so the milestone is not closed.
+
+This status reports delivered code separately from milestone closure: implementation can be locally
+complete while remote and integration evidence is still outstanding.
+
 ### Outcome
 
 AEGIS can represent its identities, units, organization, permissions and decision provenance without venue-native types or ambiguous arithmetic.
@@ -94,7 +104,8 @@ Give everything a clear name, label and measuring stick. The robot must never co
 - Add strong, dependency-light identifiers for firms, desks, bots, venues, accounts, instruments and orders.
 - Define fixed-point price, quantity and notional types, including overflow, rounding, tick-size, lot-size and contract-multiplier rules. Floating-point values must not silently enter order or risk decisions.
 - Define source, receive and processing timestamps; sequence/session epochs; error/result types; and injected clock and identifier providers. Tests use deterministic providers, while production order identities must remain unique across restart.
-- Implement validated firm → desk → bot registration with immutable organizational attribution.
+- Implement one or more validated firm roots with firm → desk → bot registration and immutable
+  organizational attribution; no parent-company model is introduced in M1.
 - Model subscriptions separately from execution routes and reject invalid or duplicate configuration.
 - Add a validated immutable startup configuration with a stable identity/hash and revisions for instrument metadata, organization, bot/strategy settings, subscriptions and routes. Dynamic adoption remains deferred.
 - Add deterministic trace output suitable for scenario comparison; keep richer reporting off the data plane.

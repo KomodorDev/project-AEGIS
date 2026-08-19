@@ -1,16 +1,41 @@
 # AEGIS
 
-> **Purpose:** Give a new contributor the shortest safe path to understand, configure, verify, and
-> benchmark the M0 repository.
+> **Purpose:** Give a new contributor the shortest safe path to understand and verify the M1 domain
+> kernel without mistaking it for a connected trading system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
-engine under development. The initial delivery slice is deliberately narrow: one Deribit testnet
-account, one BTC inverse perpetual, one bot, and no production connectivity.
+engine under development. M1 provides the dependency-light values and sealed startup rulebook on
+which later runtime behavior will rely. The reference slice remains deliberately narrow: one
+Deribit testnet account alias, one BTC inverse perpetual, one bot, and no exchange connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
+Current milestone evidence is mapped in
+[the M1 exit-evidence record](docs/milestones/m1-exit-evidence.md).
 
-## M0 quick start
+## What M1 provides
+
+These are configuration and evidence capabilities, not active trading services. Each item is usable
+without credentials, networking or a runtime event loop.
+
+- Validated nominal identifiers, typed clocks, sequences and revisions, stable result/error values,
+  deterministic test providers, and restart-namespaced production order identities.
+- Exact checked fixed-point price, quantity and notional arithmetic with explicit rounding, plus
+  revisioned instrument tick, step, minimum and multiplier validation.
+- One or more peer firm roots with immutable firm → desk → bot attribution. Logical accounts belong
+  to firms, and a route cannot cross into another firm's account.
+- Separate market-data subscriptions and execution-route declarations. The reference route is
+  disabled, and a subscription never grants permission to trade.
+- Atomic immutable startup configuration encoded as canonical `AEGISCFG` bytes and identified by a
+  SHA-256 fingerprint with all applicable revisions.
+- Bounded canonical `AEGISTRS` in-memory traces for deterministic reference-scenario comparison;
+  capacity failure is explicit and file or network reporting remains off-path.
+
+M1 does not contain a serialized market runtime, order-book processing, strategy callbacks, risk or
+OMS behavior, exchange sessions, credentials, sockets, or order transmission. Those capabilities
+belong to later milestone gates.
+
+## Quick start
 
 The supported baseline is C++20 with CMake 3.25 or newer and Ninja. Python 3.11 or newer runs the
 developer bootstrap and benchmark-evidence tooling. CI pins CMake 3.31.10 and Ninja 1.13.0. The
@@ -35,9 +60,10 @@ From a fresh checkout, the one verification command is:
 cmake --workflow --preset verify
 ```
 
-That command configures, builds, and runs the unit tests with strict warnings treated as errors.
-The first configure downloads immutable, checksum-verified Catch2 and Google Benchmark source
-archives into the ignored build tree. It does not contact an exchange or require credentials.
+That command configures, builds, and runs the unit and deterministic scenario tests with strict
+warnings treated as errors. The first configure downloads immutable, checksum-verified Catch2 and
+Google Benchmark source archives into the ignored build tree. It does not contact an exchange or
+require credentials.
 
 The `--workflow --preset` form selects an ordered configure/build/test workflow. A plain `--preset`
 selects one configure preset, while `--build --preset` selects a previously configured build preset.
@@ -56,17 +82,23 @@ python3 tools/validate_benchmark_evidence.py
 
 The benchmark runner first rebuilds its Release target, then writes raw timing output and a context
 manifest. The validator independently checks their workload identity, build mode, hashes, and Git
-provenance; neither command is a claim of production latency.
+provenance. M1 introduces no product-performance workload, so this remains the M0 runner-calibration
+benchmark; neither command nor its timing is a claim of production latency.
 
-The default build contains no exchange session, order-transmission capability, credential lookup,
+The build contains no exchange session, order-transmission capability, credential lookup, socket,
 or production endpoint. The first market and account assumptions are described in
 [the reference scenario](docs/reference-scenario.md).
 
-## M0 records
+## Milestone records
 
+- [Serialized data-plane decision](docs/decisions/0001-serialized-data-plane-execution.md)
 - [Delivery and toolchain decision](docs/decisions/0002-delivery-toolchain.md)
 - [Dedicated testnet account policy](docs/decisions/0003-dedicated-testnet-account.md)
+- [Deterministic domain value contracts](docs/decisions/0004-domain-value-contracts.md)
+- [Immutable configuration provenance](docs/decisions/0005-immutable-configuration-provenance.md)
 - [Deribit BTC perpetual reference scenario](docs/reference-scenario.md)
 - [Correctness and performance budgets](docs/quality-budgets.md)
 - [Deribit public-protocol spike](docs/protocol-spikes/deribit-btc-perpetual.md)
+- [Repository layout and dependency rules](docs/architecture/repository-layout.md)
 - [M0 exit evidence](docs/milestones/m0-exit-evidence.md)
+- [M1 exit evidence](docs/milestones/m1-exit-evidence.md)

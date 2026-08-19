@@ -28,8 +28,34 @@ include(ProjectOptions)
 
 aegis_create_project_options()
 
-# Build the small M0 library and provide the namespaced alias future consumers should link against.
-add_library(aegis src/aegis/version.cpp)
+# Build the AEGIS library and provide the namespaced alias consumers should link against.
+add_library(
+  aegis
+  # Startup validation and provenance form one subsystem that derives and publishes identity only
+  # with an accepted immutable snapshot.
+  src/aegis/configuration/configuration_provenance.cpp
+  src/aegis/configuration/startup_configuration.cpp
+  # Data subscriptions and execution routes remain separate compiled permission boundaries.
+  src/aegis/execution/execution_route.cpp
+  src/aegis/market_data/subscription.cpp
+  # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.
+  src/aegis/model/fixed_point.cpp
+  # Identifier grammar is compiled; its Result and error primitives remain header-only.
+  src/aegis/model/identifier.cpp
+  # Metadata validation owns unit coherence, increments, and contract face-value conversion.
+  src/aegis/model/instrument_metadata.cpp
+  # Clock and order-ID providers own stateful behavior; their typed values remain in public headers.
+  src/aegis/model/order_id.cpp
+  # The owned SHA-256 implementation keeps provenance fingerprints portable and dependency-free.
+  src/aegis/model/sha256.cpp
+  # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
+  src/aegis/model/time.cpp
+  # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
+  src/aegis/organization/organization.cpp
+  # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
+  src/aegis/trace/trace.cpp
+  # Version reporting exposes the configured project identity without adding runtime dependencies.
+  src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
 
 # Interesting syntax: BUILD_INTERFACE exposes headers while building, without defining install rules.
