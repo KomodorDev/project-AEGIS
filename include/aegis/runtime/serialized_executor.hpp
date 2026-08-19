@@ -407,6 +407,10 @@ public:
   [[nodiscard]] QueueSnapshot snapshot() const noexcept;
 
   // --------------------------------------------------------
+  // Report whether the calling thread is the currently bound owner without exposing its identity.
+  [[nodiscard]] bool current_thread_is_owner() const noexcept;
+
+  // --------------------------------------------------------
   // Return one configured source's synchronized loss state, or nullopt when it is unconfigured.
   [[nodiscard]] std::optional<SourceFenceSnapshot>
   source_fence_snapshot(model::MarketSourceOrdinal source_ordinal) const noexcept;

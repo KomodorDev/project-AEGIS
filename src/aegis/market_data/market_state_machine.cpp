@@ -15,6 +15,24 @@ namespace aegis::market_data {
 namespace {
 
 // ########################################################################
+// Standalone market-state users opt into a stateless authority that accepts the internally proven
+// bounded shape without creating a strategy-dispatch plan.
+class PermissiveMarketTurnPreflightAuthority final : public MarketTurnPreflightAuthority {
+public:
+
+  // --------------------------------------------------------
+  // Accept every already validated exact request without retaining owner-turn state.
+  [[nodiscard]] model::Result<void> authorize(const MarketTurnPreflight& preflight) override {
+    static_cast<void>(preflight);
+    return model::Result<void>::success();
+  }
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
 // TraceDrafts retains the at-most-two state-machine records on the stack so every shape and the
 // complete callback/re-entry fan-out can be preflighted before append or domain mutation.
 struct TraceDrafts {
@@ -133,19 +151,38 @@ void attach_book_identity(MarketStateEventFields& fields,
 }
 
 // --------------------------------------------------------
-// Preflight exact state-machine plus callback evidence, validate every fixed-field draft, and
-// append the proven prefix before the following no-fail domain commit.
-[[nodiscard]] model::Result<void> append_trace_drafts(TraceDrafts& drafts,
-                                                      std::uint32_t callback_trace_records,
-                                                      trace::RuntimeTraceSink& trace_sink) {
+// Authorize exact callback fan-out, preflight complete evidence, validate every fixed-field draft,
+// and append the proven prefix before the following no-fail domain commit.
+[[nodiscard]] model::Result<void>
+append_trace_drafts(TraceDrafts& drafts, model::MarketSourceOrdinal source_ordinal,
+                    model::TurnOrdinal turn_ordinal, std::uint32_t event_count,
+                    std::uint32_t matching_subscription_count, const FanoutBudget& fanout,
+                    MarketTurnPreflightAuthority& preflight_authority,
+                    trace::RuntimeTraceSink& trace_sink) {
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Combine the fixed two-record bound and derived callback reserve without unsigned wrap.
+  // Combine the fixed two-record bound and exact callback reserve without unsigned wrap.
   const auto state_machine_records = static_cast<std::uint32_t>(drafts.count);
-  if (callback_trace_records > std::numeric_limits<std::uint32_t>::max() - state_machine_records) {
+  if (fanout.callback_trace_records >
+      std::numeric_limits<std::uint32_t>::max() - state_machine_records) {
     return failure(model::DomainErrorCode::TraceCapacityExceeded, "runtime_trace.turn_records");
   }
-  auto capacity = trace_sink.preflight(state_machine_records + callback_trace_records);
+  const auto total_trace_records = state_machine_records + fanout.callback_trace_records;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Give the coordinator one market-data-neutral exact shape after classification and event
+  // shaping, while the current book, continuity, readiness, and canonical trace prefix are still
+  // unchanged.
+  auto authorized = preflight_authority.authorize(MarketTurnPreflight{
+      source_ordinal, turn_ordinal, event_count, matching_subscription_count, fanout.callback_count,
+      state_machine_records, fanout.callback_trace_records, total_trace_records});
+  if (!authorized) {
+    return authorized;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reserve the entire state-machine and callback/re-entry evidence set as one exact turn.
+  auto capacity = trace_sink.preflight(total_trace_records);
   if (!capacity) {
     return capacity;
   }
@@ -424,6 +461,13 @@ discontinuity_state_event_fields(const MarketSourceIdentity& source,
 } // namespace
 
 // --------------------------------------------------------
+// Share one immutable permissive authority across standalone callers without hidden owner state.
+MarketTurnPreflightAuthority& permissive_market_turn_preflight_authority() noexcept {
+  static PermissiveMarketTurnPreflightAuthority authority;
+  return authority;
+}
+
+// --------------------------------------------------------
 // Validate a restored committed pair before using it as a counter-exhaustion test seam.
 model::Result<BookIdentity> BookIdentity::from_committed(model::BookGeneration generation,
                                                          model::BookRevision revision) {
@@ -527,7 +571,8 @@ MarketStateMachine::create(const runtime::RuntimePolicy& policy,
 // fit.
 model::Result<MarketTurnOutcome>
 MarketStateMachine::initialize(const OwnerMarketTurnContext& context,
-                               trace::RuntimeTraceSink& trace_sink) {
+                               trace::RuntimeTraceSink& trace_sink,
+                               MarketTurnPreflightAuthority& preflight_authority) {
   auto provenance_valid = require_trace_provenance(expected_trace_provenance_, trace_sink);
   if (!provenance_valid) {
     return propagate<MarketTurnOutcome>(provenance_valid.error());
@@ -553,8 +598,9 @@ MarketStateMachine::initialize(const OwnerMarketTurnContext& context,
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          1U, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }
@@ -576,7 +622,8 @@ MarketStateMachine::initialize(const OwnerMarketTurnContext& context,
 // snapshot.
 model::Result<MarketTurnOutcome>
 MarketStateMachine::resynchronize(const OwnerMarketTurnContext& context,
-                                  trace::RuntimeTraceSink& trace_sink) {
+                                  trace::RuntimeTraceSink& trace_sink,
+                                  MarketTurnPreflightAuthority& preflight_authority) {
   auto provenance_valid = require_trace_provenance(expected_trace_provenance_, trace_sink);
   if (!provenance_valid) {
     return propagate<MarketTurnOutcome>(provenance_valid.error());
@@ -603,8 +650,9 @@ MarketStateMachine::resynchronize(const OwnerMarketTurnContext& context,
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          1U, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }
@@ -629,7 +677,8 @@ MarketStateMachine::resynchronize(const OwnerMarketTurnContext& context,
 // Classify one normalized update in fixed policy order and swap scratch only after every check.
 model::Result<MarketTurnOutcome>
 MarketStateMachine::process(NormalizedMarketUpdate update, const AcceptedMarketTurnContext& context,
-                            trace::RuntimeTraceSink& trace_sink) {
+                            trace::RuntimeTraceSink& trace_sink,
+                            MarketTurnPreflightAuthority& preflight_authority) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject owner-contract defects before classifying source-authored market semantics.
@@ -693,13 +742,15 @@ MarketStateMachine::process(NormalizedMarketUpdate update, const AcceptedMarketT
       }
     }
 
-    auto fanout = fanout_budget(matching_subscription_count_, state_changes ? 1U : 0U,
-                                maximum_callbacks_per_turn_);
+    const std::uint32_t event_count = state_changes ? 1U : 0U;
+    auto fanout =
+        fanout_budget(matching_subscription_count_, event_count, maximum_callbacks_per_turn_);
     if (!fanout) {
       return model::Result<MarketTurnOutcome>::failure(fanout.error());
     }
-    auto trace_result =
-        append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+    auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                            event_count, matching_subscription_count_,
+                                            fanout.value(), preflight_authority, trace_sink);
     if (!trace_result) {
       return propagate<MarketTurnOutcome>(trace_result.error());
     }
@@ -858,8 +909,9 @@ MarketStateMachine::process(NormalizedMarketUpdate update, const AcceptedMarketT
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          event_count, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }
@@ -900,7 +952,8 @@ MarketStateMachine::process(NormalizedMarketUpdate update, const AcceptedMarketT
 // Advance only to a strictly newer explicit session and clear its prior continuity anchor.
 model::Result<MarketTurnOutcome>
 MarketStateMachine::process(const SessionStarted& control, const AcceptedMarketTurnContext& context,
-                            trace::RuntimeTraceSink& trace_sink) {
+                            trace::RuntimeTraceSink& trace_sink,
+                            MarketTurnPreflightAuthority& preflight_authority) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate trusted source and owner timing before applying session-age policy.
@@ -951,13 +1004,15 @@ MarketStateMachine::process(const SessionStarted& control, const AcceptedMarketT
                                            control.receive_sequence, context, previous, next,
                                            book_identity_));
   }
-  auto fanout = fanout_budget(matching_subscription_count_, state_changes ? 1U : 0U,
-                              maximum_callbacks_per_turn_);
+  const std::uint32_t event_count = state_changes ? 1U : 0U;
+  auto fanout =
+      fanout_budget(matching_subscription_count_, event_count, maximum_callbacks_per_turn_);
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          event_count, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }
@@ -988,7 +1043,8 @@ MarketStateMachine::process(const SessionStarted& control, const AcceptedMarketT
 // deadline.
 model::Result<MarketTurnOutcome>
 MarketStateMachine::process(const StalenessCheck& control, const AcceptedMarketTurnContext& context,
-                            trace::RuntimeTraceSink& trace_sink) {
+                            trace::RuntimeTraceSink& trace_sink,
+                            MarketTurnPreflightAuthority& preflight_authority) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Bind the recorded check time to the owner's turn and validate its accepted envelope.
@@ -1058,13 +1114,15 @@ MarketStateMachine::process(const StalenessCheck& control, const AcceptedMarketT
                                            control.receive_sequence, context, previous, next,
                                            book_identity_));
   }
-  auto fanout = fanout_budget(matching_subscription_count_, state_changes ? 1U : 0U,
-                              maximum_callbacks_per_turn_);
+  const std::uint32_t event_count = state_changes ? 1U : 0U;
+  auto fanout =
+      fanout_budget(matching_subscription_count_, event_count, maximum_callbacks_per_turn_);
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          event_count, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }
@@ -1086,10 +1144,9 @@ MarketStateMachine::process(const StalenessCheck& control, const AcceptedMarketT
 
 // --------------------------------------------------------
 // Convert attributable malformed/unsupported input into only a sanitized deterministic transition.
-model::Result<MarketTurnOutcome>
-MarketStateMachine::reject(const AttributableMarketFailure& rejected,
-                           const AcceptedMarketTurnContext& context,
-                           trace::RuntimeTraceSink& trace_sink) {
+model::Result<MarketTurnOutcome> MarketStateMachine::reject(
+    const AttributableMarketFailure& rejected, const AcceptedMarketTurnContext& context,
+    trace::RuntimeTraceSink& trace_sink, MarketTurnPreflightAuthority& preflight_authority) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Only assigned sanitized parser dispositions may enter this containment boundary.
@@ -1146,13 +1203,15 @@ MarketStateMachine::reject(const AttributableMarketFailure& rejected,
                                            rejected.receive_sequence, context, previous, next,
                                            book_identity_));
   }
-  auto fanout = fanout_budget(matching_subscription_count_, state_changes ? 1U : 0U,
-                              maximum_callbacks_per_turn_);
+  const std::uint32_t event_count = state_changes ? 1U : 0U;
+  auto fanout =
+      fanout_budget(matching_subscription_count_, event_count, maximum_callbacks_per_turn_);
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          event_count, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }
@@ -1175,10 +1234,9 @@ MarketStateMachine::reject(const AttributableMarketFailure& rejected,
 
 // --------------------------------------------------------
 // Consume one ordered source-loss fence and fail closed without fabricating receive identity.
-model::Result<MarketTurnOutcome>
-MarketStateMachine::source_discontinuity(model::AdmissionOrdinal failed_admission,
-                                         const OwnerMarketTurnContext& context,
-                                         trace::RuntimeTraceSink& trace_sink) {
+model::Result<MarketTurnOutcome> MarketStateMachine::source_discontinuity(
+    model::AdmissionOrdinal failed_admission, const OwnerMarketTurnContext& context,
+    trace::RuntimeTraceSink& trace_sink, MarketTurnPreflightAuthority& preflight_authority) {
   auto provenance_valid = require_trace_provenance(expected_trace_provenance_, trace_sink);
   if (!provenance_valid) {
     return propagate<MarketTurnOutcome>(provenance_valid.error());
@@ -1209,13 +1267,15 @@ MarketStateMachine::source_discontinuity(model::AdmissionOrdinal failed_admissio
                 discontinuity_transition_fields(trace_source_, failed_admission,
                                                 context.turn_ordinal, previous, book_identity_));
   }
-  auto fanout = fanout_budget(matching_subscription_count_, state_changes ? 1U : 0U,
-                              maximum_callbacks_per_turn_);
+  const std::uint32_t event_count = state_changes ? 1U : 0U;
+  auto fanout =
+      fanout_budget(matching_subscription_count_, event_count, maximum_callbacks_per_turn_);
   if (!fanout) {
     return model::Result<MarketTurnOutcome>::failure(fanout.error());
   }
-  auto trace_result =
-      append_trace_drafts(drafts, fanout.value().callback_trace_records, trace_sink);
+  auto trace_result = append_trace_drafts(drafts, source_.source_ordinal(), context.turn_ordinal,
+                                          event_count, matching_subscription_count_, fanout.value(),
+                                          preflight_authority, trace_sink);
   if (!trace_result) {
     return propagate<MarketTurnOutcome>(trace_result.error());
   }

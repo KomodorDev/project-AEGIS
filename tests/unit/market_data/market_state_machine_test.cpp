@@ -271,6 +271,49 @@ private:
 
 // ########################################################################
 
+// ########################################################################
+// Capture the exact coordinator-facing shape and optionally reject it to prove the transactional
+// placement of the callback-fanout seam.
+class RecordingPreflightAuthority final : public market_data::MarketTurnPreflightAuthority {
+public:
+
+  // --------------------------------------------------------
+  // Record one complete request and return the caller-selected deterministic verdict.
+  [[nodiscard]] model::Result<void>
+  authorize(const market_data::MarketTurnPreflight& preflight) override {
+    ++call_count_;
+    last_preflight_ = preflight;
+    if (reject_) {
+      return model::Result<void>::failure(model::DomainError::at_field(
+          model::DomainErrorCode::DispatchCapacityExceeded, "test.preflight"));
+    }
+    return model::Result<void>::success();
+  }
+
+  // --------------------------------------------------------
+  // Select rejection without changing the fixed failure identity asserted by the test.
+  void reject(bool selected = true) noexcept { reject_ = selected; }
+
+  // --------------------------------------------------------
+  [[nodiscard]] std::uint32_t call_count() const noexcept { return call_count_; }
+
+  // --------------------------------------------------------
+  [[nodiscard]] const std::optional<market_data::MarketTurnPreflight>&
+  last_preflight() const noexcept {
+    return last_preflight_;
+  }
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  bool reject_{false};
+  std::uint32_t call_count_{0U};
+  std::optional<market_data::MarketTurnPreflight> last_preflight_;
+};
+
+// ########################################################################
+
 // --------------------------------------------------------
 // Verify an outcome carries one exact assigned disposition.
 void require_disposition(const market_data::MarketTurnOutcome& outcome,
@@ -856,6 +899,118 @@ TEST_CASE("trace and callback capacity fail closed before book commit",
 }
 
 // --------------------------------------------------------
+
+// --------------------------------------------------------
+// The coordinator seam sees the exact post-classification shape, and its failure cannot alter the
+// published book, continuity, readiness, or canonical trace prefix.
+TEST_CASE("exact callback preflight failure is transactional",
+          "[market_data][market_state][preflight]") {
+  StateMachineFixture fixture;
+  fixture.make_ready();
+  REQUIRE(fixture.machine().readiness() == market_data::MarketReadiness::Ready);
+  const auto identity_before = fixture.machine().book_identity();
+  const auto session_before = fixture.machine().active_session();
+  const auto sequence_before = fixture.machine().last_source_sequence();
+  const auto trace_before = fixture.trace().size();
+  const auto book_before = fixture.machine().ready_book();
+  REQUIRE(book_before);
+  REQUIRE(book_before.value().best_bid());
+  const auto best_bid_before = *book_before.value().best_bid();
+  REQUIRE(book_before.value().bid_at(0U));
+  const auto quantity_before = book_before.value().bid_at(0U)->quantity;
+
+  RecordingPreflightAuthority authority;
+  authority.reject();
+  auto rejected_delta =
+      fixture.update(market_data::MarketUpdateKind::Delta, 1U, 11U, 10U,
+                     {{market_data::BookSide::Bid, price("100"), quantity("9")}}, 2U);
+  const auto rejected = fixture.machine().process(
+      std::move(rejected_delta),
+      market_data::AcceptedMarketTurnContext{ordinal<model::AdmissionOrdinal>(2U),
+                                             ordinal<model::TurnOrdinal>(3U),
+                                             model::ProcessingTimestamp{300U}},
+      fixture.trace(), authority);
+  REQUIRE_FALSE(rejected);
+  CHECK(authority.call_count() == 1U);
+  CHECK(rejected.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::DispatchCapacityExceeded,
+                                     "test.preflight"));
+  REQUIRE(authority.last_preflight());
+  CHECK(
+      (*authority.last_preflight() ==
+       market_data::MarketTurnPreflight{fixture.policy().sources().front().ordinal(),
+                                        ordinal<model::TurnOrdinal>(3U), 1U, 1U, 1U, 1U, 2U, 3U}));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Every externally visible owner field and trace byte prefix remains at its predecessor.
+  CHECK(fixture.machine().readiness() == market_data::MarketReadiness::Ready);
+  CHECK(fixture.machine().book_identity() == identity_before);
+  CHECK(fixture.machine().active_session() == session_before);
+  CHECK(fixture.machine().last_source_sequence() == sequence_before);
+  CHECK(fixture.trace().size() == trace_before);
+  const auto book_after = fixture.machine().ready_book();
+  REQUIRE(book_after);
+  REQUIRE(book_after.value().best_bid());
+  REQUIRE(book_after.value().bid_at(0U));
+  CHECK(*book_after.value().best_bid() == best_bid_before);
+  CHECK(book_after.value().bid_at(0U)->quantity == quantity_before);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The same valid delta succeeds afterward, proving rejected scratch work cannot poison recovery.
+  auto accepted_delta =
+      fixture.update(market_data::MarketUpdateKind::Delta, 1U, 11U, 10U,
+                     {{market_data::BookSide::Bid, price("100"), quantity("9")}}, 2U);
+  const auto accepted = fixture.process(std::move(accepted_delta), 2U, 4U, 400U);
+  REQUIRE(accepted);
+  REQUIRE(accepted.value().ready_book());
+  REQUIRE(accepted.value().ready_book()->bid_at(0U));
+  CHECK(accepted.value().ready_book()->bid_at(0U)->quantity == quantity("9"));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// A classified no-op reserves zero callback records, so one remaining canonical slot is sufficient
+// for its sole input-disposition record.
+TEST_CASE("exact no-op preflight uses only disposition capacity",
+          "[market_data][market_state][preflight][trace]") {
+  StateMachineFixture fixture{limits(3U, 100U, 4U, 6U)};
+  RecordingPreflightAuthority authority;
+  REQUIRE(fixture.machine().initialize(
+      market_data::OwnerMarketTurnContext{ordinal<model::TurnOrdinal>(1U),
+                                          model::ProcessingTimestamp{100U}},
+      fixture.trace(), authority));
+  REQUIRE(fixture.trace().size() == 1U);
+  const auto source =
+      market_data::MarketSourceIdentity::from_runtime_source(fixture.policy().sources().front());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Establish then ignore the same session four times, leaving exactly one trace slot for the last
+  // no-op under the policy's minimum evidence-capacity relationship.
+  for (std::uint64_t index = 0U; index < 5U; ++index) {
+    const auto turn = index + 2U;
+    const auto outcome = fixture.machine().process(
+        market_data::SessionStarted{source, model::SessionEpoch{1U}, model::SourceTimestamp{1U},
+                                    ordinal<model::ReceiveSequence>(index + 1U),
+                                    model::ReceiveTimestamp{index + 1U}},
+        market_data::AcceptedMarketTurnContext{ordinal<model::AdmissionOrdinal>(index + 1U),
+                                               ordinal<model::TurnOrdinal>(turn),
+                                               model::ProcessingTimestamp{turn * 100U}},
+        fixture.trace(), authority);
+    REQUIRE(outcome);
+    CHECK_FALSE(outcome.value().state_event());
+    CHECK(outcome.value().expected_callback_count() == 0U);
+  }
+  CHECK(fixture.trace().size() == 6U);
+  CHECK(authority.call_count() == 6U);
+  REQUIRE(authority.last_preflight());
+  CHECK(
+      (*authority.last_preflight() ==
+       market_data::MarketTurnPreflight{fixture.policy().sources().front().ordinal(),
+                                        ordinal<model::TurnOrdinal>(6U), 0U, 1U, 0U, 1U, 0U, 1U}));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
 
 // --------------------------------------------------------
 // Book counter helpers reject impossible restored pairs and fail before either nominal counter

@@ -258,10 +258,10 @@ BotRuntime::create(const configuration::StartupConfiguration& configuration,
 }
 
 // --------------------------------------------------------
-// Mint one turn-scoped proof only after worst-case fan-out and evidence checks succeed.
-model::Result<BotDispatchPlan>
-BotRuntime::preflight(model::MarketSourceOrdinal source_ordinal, model::TurnOrdinal turn_ordinal,
-                      std::uint32_t maximum_events_per_subscription) const {
+// Mint one turn-scoped proof only after exact classified fan-out and evidence checks succeed.
+model::Result<BotDispatchPlan> BotRuntime::preflight(model::MarketSourceOrdinal source_ordinal,
+                                                     model::TurnOrdinal turn_ordinal,
+                                                     std::uint32_t event_count) const {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A post-callback fault or recursive planning attempt closes the dispatch boundary before it can
@@ -276,15 +276,15 @@ BotRuntime::preflight(model::MarketSourceOrdinal source_ordinal, model::TurnOrdi
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Resolve the exact canonical source range and reject invalid worst-case event counts.
+  // Resolve the exact canonical source range and reject only shapes outside the zero-to-two event
+  // vocabulary; a zero-event disposition still mints a consumable plan.
   const auto source_index = static_cast<std::size_t>(source_ordinal.value() - 1U);
   if (source_index + 1U >= source_offsets_.size()) {
     return failure<BotDispatchPlan>(DomainErrorCode::RuntimeSourceNotConfigured,
                                     "bot_runtime.source_ordinal");
   }
-  if (maximum_events_per_subscription == 0U || maximum_events_per_subscription > 2U) {
-    return failure<BotDispatchPlan>(DomainErrorCode::InvalidValue,
-                                    "bot_runtime.maximum_events_per_subscription");
+  if (event_count > 2U) {
+    return failure<BotDispatchPlan>(DomainErrorCode::InvalidValue, "bot_runtime.event_count");
   }
 
   const auto matching = source_offsets_[source_index + 1U] - source_offsets_[source_index];
@@ -292,26 +292,25 @@ BotRuntime::preflight(model::MarketSourceOrdinal source_ordinal, model::TurnOrdi
     return failure<BotDispatchPlan>(DomainErrorCode::DispatchCapacityExceeded,
                                     "bot_runtime.matching_subscriptions");
   }
-  const auto maximum_callbacks =
-      static_cast<std::uint64_t>(matching) * maximum_events_per_subscription;
-  if (maximum_callbacks > maximum_callbacks_per_turn_) {
+  const auto callback_count = static_cast<std::uint64_t>(matching) * event_count;
+  if (callback_count > maximum_callbacks_per_turn_) {
     return failure<BotDispatchPlan>(DomainErrorCode::DispatchCapacityExceeded,
-                                    "bot_runtime.maximum_callbacks_per_turn");
+                                    "bot_runtime.callback_count");
   }
 
   const auto last = last_callback_ordinal_ ? last_callback_ordinal_->value() : 0U;
-  if (maximum_callbacks > std::numeric_limits<std::uint64_t>::max() - last) {
+  if (callback_count > std::numeric_limits<std::uint64_t>::max() - last) {
     return failure<BotDispatchPlan>(DomainErrorCode::CallbackCounterExhausted, "callback_ordinal");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Reserve worst-case callback plus first-reentry trace headroom before the market owner mutates.
-  const auto maximum_trace_records = maximum_callbacks * 2U;
-  if (maximum_trace_records > std::numeric_limits<std::uint32_t>::max()) {
+  // Reserve exact callback plus first-reentry trace headroom before the market owner mutates.
+  const auto callback_trace_records = callback_count * 2U;
+  if (callback_trace_records > std::numeric_limits<std::uint32_t>::max()) {
     return failure<BotDispatchPlan>(DomainErrorCode::DispatchCapacityExceeded,
-                                    "bot_runtime.maximum_callback_trace_records");
+                                    "bot_runtime.callback_trace_records");
   }
-  auto trace_capacity = trace_sink_->preflight(static_cast<std::uint32_t>(maximum_trace_records));
+  auto trace_capacity = trace_sink_->preflight(static_cast<std::uint32_t>(callback_trace_records));
   if (!trace_capacity) {
     return model::Result<BotDispatchPlan>::failure(trace_capacity.error());
   }
@@ -323,10 +322,11 @@ BotRuntime::preflight(model::MarketSourceOrdinal source_ordinal, model::TurnOrdi
   // ++++++++++++++++++++++++++++++++++++++++
   // Capture only immutable routing and current counter predecessors; preflight itself changes no
   // BotRuntime state, so failed domain processing requires no rollback mutation.
-  return model::Result<BotDispatchPlan>::success(BotDispatchPlan{
-      *this, source_ordinal, turn_ordinal, static_cast<std::uint32_t>(matching),
-      maximum_events_per_subscription, static_cast<std::uint32_t>(maximum_callbacks),
-      last_callback_ordinal_, completed_dispatch_count_});
+  return model::Result<BotDispatchPlan>::success(
+      BotDispatchPlan{*this, source_ordinal, turn_ordinal, static_cast<std::uint32_t>(matching),
+                      event_count, static_cast<std::uint32_t>(callback_count),
+                      static_cast<std::uint32_t>(callback_trace_records), last_callback_ordinal_,
+                      completed_dispatch_count_});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -373,11 +373,10 @@ model::Result<void> BotRuntime::validate_plan(const BotDispatchPlan& plan) const
                          "bot_dispatch_plan.source_ordinal");
   }
   const auto matching = source_offsets_[source_index + 1U] - source_offsets_[source_index];
-  const auto maximum_callbacks =
-      static_cast<std::uint64_t>(matching) * plan.maximum_events_per_subscription_;
-  if (matching != plan.matching_subscription_count_ ||
-      maximum_callbacks != plan.maximum_callback_count_ ||
-      plan.maximum_events_per_subscription_ == 0U || plan.maximum_events_per_subscription_ > 2U) {
+  const auto callback_count = static_cast<std::uint64_t>(matching) * plan.event_count_;
+  const auto callback_trace_records = callback_count * 2U;
+  if (matching != plan.matching_subscription_count_ || callback_count != plan.callback_count_ ||
+      callback_trace_records != plan.callback_trace_record_count_ || plan.event_count_ > 2U) {
     return failure<void>(DomainErrorCode::InvalidRelationship, "bot_dispatch_plan.fanout");
   }
   return model::Result<void>::success();
@@ -482,16 +481,22 @@ BotRuntime::dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnO
   const bool has_market = outcome.market_event().has_value();
   const auto event_count =
       static_cast<std::uint32_t>(has_state) + static_cast<std::uint32_t>(has_market);
-  if (event_count > plan.maximum_events_per_subscription_) {
+  if (event_count != plan.event_count_) {
     return failure<BotDispatchReport>(DomainErrorCode::DispatchCapacityExceeded,
                                       "bot_runtime.outcome_event_count");
   }
+  const auto exact_callbacks =
+      static_cast<std::uint64_t>(plan.matching_subscription_count_) * event_count;
+  const auto exact_trace_records = exact_callbacks * 2U;
+  if (exact_callbacks != plan.callback_count_ ||
+      exact_trace_records != plan.callback_trace_record_count_ ||
+      outcome.expected_callback_count() != exact_callbacks ||
+      exact_trace_records > std::numeric_limits<std::uint32_t>::max() ||
+      outcome.reserved_callback_trace_records() != exact_trace_records) {
+    return failure<BotDispatchReport>(DomainErrorCode::DispatchCapacityExceeded,
+                                      "bot_runtime.outcome_callback_count");
+  }
   if (!has_state && !has_market) {
-    if (outcome.expected_callback_count() != 0U ||
-        outcome.reserved_callback_trace_records() != 0U) {
-      return failure<BotDispatchReport>(DomainErrorCode::DispatchCapacityExceeded,
-                                        "bot_runtime.outcome_callback_count");
-    }
     ++completed_dispatch_count_;
     return model::Result<BotDispatchReport>::success(
         BotDispatchReport{0U, 0U, 0U, 0U, 0U, 0U, std::nullopt, std::nullopt});
@@ -521,15 +526,6 @@ BotRuntime::dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnO
     return failure<BotDispatchReport>(DomainErrorCode::MarketNotReady, "bot_runtime.ready_book");
   }
 
-  const auto exact_callbacks = plan.matching_subscription_count_ * event_count;
-  const auto exact_trace_records = static_cast<std::uint64_t>(exact_callbacks) * 2U;
-  if (exact_callbacks > plan.maximum_callback_count_ ||
-      outcome.expected_callback_count() != exact_callbacks ||
-      exact_trace_records > std::numeric_limits<std::uint32_t>::max() ||
-      outcome.reserved_callback_trace_records() != exact_trace_records) {
-    return failure<BotDispatchReport>(DomainErrorCode::DispatchCapacityExceeded,
-                                      "bot_runtime.outcome_callback_count");
-  }
   auto capacity = trace_sink_->preflight(outcome.reserved_callback_trace_records());
   if (!capacity) {
     return model::Result<BotDispatchReport>::failure(capacity.error());

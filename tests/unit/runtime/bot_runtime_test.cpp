@@ -523,13 +523,17 @@ TEST_CASE("bot runtime dispatches only the subscribed bot with complete attribut
                                              std::move(registrations));
   REQUIRE(created);
   auto bot_runtime = std::move(created).value();
+  const auto oversized_initial_plan = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
+                                                            model::TurnOrdinal::initial(), 2U);
+  REQUIRE(oversized_initial_plan);
   const auto initial_plan = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
                                                   model::TurnOrdinal::initial(), 1U);
   REQUIRE(initial_plan);
   CHECK(initial_plan.value().source_ordinal() == model::MarketSourceOrdinal::initial());
   CHECK(initial_plan.value().matching_subscription_count() == 1U);
-  CHECK(initial_plan.value().maximum_events_per_subscription() == 1U);
-  CHECK(initial_plan.value().maximum_callback_count() == 1U);
+  CHECK(initial_plan.value().event_count() == 1U);
+  CHECK(initial_plan.value().callback_count() == 1U);
+  CHECK(initial_plan.value().callback_trace_record_count() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Initial Synchronizing and snapshot recovery dispatch state before market to the sole grant.
@@ -538,14 +542,24 @@ TEST_CASE("bot runtime dispatches only the subscribed bot with complete attribut
                                                              model::ProcessingTimestamp{60U}},
                          trace_sink);
   REQUIRE(initialized);
+  const auto oversized_initial =
+      bot_runtime.dispatch(oversized_initial_plan.value(), initialized.value());
+  REQUIRE_FALSE(oversized_initial);
+  CHECK(oversized_initial.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::DispatchCapacityExceeded,
+                                     "bot_runtime.outcome_event_count"));
   const auto initial_report = bot_runtime.dispatch(initial_plan.value(), initialized.value());
   REQUIRE(initial_report);
   CHECK(initial_report.value().state_callbacks == 1U);
 
+  const auto too_small_plan = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
+                                                    ordinal<model::TurnOrdinal>(2U), 1U);
+  REQUIRE(too_small_plan);
   const auto ready_plan = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
                                                 ordinal<model::TurnOrdinal>(2U), 2U);
   REQUIRE(ready_plan);
-  CHECK(ready_plan.value().maximum_callback_count() == 2U);
+  CHECK(ready_plan.value().callback_count() == 2U);
+  CHECK(ready_plan.value().callback_trace_record_count() == 4U);
   const auto ready =
       machine.process(snapshot_from(policy),
                       market_data::AcceptedMarketTurnContext{model::AdmissionOrdinal::initial(),
@@ -553,6 +567,11 @@ TEST_CASE("bot runtime dispatches only the subscribed bot with complete attribut
                                                              model::ProcessingTimestamp{200U}},
                       trace_sink);
   REQUIRE(ready);
+  const auto too_small = bot_runtime.dispatch(too_small_plan.value(), ready.value());
+  REQUIRE_FALSE(too_small);
+  CHECK(too_small.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::DispatchCapacityExceeded,
+                                     "bot_runtime.outcome_event_count"));
   const auto ready_report = bot_runtime.dispatch(ready_plan.value(), ready.value());
   REQUIRE(ready_report);
   CHECK(ready_report.value().state_callbacks == 1U);
@@ -721,8 +740,11 @@ TEST_CASE("bot runtime cancels failed turns and consumes zero-event plans", "[ru
   // Starting the first explicit session while already Synchronizing emits only an input
   // disposition. Dispatch still validates and consumes its zero-callback proof.
   const auto zero_plan = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
-                                               ordinal<model::TurnOrdinal>(3U), 1U);
+                                               ordinal<model::TurnOrdinal>(3U), 0U);
   REQUIRE(zero_plan);
+  CHECK(zero_plan.value().event_count() == 0U);
+  CHECK(zero_plan.value().callback_count() == 0U);
+  CHECK(zero_plan.value().callback_trace_record_count() == 0U);
   const auto no_change = machine.process(
       market_data::SessionStarted{
           market_data::MarketSourceIdentity::from_runtime_source(policy.sources().front()),
@@ -796,7 +818,7 @@ TEST_CASE("bot runtime rejects wrong-source and wrong-turn zero-event outcomes",
   // ++++++++++++++++++++++++++++++++++++++++
   // A source-one plan cannot authorize a source-two outcome even though both imply zero callbacks.
   const auto wrong_source_plan = bot_runtime.preflight(policy.sources().front().ordinal(),
-                                                       ordinal<model::TurnOrdinal>(2U), 1U);
+                                                       ordinal<model::TurnOrdinal>(2U), 0U);
   REQUIRE(wrong_source_plan);
   const auto wrong_source = bot_runtime.dispatch(wrong_source_plan.value(), zero_outcome.value());
   REQUIRE_FALSE(wrong_source);
@@ -808,7 +830,7 @@ TEST_CASE("bot runtime rejects wrong-source and wrong-turn zero-event outcomes",
   // ++++++++++++++++++++++++++++++++++++++++
   // A later-turn plan for the same source rejects the stale outcome without consuming a dispatch.
   const auto wrong_turn_plan =
-      bot_runtime.preflight(second_source.ordinal(), ordinal<model::TurnOrdinal>(3U), 1U);
+      bot_runtime.preflight(second_source.ordinal(), ordinal<model::TurnOrdinal>(3U), 0U);
   REQUIRE(wrong_turn_plan);
   const auto wrong_turn = bot_runtime.dispatch(wrong_turn_plan.value(), zero_outcome.value());
   REQUIRE_FALSE(wrong_turn);
@@ -820,7 +842,7 @@ TEST_CASE("bot runtime rejects wrong-source and wrong-turn zero-event outcomes",
   // ++++++++++++++++++++++++++++++++++++++++
   // Retrying with the exact source and turn succeeds and advances the use predecessor once.
   const auto exact_plan =
-      bot_runtime.preflight(second_source.ordinal(), ordinal<model::TurnOrdinal>(2U), 1U);
+      bot_runtime.preflight(second_source.ordinal(), ordinal<model::TurnOrdinal>(2U), 0U);
   REQUIRE(exact_plan);
   const auto exact = bot_runtime.dispatch(exact_plan.value(), zero_outcome.value());
   REQUIRE(exact);
@@ -954,10 +976,21 @@ TEST_CASE("bot runtime validates strategy ownership and callback counter headroo
                                              runtime::BotRuntimeCounterSeed{maximum});
   REQUIRE(created);
   auto bot_runtime = std::move(created).value();
+  const auto zero = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
+                                          model::TurnOrdinal::initial(), 0U);
+  REQUIRE(zero);
+  CHECK(zero.value().event_count() == 0U);
+  CHECK(zero.value().callback_count() == 0U);
+  CHECK(zero.value().callback_trace_record_count() == 0U);
   const auto exhausted = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
                                                model::TurnOrdinal::initial(), 1U);
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == model::DomainErrorCode::CallbackCounterExhausted);
+  const auto oversized = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
+                                               model::TurnOrdinal::initial(), 3U);
+  REQUIRE_FALSE(oversized);
+  CHECK(oversized.error() == model::DomainError::at_field(model::DomainErrorCode::InvalidValue,
+                                                          "bot_runtime.event_count"));
   REQUIRE(strategy != nullptr);
 
   // ++++++++++++++++++++++++++++++++++++++++

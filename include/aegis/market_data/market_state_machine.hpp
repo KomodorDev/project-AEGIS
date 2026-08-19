@@ -69,6 +69,58 @@ struct AttributableMarketFailure {
 // ########################################################################
 
 // ########################################################################
+// One exact preflight request exposes only bounded routing and evidence counts. It deliberately
+// carries no market event, book view, strategy, or runtime-specific dispatch capability.
+struct MarketTurnPreflight {
+  model::MarketSourceOrdinal source_ordinal;
+  model::TurnOrdinal turn_ordinal;
+  std::uint32_t event_count;
+  std::uint32_t matching_subscription_count;
+  std::uint32_t callback_count;
+  std::uint32_t state_trace_record_count;
+  std::uint32_t callback_trace_record_count;
+  std::uint32_t total_trace_record_count;
+
+  // --------------------------------------------------------
+  // Structural equality supports exact coordinator and transactional-boundary assertions.
+  friend bool operator==(const MarketTurnPreflight&, const MarketTurnPreflight&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// A coordinator-supplied authority may reserve an exact callback plan only after the market owner
+// has classified and shaped the complete outcome, but before canonical evidence or domain commit.
+class MarketTurnPreflightAuthority {
+public:
+
+  // --------------------------------------------------------
+  // Authorities have stable polymorphic ownership and are never copied through this boundary.
+  MarketTurnPreflightAuthority() = default;
+  MarketTurnPreflightAuthority(const MarketTurnPreflightAuthority&) = delete;
+  MarketTurnPreflightAuthority& operator=(const MarketTurnPreflightAuthority&) = delete;
+  MarketTurnPreflightAuthority(MarketTurnPreflightAuthority&&) = delete;
+  MarketTurnPreflightAuthority& operator=(MarketTurnPreflightAuthority&&) = delete;
+  virtual ~MarketTurnPreflightAuthority() = default;
+
+  // --------------------------------------------------------
+  // Accept or reject the exact bounded turn shape without mutating market-owner state.
+  [[nodiscard]] virtual model::Result<void> authorize(const MarketTurnPreflight& preflight) = 0;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// Return the explicit stateless authority used by standalone market-state callers without bots.
+[[nodiscard]] MarketTurnPreflightAuthority& permissive_market_turn_preflight_authority() noexcept;
+
+// --------------------------------------------------------
+
+// ########################################################################
 // BookIdentity advances generation only for snapshots while every commit advances the global
 // revision; its checked helpers make exhaustion testable without billions of commits.
 class BookIdentity final {
@@ -253,43 +305,57 @@ public:
 
   // --------------------------------------------------------
   // Publish the required initial Synchronizing transition without fabricating ingress context.
-  [[nodiscard]] model::Result<MarketTurnOutcome> initialize(const OwnerMarketTurnContext& context,
-                                                            trace::RuntimeTraceSink& trace_sink);
+  [[nodiscard]] model::Result<MarketTurnOutcome>
+  initialize(const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
+             MarketTurnPreflightAuthority& preflight_authority =
+                 permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Clear source continuity and require a fresh snapshot, retaining hidden historical book bytes.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  resynchronize(const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink);
+  resynchronize(const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
+                MarketTurnPreflightAuthority& preflight_authority =
+                    permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Classify and transactionally apply one normalized snapshot or delta.
-  [[nodiscard]] model::Result<MarketTurnOutcome> process(NormalizedMarketUpdate update,
-                                                         const AcceptedMarketTurnContext& context,
-                                                         trace::RuntimeTraceSink& trace_sink);
+  [[nodiscard]] model::Result<MarketTurnOutcome>
+  process(NormalizedMarketUpdate update, const AcceptedMarketTurnContext& context,
+          trace::RuntimeTraceSink& trace_sink,
+          MarketTurnPreflightAuthority& preflight_authority =
+              permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Apply deterministic session-age policy and clear continuity only for a newer session.
-  [[nodiscard]] model::Result<MarketTurnOutcome> process(const SessionStarted& control,
-                                                         const AcceptedMarketTurnContext& context,
-                                                         trace::RuntimeTraceSink& trace_sink);
+  [[nodiscard]] model::Result<MarketTurnOutcome>
+  process(const SessionStarted& control, const AcceptedMarketTurnContext& context,
+          trace::RuntimeTraceSink& trace_sink,
+          MarketTurnPreflightAuthority& preflight_authority =
+              permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Evaluate the explicit freshness timestamp without reading an ambient clock.
-  [[nodiscard]] model::Result<MarketTurnOutcome> process(const StalenessCheck& control,
-                                                         const AcceptedMarketTurnContext& context,
-                                                         trace::RuntimeTraceSink& trace_sink);
+  [[nodiscard]] model::Result<MarketTurnOutcome>
+  process(const StalenessCheck& control, const AcceptedMarketTurnContext& context,
+          trace::RuntimeTraceSink& trace_sink,
+          MarketTurnPreflightAuthority& preflight_authority =
+              permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Contain one attributable malformed or unsupported active-stream frame without raw payload.
-  [[nodiscard]] model::Result<MarketTurnOutcome> reject(const AttributableMarketFailure& failure,
-                                                        const AcceptedMarketTurnContext& context,
-                                                        trace::RuntimeTraceSink& trace_sink);
+  [[nodiscard]] model::Result<MarketTurnOutcome>
+  reject(const AttributableMarketFailure& failure, const AcceptedMarketTurnContext& context,
+         trace::RuntimeTraceSink& trace_sink,
+         MarketTurnPreflightAuthority& preflight_authority =
+             permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Consume one ordered admission-loss fence and require snapshot recovery.
   [[nodiscard]] model::Result<MarketTurnOutcome>
   source_discontinuity(model::AdmissionOrdinal failed_admission,
-                       const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink);
+                       const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
+                       MarketTurnPreflightAuthority& preflight_authority =
+                           permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Return absence until initialization publishes the first explicit state.

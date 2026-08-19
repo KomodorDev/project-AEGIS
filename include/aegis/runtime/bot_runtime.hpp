@@ -160,15 +160,17 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return the per-grant event bound supplied before the owner attempted state mutation.
-  [[nodiscard]] std::uint32_t maximum_events_per_subscription() const noexcept {
-    return maximum_events_per_subscription_;
-  }
+  // Return the exact per-grant event count classified before owner mutation.
+  [[nodiscard]] std::uint32_t event_count() const noexcept { return event_count_; }
 
   // --------------------------------------------------------
-  // Return the resulting worst-case callback count reserved by this proof.
-  [[nodiscard]] std::uint32_t maximum_callback_count() const noexcept {
-    return maximum_callback_count_;
+  // Return the exact callback count reserved by this proof.
+  [[nodiscard]] std::uint32_t callback_count() const noexcept { return callback_count_; }
+
+  // --------------------------------------------------------
+  // Return exact callback plus possible first-reentry canonical trace headroom.
+  [[nodiscard]] std::uint32_t callback_trace_record_count() const noexcept {
+    return callback_trace_record_count_;
   }
 
   // --------------------------------------------------------
@@ -185,14 +187,13 @@ private:
   // Capture every private freshness and owner binding only after preflight succeeds.
   BotDispatchPlan(const BotRuntime& owner, model::MarketSourceOrdinal source_ordinal,
                   model::TurnOrdinal turn_ordinal, std::uint32_t matching_subscription_count,
-                  std::uint32_t maximum_events_per_subscription,
-                  std::uint32_t maximum_callback_count,
+                  std::uint32_t event_count, std::uint32_t callback_count,
+                  std::uint32_t callback_trace_record_count,
                   std::optional<model::CallbackOrdinal> callback_counter_predecessor,
                   std::uint64_t dispatch_counter_predecessor) noexcept
       : owner_{&owner}, source_ordinal_{source_ordinal}, turn_ordinal_{turn_ordinal},
-        matching_subscription_count_{matching_subscription_count},
-        maximum_events_per_subscription_{maximum_events_per_subscription},
-        maximum_callback_count_{maximum_callback_count},
+        matching_subscription_count_{matching_subscription_count}, event_count_{event_count},
+        callback_count_{callback_count}, callback_trace_record_count_{callback_trace_record_count},
         callback_counter_predecessor_{callback_counter_predecessor},
         dispatch_counter_predecessor_{dispatch_counter_predecessor} {}
 
@@ -201,8 +202,9 @@ private:
   model::MarketSourceOrdinal source_ordinal_;
   model::TurnOrdinal turn_ordinal_;
   std::uint32_t matching_subscription_count_;
-  std::uint32_t maximum_events_per_subscription_;
-  std::uint32_t maximum_callback_count_;
+  std::uint32_t event_count_;
+  std::uint32_t callback_count_;
+  std::uint32_t callback_trace_record_count_;
   std::optional<model::CallbackOrdinal> callback_counter_predecessor_;
   std::uint64_t dispatch_counter_predecessor_;
 };
@@ -286,11 +288,11 @@ public:
   BotRuntime& operator=(BotRuntime&&) noexcept = default;
 
   // --------------------------------------------------------
-  // Validate source routing, worst-case callback/trace capacity, and callback-counter headroom
-  // before the market owner may mutate state. This observation does not mutate BotRuntime.
-  [[nodiscard]] model::Result<BotDispatchPlan>
-  preflight(model::MarketSourceOrdinal source_ordinal, model::TurnOrdinal turn_ordinal,
-            std::uint32_t maximum_events_per_subscription) const;
+  // Validate source routing, exact callback/trace capacity, and callback-counter headroom for the
+  // classified zero-to-two event shape. This observation does not mutate BotRuntime.
+  [[nodiscard]] model::Result<BotDispatchPlan> preflight(model::MarketSourceOrdinal source_ordinal,
+                                                         model::TurnOrdinal turn_ordinal,
+                                                         std::uint32_t event_count) const;
 
   // --------------------------------------------------------
   // Preserve a no-fail coordinator rollback seam. Preflight is observational, so cancellation is a

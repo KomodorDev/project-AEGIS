@@ -1100,15 +1100,19 @@ TEST_CASE("only the bound owner can execute and release turns", "[runtime][execu
   const auto unbound_drive = executor.drive(0U);
   REQUIRE_FALSE(unbound_run);
   REQUIRE_FALSE(unbound_drive);
+  CHECK_FALSE(executor.current_thread_is_owner());
   CHECK(unbound_run.error().code == model::DomainErrorCode::ExecutorNotBound);
   CHECK(unbound_drive.error().code == model::DomainErrorCode::ExecutorNotBound);
   REQUIRE(executor.bind_to_current_thread());
+  CHECK(executor.current_thread_is_owner());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Another thread receives WrongOwner for both progression and release.
   std::optional<model::DomainError> run_error;
   std::optional<model::DomainError> release_error;
-  std::thread intruder{[&executor, &run_error, &release_error] {
+  bool intruder_is_owner = true;
+  std::thread intruder{[&executor, &run_error, &release_error, &intruder_is_owner] {
+    intruder_is_owner = executor.current_thread_is_owner();
     const auto run = executor.run_one();
     if (!run) {
       run_error.emplace(run.error());
@@ -1119,6 +1123,7 @@ TEST_CASE("only the bound owner can execute and release turns", "[runtime][execu
     }
   }};
   intruder.join();
+  CHECK_FALSE(intruder_is_owner);
   REQUIRE(run_error.has_value());
   REQUIRE(release_error.has_value());
   CHECK(run_error->code == model::DomainErrorCode::ExecutorWrongOwner);
@@ -1127,13 +1132,16 @@ TEST_CASE("only the bound owner can execute and release turns", "[runtime][execu
   // ++++++++++++++++++++++++++++++++++++++++
   // Explicit release permits a successor thread to bind and release the same executor.
   REQUIRE(executor.release_from_current_thread());
+  CHECK_FALSE(executor.current_thread_is_owner());
   std::optional<model::DomainError> handoff_error;
-  std::thread successor{[&executor, &handoff_error] {
+  bool successor_is_owner = false;
+  std::thread successor{[&executor, &handoff_error, &successor_is_owner] {
     const auto binding = executor.bind_to_current_thread();
     if (!binding) {
       handoff_error.emplace(binding.error());
       return;
     }
+    successor_is_owner = executor.current_thread_is_owner();
     const auto release = executor.release_from_current_thread();
     if (!release) {
       handoff_error.emplace(release.error());
@@ -1141,6 +1149,7 @@ TEST_CASE("only the bound owner can execute and release turns", "[runtime][execu
   }};
   successor.join();
   CHECK_FALSE(handoff_error.has_value());
+  CHECK(successor_is_owner);
   CHECK_FALSE(executor.snapshot().owner_bound);
 
   // ++++++++++++++++++++++++++++++++++++++++

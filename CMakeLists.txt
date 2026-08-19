@@ -64,6 +64,8 @@ add_library(
   src/aegis/organization/organization.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
+  # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
+  src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
   src/aegis/runtime/runtime_diagnostics.cpp
   # Bot dispatch owns one strategy per bot and invokes canonical state-before-market callbacks.

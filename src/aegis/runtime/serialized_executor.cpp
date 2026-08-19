@@ -443,6 +443,13 @@ QueueSnapshot SerializedExecutor::snapshot() const noexcept {
 }
 
 // --------------------------------------------------------
+// Compare the caller with the synchronized owner token without publishing a thread identifier.
+bool SerializedExecutor::current_thread_is_owner() const noexcept {
+  std::lock_guard lock{mutex_};
+  return owner_thread_.has_value() && owner_thread_.value() == std::this_thread::get_id();
+}
+
+// --------------------------------------------------------
 // Resolve and copy one source's loss state under the same mutex used for folding and restoration.
 std::optional<SourceFenceSnapshot> SerializedExecutor::source_fence_snapshot(
     model::MarketSourceOrdinal source_ordinal) const noexcept {
