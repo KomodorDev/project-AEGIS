@@ -35,6 +35,7 @@ add_executable(
   unit/organization/organization_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
   unit/runtime/runtime_policy_test.cpp
+  unit/runtime/runtime_diagnostics_test.cpp
   # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
   unit/trace/runtime_trace_test.cpp
