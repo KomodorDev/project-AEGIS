@@ -53,38 +53,52 @@ code, tests, build files, scripts and Markdown documentation.
 - In Markdown, an informative heading plus its introductory prose counts as the explanation for that
   logical block; add prose when a heading alone does not establish purpose or scope.
 
-### C and C++ divider hierarchy
+### C, C++ and Python divider hierarchy
 
-Use matching visual boundaries around every class-like type and function-level block in C and C++
-headers, sources, tests, support code and benchmarks. The divider hierarchy is fixed from strongest
-to weakest:
+Use matching visual boundaries around every class-like type and function-level block in C/C++
+headers and sources and in Python modules, including tests, support code, tools and benchmarks. The
+divider hierarchy is fixed from strongest to weakest; use the language's native line-comment prefix:
 
-- Class/type boundary: `// ########################################################################`
-- Method/function boundary: `// --------------------------------------------------------`
-- Internal algorithm-step boundary: `// ++++++++++++++++++++++++++++++++++++++++`
+- Class/type boundary: `// ########################################################################` in C/C++ or
+  `# ########################################################################` in Python.
+- Method/function boundary: `// --------------------------------------------------------` in C/C++ or
+  `# --------------------------------------------------------` in Python.
+- Internal algorithm-step boundary: `// ++++++++++++++++++++++++++++++++++++++++` in C/C++ or
+  `# ++++++++++++++++++++++++++++++++++++++++` in Python.
 
 Apply the boundaries as follows:
 
-- Leave exactly one blank line immediately before every divider, including opening, closing, shared
-  and internal-step dividers. This spacing rule also applies to the final divider before a namespace
-  close or end of file.
+- In C/C++, leave exactly one blank line immediately before every divider, including opening,
+  closing, shared and internal-step dividers. This spacing rule also applies to the final divider
+  before a namespace close or end of file.
+- In Python, leave at least one blank line immediately before every divider. Follow Ruff's
+  formatter-native two blank lines around top-level definitions rather than forcing exactly one
+  there; nested dividers normally retain one blank line.
 - Put the opening divider first and the explanatory comment immediately after it. The description
   must explain responsibility, invariant or intent before the declaration or code it governs.
 - Close every governed block with the same divider, separated from the governed code by the required
   blank line. The final class, function or algorithm phase in a file must also have an explicit
-  closing divider; reaching a namespace close or end of file is not an implicit close.
+  closing divider; reaching a C++ namespace close, a Python dedent or end of file is not an implicit
+  close.
 - Use the class/type divider for `class`, `struct`, `union` and `enum class` definitions or forward
-  declarations, and for named concept/type-alias contract groups. Continue to use method/function
-  dividers for functions declared or defined inside class-like types.
+  declarations, Python classes, and named concept/type-alias/protocol contract groups. Continue to
+  use method/function dividers for functions declared or defined inside class-like types.
 - Use the method/function divider for constructors, methods, free functions, operators, factories,
-  test cases and benchmark callbacks. Closely related overloads may form one documented block.
+  Python `def` and `async def` blocks, test cases and benchmark callbacks. Closely related overloads
+  may form one documented block.
 - Use the step divider only inside longer function bodies where validation, transformation,
   encoding, commit or other meaningful phases need to be distinguished. Close the final phase
-  before the function's closing brace.
+  before the C/C++ function's closing brace or the Python function's closing dedent.
 - Adjacent blocks at the same level may share one divider as the previous block's close and the next
   block's open. Put the required blank line before that shared divider, then put the next block's
   description immediately after it.
-- Keep namespace-closing comments outside the class/function boundary they contain.
+- In Python, put an opening divider and its description before any decorators without inserting a
+  blank line between the description, decorators and declaration.
+- Start a Python class or function that contains nested dividers with its normal docstring, then put
+  the first nested divider after that docstring. Ruff removes empty lines placed directly after a
+  suite header, so the docstring makes the required separation formatter-stable.
+- Keep C++ namespace-closing comments outside the class/function boundary they contain. In Python,
+  indent dividers to the level of the class, function or phase they govern.
 
 Example:
 
@@ -124,6 +138,38 @@ Result<void> OrderBook::add(Order order) {
 }
 
 // --------------------------------------------------------
+```
+
+Python example:
+
+```python
+"""Demonstrate the repository's Python divider hierarchy."""
+
+
+# ########################################################################
+# Owns validated orders and preserves canonical insertion order.
+class OrderBook:
+    """Own a validated order collection in canonical insertion order."""
+
+    # --------------------------------------------------------
+    # Validates and inserts one order without partial mutation.
+    def add(self, order: Order) -> None:
+        """Validate and insert one order without partial mutation."""
+
+        # ++++++++++++++++++++++++++++++++++++++++
+        # Reject invalid input before changing owned state.
+        self._validate(order)
+
+        # ++++++++++++++++++++++++++++++++++++++++
+        # Commit only after every fallible operation has succeeded.
+        self._orders.append(order)
+
+        # ++++++++++++++++++++++++++++++++++++++++
+
+    # --------------------------------------------------------
+
+
+# ########################################################################
 ```
 
 ### Interesting syntax
