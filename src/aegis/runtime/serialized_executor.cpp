@@ -155,6 +155,39 @@ void SerializedExecutor::close() noexcept {
 }
 
 // --------------------------------------------------------
+// Latch a fault raised after owner-local mutation while leaving run_one responsible for publishing
+// the active handler's successful completion before that fault surfaces at the next boundary.
+model::Result<void> SerializedExecutor::request_owner_fault(model::DomainError error) noexcept {
+  std::lock_guard lock{mutex_};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject callers without the current owner authority before lifecycle state can change.
+  if (!owner_thread_.has_value()) {
+    return model::Result<void>::failure(
+        model::DomainError::at_field(model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
+  }
+  if (owner_thread_.value() != std::this_thread::get_id()) {
+    return model::Result<void>::failure(
+        model::DomainError::at_field(model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // This seam is post-mutation authority for a running handler, never an out-of-turn close API.
+  if (!turn_active_) {
+    return model::Result<void>::failure(model::DomainError::at_field(
+        model::DomainErrorCode::ExecutorReentryDetected, "executor_owner_fault"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve the first cause, close later admission, and wake a dedicated driver. The active
+  // handler still owns its stack and may return success so run_one can publish its TurnReport.
+  fail_closed_locked(std::move(error));
+  return model::Result<void>::success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 // Binding is idempotent for the current thread and rejects an implicit concurrent handoff.
 model::Result<void> SerializedExecutor::bind_to_current_thread() {
   std::lock_guard lock{mutex_};

@@ -382,6 +382,11 @@ public:
   void close() noexcept;
 
   // --------------------------------------------------------
+  // Let the current owner latch a post-mutation terminal fault without erasing the active turn's
+  // successful completion report. This authority exists only on an active owner call stack.
+  [[nodiscard]] model::Result<void> request_owner_fault(model::DomainError error) noexcept;
+
+  // --------------------------------------------------------
   // Bind owner progression to the calling thread; only an explicit release permits handoff.
   [[nodiscard]] model::Result<void> bind_to_current_thread();
 

@@ -202,6 +202,28 @@ struct TerminalOverlapCommand {
 // ########################################################################
 
 // ########################################################################
+// OwnerFaultObservation retains the results of owner-local fault publication while the enclosing
+// handler deliberately returns success so its applied turn remains reportable.
+struct OwnerFaultObservation {
+  runtime::SerializedExecutor* executor;
+  std::size_t applied{0U};
+  std::optional<runtime::AcceptedTurnContext> context;
+  bool first_request_succeeded{false};
+  bool second_request_succeeded{false};
+  std::optional<model::DomainError> request_error;
+};
+
+// ########################################################################
+
+// ########################################################################
+// OwnerFaultCommand keeps mutable fault-publication evidence behind one stable runtime handle.
+struct OwnerFaultCommand {
+  OwnerFaultObservation* observation;
+};
+
+// ########################################################################
+
+// ########################################################################
 // CompletionCommand synchronizes a dedicated owner turn without sharing non-atomic mutable data.
 struct CompletionCommand {
   std::atomic_size_t* completed;
@@ -301,6 +323,39 @@ apply_then_exhaust_admission(const TerminalOverlapCommand& command,
 }
 
 // --------------------------------------------------------
+// Apply owner-local work, latch two terminal causes in order, and return success so the first cause
+// takes effect only after this active turn has published its report.
+[[nodiscard]] model::Result<void>
+apply_then_request_owner_fault(const OwnerFaultCommand& command,
+                               const runtime::AcceptedTurnContext& context) noexcept {
+  auto& observation = *command.observation;
+  ++observation.applied;
+  observation.context.emplace(context);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The first request closes admission and establishes the stable terminal cause.
+  const auto first = observation.executor->request_owner_fault(model::DomainError::at_field(
+      model::DomainErrorCode::RuntimeEvidenceExhausted, "test_owner_fault_first"));
+  observation.first_request_succeeded = first.has_value();
+  if (!first) {
+    observation.request_error.emplace(first.error());
+    return model::Result<void>::success();
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A later active-owner request succeeds idempotently but cannot replace the first cause.
+  const auto second = observation.executor->request_owner_fault(model::DomainError::at_field(
+      model::DomainErrorCode::InvalidMarketState, "test_owner_fault_second"));
+  observation.second_request_succeeded = second.has_value();
+  if (!second) {
+    observation.request_error.emplace(second.error());
+  }
+  return model::Result<void>::success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 // Publish one dedicated command completion using storage prepared before admission.
 [[nodiscard]] model::Result<void> count_completion(const CompletionCommand& command,
                                                    const runtime::AcceptedTurnContext&) noexcept {
@@ -346,6 +401,7 @@ static_assert(static_cast<std::uint8_t>(runtime::TurnKind::SourceDiscontinuity) 
 static_assert(std::is_trivially_copyable_v<RecordCommand>);
 static_assert(std::is_trivially_copyable_v<ReentryCommand>);
 static_assert(std::is_trivially_copyable_v<TerminalOverlapCommand>);
+static_assert(std::is_trivially_copyable_v<OwnerFaultCommand>);
 static_assert(std::is_trivially_copyable_v<CompletionCommand>);
 static_assert(std::is_trivially_copyable_v<StopGateCommand>);
 static_assert(std::is_trivially_copyable_v<runtime::WorkItem>);
@@ -871,6 +927,117 @@ TEST_CASE("applied turn reports before overlapping producer fault surfaces",
   CHECK(next_run.error() == observation.nested_error.value());
   CHECK(next_drive.error() == observation.nested_error.value());
   REQUIRE(driver.release_from_current_thread());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// An active owner may latch a post-mutation fault without erasing the successful current turn;
+// the first cause closes admission and surfaces unchanged at every later progression boundary.
+TEST_CASE("owner fault preserves the applied turn and first terminal cause",
+          "[runtime][executor]") {
+  model::DeterministicClockProvider clock;
+  runtime::SerializedExecutor executor{2U, clock};
+  runtime::DeterministicExecutorDriver driver{executor};
+  FixedRecorder recorder;
+  OwnerFaultObservation observation{&executor, 0U, std::nullopt, false, false, std::nullopt};
+  const auto faulting_work =
+      runtime::WorkItem::make<&apply_then_request_owner_fault>(OwnerFaultCommand{&observation});
+  const auto later_work = runtime::WorkItem::make<&record_value>(RecordCommand{&recorder, 2});
+  REQUIRE(executor.try_admit(faulting_work));
+  REQUIRE(executor.try_admit(later_work));
+  REQUIRE(driver.bind_to_current_thread());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Both active-owner requests succeed, but the first cause remains terminal after the applied
+  // handler returns one complete TurnReport.
+  const auto applied = driver.run_one();
+  REQUIRE(applied);
+  REQUIRE(applied.value().has_value());
+  CHECK(applied.value()->kind == runtime::TurnKind::Command);
+  CHECK(applied.value()->turn_ordinal == model::TurnOrdinal::initial());
+  CHECK(applied.value()->attempt_ordinal == model::AdmissionOrdinal::initial());
+  CHECK(applied.value()->completed_turns == 1U);
+  CHECK(observation.applied == 1U);
+  REQUIRE(observation.context.has_value());
+  CHECK(observation.context->turn_ordinal == model::TurnOrdinal::initial());
+  CHECK(observation.first_request_succeeded);
+  CHECK(observation.second_request_succeeded);
+  CHECK_FALSE(observation.request_error.has_value());
+  const auto first_fault = model::DomainError::at_field(
+      model::DomainErrorCode::RuntimeEvidenceExhausted, "test_owner_fault_first");
+  CHECK(executor.terminal_error() == first_fault);
+  CHECK(executor.snapshot() ==
+        runtime::QueueSnapshot{1U, 0U, 0U, 2U, 0U, raw_drive_limit, 1U, true, true, true, false});
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Later admission and owner progression expose the stored cause; neither path can execute or
+  // consume the already accepted successor command.
+  const auto later_admission = executor.try_admit(later_work);
+  const auto next_run = driver.run_one();
+  const auto next_drive = driver.drive(1U);
+  REQUIRE_FALSE(later_admission);
+  REQUIRE_FALSE(next_run);
+  REQUIRE_FALSE(next_drive);
+  CHECK(later_admission.error() == first_fault);
+  CHECK(next_run.error() == first_fault);
+  CHECK(next_drive.error() == first_fault);
+  CHECK(executor.snapshot().pending_commands == 1U);
+  CHECK(recorder.size == 0U);
+  REQUIRE(driver.release_from_current_thread());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Owner-fault authority rejects unbound, wrong-thread, and out-of-turn callers before changing
+// closure, terminal state, pending work, or ownership.
+TEST_CASE("owner fault rejects callers without an active owner turn", "[runtime][executor]") {
+  model::DeterministicClockProvider clock;
+  runtime::SerializedExecutor executor{1U, clock};
+  const auto requested_fault = [] {
+    return model::DomainError::at_field(model::DomainErrorCode::RuntimeEvidenceExhausted,
+                                        "test_owner_fault_misuse");
+  };
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // An unbound caller receives the same stable absence error as owner progression.
+  const auto unbound = executor.request_owner_fault(requested_fault());
+  REQUIRE_FALSE(unbound);
+  CHECK(unbound.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
+  CHECK(executor.snapshot() == runtime::QueueSnapshot{0U, 0U, 0U, 1U, 0U, raw_drive_limit, 0U,
+                                                      false, false, false, false});
+  REQUIRE(executor.bind_to_current_thread());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A different thread cannot borrow the bound owner's authority even while no turn is active.
+  std::optional<model::DomainError> wrong_owner_error;
+  bool wrong_owner_succeeded = false;
+  std::thread wrong_owner{[&] {
+    const auto result = executor.request_owner_fault(requested_fault());
+    wrong_owner_succeeded = result.has_value();
+    if (!result) {
+      wrong_owner_error.emplace(result.error());
+    }
+  }};
+  wrong_owner.join();
+  CHECK_FALSE(wrong_owner_succeeded);
+  REQUIRE(wrong_owner_error.has_value());
+  CHECK(wrong_owner_error.value() ==
+        model::DomainError::at_field(model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Binding alone is insufficient: the seam is valid only inside the run-to-completion handler.
+  const auto outside_turn = executor.request_owner_fault(requested_fault());
+  REQUIRE_FALSE(outside_turn);
+  CHECK(outside_turn.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::ExecutorReentryDetected,
+                                     "executor_owner_fault"));
+  CHECK(executor.snapshot() ==
+        runtime::QueueSnapshot{0U, 0U, 0U, 1U, 0U, raw_drive_limit, 0U, false, false, true, false});
+  CHECK_FALSE(executor.terminal_error().has_value());
+  REQUIRE(executor.release_from_current_thread());
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
