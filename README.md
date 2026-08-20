@@ -1,18 +1,21 @@
 # AEGIS
 
 > **Purpose:** Give a new contributor the shortest safe path to understand the M1 domain kernel and
-> in-progress M2 deterministic runtime without mistaking either for a connected trading system.
+> locally complete M2 deterministic runtime without mistaking either for a connected trading system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
-is implementing a bounded serialized owner, recorded fixture playback, transactional market books,
-and Ready-only strategy dispatch. The reference slice remains deliberately narrow: one Deribit
-testnet account alias, one BTC inverse perpetual, one bot, and no exchange connectivity.
+adds a bounded serialized owner, recorded fixture playback, transactional market books, and
+Ready-only strategy dispatch. The reference slice remains deliberately narrow: one Deribit
+testnet account alias, one BTC inverse perpetual, one active subscribed bot, and no exchange
+connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
 Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md)
-and the in-progress [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md).
+and the locally complete [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md). After M1
+merged, the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. M2 still
+has no pull request and makes no integration claim.
 
 ## What M1 provides
 
@@ -35,6 +38,22 @@ without credentials, networking or a runtime event loop.
 M1 does not contain a serialized market runtime, order-book processing, strategy callbacks, risk or
 OMS behavior, exchange sessions, credentials, sockets, or order transmission. Those capabilities
 belong to later milestone gates.
+
+## What M2 provides
+
+These are credential-free in-process runtime capabilities. They add no venue session, network,
+credential, order, risk, OMS, or transmission boundary.
+
+- A fixed-capacity producer-safe ingress and one serialized mutable owner, with deterministic and
+  dedicated drivers, explicit capacity/closure decisions, queue age, and ordered source-loss fences.
+- Strict recorded-frame parsing and policy-backed normalization into immutable source-attributed
+  market commands.
+- Fixed-depth transactional books with explicit `Synchronizing`, `Ready`, `Stale`, and `Invalid`
+  states; only a complete valid snapshot can recover readiness.
+- Canonical subscription dispatch, separate state and market callbacks, read-only Ready book views,
+  bounded diagnostics, re-entry rejection, and exact pre-commit callback/trace reservation.
+- Canonical `AEGISRTS` replay evidence. The complete M2 scenario reproduces all 28 callbacks and 71
+  trace records byte-for-byte under two manual runs and the dedicated driver.
 
 ## Quick start
 
@@ -79,12 +98,16 @@ cmake --workflow --preset verify-tsan
 cmake --workflow --preset benchmark
 python3 tools/run_benchmarks.py
 python3 tools/validate_benchmark_evidence.py
+python3 tools/run_benchmarks.py --suite m2
+python3 tools/validate_benchmark_evidence.py --suite m2
 ```
 
 The benchmark runner first rebuilds its Release target, then writes raw timing output and a context
-manifest. The validator independently checks their workload identity, build mode, hashes, and Git
-provenance. M1 introduces no product-performance workload, so this remains the M0 runner-calibration
-benchmark; neither command nor its timing is a claim of production latency.
+manifest. The validator independently checks workload identity, units, samples, fingerprints, build
+mode, hashes, and Git provenance. The no-argument commands retain the M0 calibration contract; the
+explicit M2 suite runs the executor, callback, and complete market-owner workloads. An M2 result is
+only a `REF-MAC-01` qualification when every required host-control field is truthfully set and
+validated; otherwise it is smoke evidence.
 
 The build contains no exchange session, order-transmission capability, credential lookup, socket,
 or production endpoint. The first market and account assumptions are described in

@@ -281,8 +281,8 @@ For the first implementation, one dedicated thread and serialized executor owns 
 #### In-memory order books
 
 **Status:** In-memory single-owner working state and the M2 synchronization behavior below are
-**Accepted**. The runtime policy fixes a bounded retained depth for one process; later venue depth
-selection and historical retention remain **Open**.
+**Accepted and implemented**. The runtime policy fixes a bounded retained depth for one process;
+later venue depth selection and historical retention remain **Open**.
 
 For every subscribed venue/instrument that requires order-book data, the normalized market-data core maintains the current working book in memory. A venue adapter normally supplies an initial snapshot followed by ordered incremental updates.
 

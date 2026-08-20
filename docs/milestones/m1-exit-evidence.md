@@ -6,8 +6,10 @@
 
 **Status:** The M1 implementation is complete on `codex/m1-domain-kernel` through code commit
 `d9f015b`. Normal, formatting, ASan+UBSan, TSan, release, and benchmark-evidence regression checks
-passed locally on 2026-08-18. Remote CI, review, and integration into `dev` remain pending; M1 is not
-closed or merged.
+passed locally on 2026-08-18. PR #7 then passed all seven remote checks and merged the unchanged
+review head `796321825d701f3add83af104b7924eb2826fd07` into `dev` as
+`6287e01be33300e0e7ea24c76dd64a869c67612b` on 2026-08-19. GitHub records no approving review, so
+M1 is integrated but is not claimed formally closed under an approval-based closure gate.
 
 The code commit named above is the exact implementation snapshot covered by the recorded local
 matrix. Later evidence or documentation-only commits do not move that boundary; any implementation
@@ -19,7 +21,7 @@ exit conditions.
 ## How to read this record
 
 Scope rows connect each promise to implementation and tests. Exit-gate rows summarize the strongest
-evidence currently available, while the final section keeps remote CI, review and merge facts
+evidence currently available, while the final section keeps remote CI, review, and merge facts
 explicitly separate from local proof.
 
 ## Scope evidence
@@ -41,7 +43,7 @@ explicitly separate from local proof.
 |---|---|---|
 | `M1-E01` Invalid identifiers, metadata, conversions, and hierarchy references fail deterministically | Identifier grammar tests; metadata validation and unit tests; exact conversion failures; organization, subscription, route, and atomic startup negative cases assert stable error codes, fields, and positions. | Local pass in all normal and sanitizer suites |
 | `M1-E02` Bot identity is immutable and subscriptions grant no trading permission | `Organization` exposes derived `BotAttribution`; peer-firm tests retain firm/desk attribution; cross-firm account routing is rejected; “a subscription never creates or enables an execution route” passes; the reference route is disabled. | Local pass |
-| `M1-E03` Identical inputs reproduce IDs and traces without weakening production identity | Fixed deterministic namespace/counter inputs reproduce the same 24-byte order IDs. Equivalent ordered/reordered reference configuration produces equal trace records, 1,285 canonical bytes, and the same digest. Production entropy success and fail-closed paths are tested independently. | Local pass; remote platform matrix pending |
+| `M1-E03` Identical inputs reproduce IDs and traces without weakening production identity | Fixed deterministic namespace/counter inputs reproduce the same 24-byte order IDs. Equivalent ordered/reordered reference configuration produces equal trace records, 1,285 canonical bytes, and the same digest. Production entropy success and fail-closed paths are tested independently. | Local pass and seven-check remote platform matrix pass |
 | `M1-E04` Configuration and metadata revisions are available to later evidence | `ConfigurationProvenance` owns the overall fingerprint and configuration, organization, strategy, subscription, route, and per-instrument metadata revisions. Every M1 trace record copies the applicable provenance. Later admission/event types must consume this established contract when introduced. | M1 contract and trace proof complete |
 | `M1-E05` Arithmetic boundaries, rounding direction, and overflow are covered | Tests cover strict parsing, all signed rounding directions, ties-to-even, exact/misaligned increments, quantization, min/max coefficients, rejected unsigned narrowing, scale overflow, multiply/divide overflow, division by zero, and invalid rounding values. | Local pass |
 
@@ -93,13 +95,14 @@ M1 defines no product-performance workload or latency target: the first named pr
 belong to M2. The benchmark commands above only regress `BENCH-M0-HARNESS-001` and its evidence
 plumbing; their timing is not M1 or production latency evidence.
 
-## Pending remote and integration evidence
+## Remote and integration evidence
 
-M1 remains open until all of the following are recorded:
-
-- a feature-branch push and pull request with `dev` verified as its base;
-- passing remote formatting, GCC, Clang, AppleClang, ASan+UBSan, TSan, and benchmark-evidence jobs;
-- review approval and merge into `dev`;
-- the final PR, CI run, and merge commit added to this record.
-
-No remote run, review, or merge is claimed by this document.
+- PR #7 used `codex/m1-domain-kernel` at
+  `796321825d701f3add83af104b7924eb2826fd07` with `dev` as its base.
+- Remote clang-format, GCC, Clang, AppleClang, ASan+UBSan, TSan, and benchmark-evidence jobs all
+  completed successfully on 2026-08-19.
+- The PR merged into `dev` at 2026-08-19 18:34:32 UTC as
+  `6287e01be33300e0e7ea24c76dd64a869c67612b`.
+- GitHub records no approving review. The only recorded review is a non-approving automated comment
+  submitted after merge. Review approval therefore remains absent if it is retained as a formal
+  milestone-closure requirement.

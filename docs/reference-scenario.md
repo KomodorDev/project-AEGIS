@@ -48,9 +48,10 @@ milestone must obtain revisioned authoritative metadata and validate the contrac
 
 The strategy is intentionally deterministic and contains no alpha logic.
 
-Its default mode is observe-only. Every callback appends one trace record containing the callback
-ordinal, readiness state, normalized best bid/ask fields when coherent, and relevant metadata/book
-revisions. Non-ready input never creates an order intent. In fake-backed submission tests, the test
+Its default mode is observe-only. Every callback produces one runtime-owned canonical trace record
+containing the callback ordinal, readiness state, normalized best bid/ask fields when coherent, and
+relevant metadata/book revisions. Non-ready input never creates an order intent. In fake-backed
+submission tests, the test
 driver may inject one `SubmitReferenceIntent` command: the strategy submits the fixed M3 reference
 request on the next `Ready` callback exactly once and records all later callbacks without submitting
 again. M3 owns the request's supported order vocabulary and economics.
@@ -58,7 +59,7 @@ again. M3 owns the request's supported order vocabulary and economics.
 | Stage | Behavior |
 |---|---|
 | M1 | Its immutable configuration and organizational attribution validate or fail as a unit. |
-| M2 | A recorded coherent top-of-book event produces a deterministic digest; non-ready state produces no decision. |
+| M2 | Credential-free recorded snapshots/deltas produce deterministic state/market callbacks and `AEGISRTS`; non-ready state exposes no book or decision. |
 | M3–M5 | The injected one-shot command requests one fixed fake-backed order intent through the canonical route/risk/OMS path. |
 | M6–M7 | Live public and private testnet facts may be observed, but the constructed runtime has no transmission capability. |
 | M8 | One explicitly armed testnet route may exercise a bounded submit/cancel lifecycle. |
@@ -70,6 +71,18 @@ again. M3 owns the request's supported order vocabulary and economics.
 No stage silently retries an ambiguous submission. A market-data subscription never implies
 execution permission. This table fixes externally visible scenario behavior, not the deferred M3–M11
 protocol, state-machine, recovery, or operator-interface designs owned by those milestones.
+
+## M2 deterministic replay
+
+The implemented M2 scenario drives the normalized Deribit source through snapshot, delta, exact
+duplicate, older input, gap, same-sequence conflict, checksum failure, metadata mismatch, malformed
+input, staleness, session reset, capacity loss, and snapshot-only recovery. Two manual runs and one
+dedicated-owner run reproduce the same 28 complete callback observations and 71 canonical runtime
+trace records. The schema-one stream is 29,610 bytes with digest
+`e63b89b8c3a826fd1104f9e9949364606be5efbeedc112cb980260ccb70fda0b`.
+
+The configured scenario remains single-firm. Its extra unrelated registered bot receives no
+callback, while separate BotRuntime tests preserve canonical multi-firm dispatch support.
 
 ## Account boundary
 

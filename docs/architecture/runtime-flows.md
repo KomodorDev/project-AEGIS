@@ -3,7 +3,8 @@
 > **Purpose:** Show how accepted serialized ownership, M2 market validity, and later order/risk
 > boundaries sequence complete work without implying hidden thread hops or partial state.
 
-**Status: Accepted invariants with illustrative participants.** M2 fixes the ingress and market-state
+**Status: Implemented M2 market flow with illustrative later participants.** M2 implements the
+recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic, and replay
 branches; order, risk, private-session, and recovery details remain proposed or open.
 
 Return to the [architecture overview](../architecture.md) or read
@@ -52,7 +53,7 @@ sequenceDiagram
             M->>D: Invalid state transition when active source integrity may be lost
         else Frame is valid
             P->>M: Complete NormalizedMarketUpdate
-            M->>M: Validate full scratch candidate and reserve critical traces
+            M->>M: Classify full scratch candidate and preflight exact traces/callbacks
 
             alt Update is invalid, stale or discontinuous
                 M->>D: Sanitized non-ready state transition only
@@ -77,6 +78,11 @@ sequenceDiagram
 State transitions use a separate `on_market_state` callback and never carry a tradable book. M2's
 `BotContext` has no order capability. M3 will add the submission boundary shown in Flow 2 without
 adding an executor hop inside a callback.
+
+`MarketRuntime` composes this flow without a producer-side mutation path. Both the manual and
+dedicated drivers invoke the same turn processor; the M2 reference scenario proves that their copied
+callback vectors, structured diagnostics, `AEGISRTS` records, canonical bytes, and digest agree
+exactly.
 
 ## 2. Order Submission
 

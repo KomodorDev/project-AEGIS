@@ -84,12 +84,12 @@ Prepare the workshop before building the robot: choose the tools, make automatic
 
 ## M1 — Domain Kernel and Immutable Provenance
 
-**Implementation status (2026-08-18):** Implemented as a coherent multi-commit slice on
-`codex/m1-domain-kernel`. [M1 exit evidence](milestones/m1-exit-evidence.md) records the local proof;
-remote CI, review, and integration into `dev` remain pending, so the milestone is not closed.
-
-This status reports delivered code separately from milestone closure: implementation can be locally
-complete while remote and integration evidence is still outstanding.
+**Integration status (2026-08-20):** Implemented on `codex/m1-domain-kernel` and merged into `dev`
+by PR #7 as `6287e01be33300e0e7ea24c76dd64a869c67612b`. The reviewed head remained the pinned
+`796321825d701f3add83af104b7924eb2826fd07`, and all seven remote checks passed. [M1 exit
+evidence](milestones/m1-exit-evidence.md) records the local and remote proof. GitHub records no
+approving review, so M1 is integrated but is not claimed formally closed under an approval-based
+closure gate.
 
 ### Outcome
 
@@ -122,10 +122,12 @@ Give everything a clear name, label and measuring stick. The robot must never co
 
 ## M2 — Deterministic Runtime and Market-State Validity
 
-**Status:** In progress on the temporary stack recorded in the
-[M2 exit-evidence file](milestones/m2-exit-evidence.md). The executor and market-validity contracts
-are accepted in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
-[ADR-0007](decisions/0007-market-state-validity.md); implementation and exit evidence remain open.
+**Status:** Local implementation and exit-gate evidence are complete on the rebased branch recorded
+in the [M2 exit-evidence file](milestones/m2-exit-evidence.md). The executor and market-validity
+contracts are accepted in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
+[ADR-0007](decisions/0007-market-state-validity.md). M1 has merged, and the recorded M2-only commits
+were deliberately rebased onto its `dev` merge commit. M2 still has no pull request; remote CI,
+review, and integration remain pending.
 
 ### Outcome
 

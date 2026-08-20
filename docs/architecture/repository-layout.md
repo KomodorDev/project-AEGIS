@@ -1,11 +1,11 @@
 # Repository Layout
 
-> **Purpose:** Describe the implemented M1 and accepted M2 source/test ownership boundaries, allowed
+> **Purpose:** Describe the implemented M1 and M2 source/test ownership boundaries, allowed
 > dependency directions, and where later components should grow without empty scaffolding.
 
-**Status:** The directories and dependency rules used through M1 are implemented. M2 accepts the
-`runtime`, `strategy`, expanded `market_data`, and companion runtime-trace boundaries while their
-implementation is in progress. Areas named for later milestones remain **Proposed**. Runtime ownership
+**Status:** The directories and dependency rules used through M2 are implemented. Strategy and bot
+contracts live with their serialized owner under `runtime`; there is no separate empty `strategy`
+area. Areas named for later milestones remain **Proposed**. Runtime ownership
 follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md); M1 value and provenance
 boundaries follow [ADR-0004](../decisions/0004-domain-value-contracts.md) and
 [ADR-0005](../decisions/0005-immutable-configuration-provenance.md); M2 runtime and market ownership
@@ -25,7 +25,7 @@ The source layout should make it easy to answer three questions:
 Directories are added only when the first real implementation or test needs them. Empty scaffolding
 and `.gitkeep` files do not establish useful architecture.
 
-## Implemented M1 Source Shape
+## Implemented M1–M2 Source Shape
 
 Headers shared across repository targets live under `include/aegis`; implementations mirror their
 owning area under `src/aegis`. This is a source-build boundary, not a stable installed API or ABI.
@@ -37,6 +37,7 @@ include/aegis/                 src/aegis/
 ├── market_data/              ├── market_data/
 ├── model/                    ├── model/
 ├── organization/             ├── organization/
+├── runtime/                  ├── runtime/
 ├── trace/                    ├── trace/
 └── version.hpp               └── version.cpp
 ```
@@ -48,18 +49,12 @@ include/aegis/                 src/aegis/
 | `market_data` | Subscription declarations plus M2 recorded fixture, normalized update/event, transactional book, and validity contracts. It contains no venue networking. |
 | `execution` | M1 execution-route declarations and validation only. Order requests, authorization, risk, OMS, and transmission begin in M3. |
 | `configuration` | Atomic startup validation, canonical `AEGISCFG` encoding, SHA-256 identity, and revision provenance across the M1 sections. |
+| `runtime` | M2 runtime policy, bounded admission, deterministic/dedicated drivers, composition, diagnostics, configured bot/strategy ownership, Ready/state callbacks, and capability-limited bot context. Order submission begins in M3. |
 | `trace` | Bounded M1 `AEGISTRS` provenance and companion M2 `AEGISRTS` runtime evidence; external reporting and persistence are excluded. |
 
 Component-owned types stay with their component. A normalized market event will belong to
 `market_data`, an order request will belong to `execution`, and a risk mode will belong to `risk`.
 A type moves to `model` only when it is genuinely neutral and shared.
-
-The following M2 areas are accepted and being implemented:
-
-| M2 area | Accepted responsibility |
-|---|---|
-| `strategy` | M2 strategy contract, configured bot runtime, Ready/state callbacks, and capability-limited bot context. Order submission begins in M3. |
-| `runtime` | M2 bounded admission, deterministic/dedicated drivers, lifecycle, and composition. Market validity remains in `market_data`. |
 
 The expected later areas remain proposed:
 
@@ -88,10 +83,11 @@ component's immutable API and mutate its state.
   not depend on venue implementations.
 - Strategies consume normalized events and submit through a bot-bound execution boundary. They do
   not call adapters, sessions, or sockets.
-- `strategy` consumes `market_data`, `model`, `organization`, and immutable provenance; it does not
-  depend on `execution` until M3 deliberately adds a bot-bound submission capability.
-- `runtime` is the composition root and may depend on subsystem implementations. Subsystems do
-  not depend on `runtime` to find one another.
+- The strategy interface and bot context are owned by `runtime`: they consume `market_data`,
+  `model`, `organization`, and immutable provenance but do not expose `execution` in M2.
+- `runtime` is the composition root and may depend on subsystem implementations. Lower-level
+  subsystems do not depend on the composition root to find one another; the narrow market-turn
+  preflight authority is an injected interface owned by `market_data`.
 - Control-plane and data-plane code exchange immutable values or snapshots. They do not share
   mutable domain objects.
 - Cross-subsystem state access uses explicit ownership boundaries and stable identifiers, not
@@ -103,7 +99,7 @@ component's immutable API and mutate its state.
 Avoid generic directories such as `common`, `utils`, or `core`. A reusable helper remains with the
 subsystem that gives it meaning until there is evidence of a genuinely independent abstraction.
 
-## Implemented M1 Test Shape
+## Implemented M1–M2 Test Shape
 
 ```text
 tests/
@@ -114,6 +110,7 @@ tests/
 │   ├── market_data/
 │   ├── model/
 │   ├── organization/
+│   ├── runtime/
 │   └── trace/
 └── deterministic_scenarios/
 ```
@@ -121,8 +118,8 @@ tests/
 | Area | Coverage |
 |---|---|
 | `support` | Reusable accepted reference and two-firm configuration builders. |
-| `unit` | Deterministic behavior, boundary failures, compile-time type separation, and canonical golden vectors within one M1 area. |
-| `deterministic_scenarios` | The complete reference configuration and its bounded provenance trace, driven without credentials, clocks, transports, or exchange access. |
+| `unit` | Deterministic behavior, boundary failures, compile-time type separation, ownership checks, transition matrices, and canonical golden vectors within one implemented area. |
+| `deterministic_scenarios` | Complete M1 configuration/provenance replay plus the M2 recorded-market validity script under deterministic and dedicated owners, with no credentials, transports, or exchange access. |
 | `venue_contract` (**Proposed**) | Future parsing and encoding against sanitized credential-free fixtures. |
 | `integration` (**Proposed**) | Future boundaries such as normalization-to-strategy and risk-to-OMS admission. |
 
@@ -131,8 +128,8 @@ contain a live credential, and no test may submit a real order without explicit 
 
 ## Deliberately Open
 
-M0 selected CMake and the test/measurement baseline; M1 added no third-party runtime dependency. The
-following choices still wait for concrete milestone requirements:
+M0 selected CMake and the test/measurement baseline; M1–M2 add no third-party product runtime
+dependency. The following choices still wait for concrete milestone requirements:
 
 - runtime networking, asynchronous-I/O, external serialization, or persistence libraries;
 - the long-term installed/public API boundary beyond the current cross-target `include/aegis`
@@ -142,5 +139,5 @@ following choices still wait for concrete milestone requirements:
 - generated code, persistence, or migration directories;
 - placement and timing of realized and unrealized P&L calculations.
 
-Canonical M1 configuration and trace bytes are internal deterministic evidence formats; they do not
-select a networking, storage, or general-purpose serialization framework.
+Canonical M1 configuration/provenance and M2 runtime trace bytes are internal deterministic evidence
+formats; they do not select a networking, storage, or general-purpose serialization framework.

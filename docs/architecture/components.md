@@ -16,7 +16,9 @@ This document expands the [architecture overview](../architecture.md). It descri
 
 ## Logical Component View
 
-**Status:** The plane boundary, serialized data-plane ownership and mandatory order path are **Accepted**. Component names and exact internal boundaries are **Proposed**. The diagram is **Illustrative** and does not imply queues, processes or thread hops.
+**Status:** The plane boundary, serialized ownership, and M2 ingress/market/dispatch/bot boundaries are
+**Accepted and implemented**. The later order path is **Accepted** while its component APIs remain
+**Proposed**. The diagram is **Illustrative** and does not imply queues, processes, or thread hops.
 
 ```mermaid
 flowchart LR
@@ -85,6 +87,11 @@ flowchart LR
 
 Arrows show logical flow or dependency, not elapsed time. The distinction between synchronous calls and asynchronous events is defined in [Runtime Flows](runtime-flows.md).
 
+M2 implements the credential-free path from recorded fixture ingress through the bot runtime and
+strategy. Venue/account sessions, native adapters, sockets, order submission, risk, OMS, inventory,
+and transmission remain later milestones; their presence in the diagram does not place those
+capabilities in the M2 build.
+
 The view preserves these invariants:
 
 - One serialized executor on one dedicated thread owns all mutable v1 data-plane state.
@@ -99,7 +106,9 @@ The view preserves these invariants:
 
 ## Conceptual Domain and Runtime Ownership
 
-**Status:** Organizational and bot relationships are **Accepted**. The adapter/session topology is **Proposed**. The diagram is **Illustrative**: composition marks conceptual lifecycle ownership, not C++ pointer or storage semantics.
+**Status:** Organizational relationships and configured M2 bot-runtime ownership are **Accepted and
+implemented**. The adapter/session topology is **Proposed**. The diagram is **Illustrative**:
+composition marks conceptual lifecycle ownership, not C++ pointer or storage semantics.
 
 ```mermaid
 classDiagram
