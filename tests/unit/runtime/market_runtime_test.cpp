@@ -819,6 +819,66 @@ TEST_CASE("market runtime contains malformed input and recovers on a later valid
 }
 
 // --------------------------------------------------------
+// A zero source sequence is contained as absent identity and cannot commit or poison recovery.
+TEST_CASE("market runtime rejects zero source sequence before book publication",
+          "[runtime][market_runtime][m2][sequence]") {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The syntactically valid zero sequence yields only a sanitized Invalid state callback.
+  RuntimeHarness harness{4U};
+  bind_and_bootstrap(harness);
+  require_accepted(
+      harness.runtime(),
+      attempt("AEGISMD|1|source.deribit-btc-perpetual|snapshot|0|none|1000|1|ok:zero|2|"
+              "B,30000.5,2|A,30001.0,3"));
+  const auto rejected_turn = harness.runtime().run_one();
+  REQUIRE(rejected_turn);
+  REQUIRE(rejected_turn.value().has_value());
+  REQUIRE(harness.observations().size() == 2U);
+  CHECK(harness.observations()[1U].kind == ObservedCallbackKind::State);
+  CHECK(harness.observations()[1U].readiness == market_data::MarketReadiness::Invalid);
+  CHECK_FALSE(harness.observations()[1U].book_generation.has_value());
+  CHECK_FALSE(harness.observations()[1U].book_revision.has_value());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A later valid snapshot creates generation one from untouched book storage.
+  require_accepted(harness.runtime(), attempt(snapshot_frame()));
+  const auto recovery_turn = harness.runtime().run_one();
+  REQUIRE(recovery_turn);
+  REQUIRE(recovery_turn.value().has_value());
+  REQUIRE(harness.observations().size() == 4U);
+  CHECK(harness.observations()[2U].kind == ObservedCallbackKind::State);
+  CHECK(harness.observations()[2U].readiness == market_data::MarketReadiness::Ready);
+  CHECK(harness.observations()[3U].kind == ObservedCallbackKind::Market);
+  CHECK(harness.observations()[3U].book_generation == model::BookGeneration::initial());
+  CHECK(harness.observations()[3U].book_revision == model::BookRevision::initial());
+  CHECK(harness.observations()[3U].best_bid == price("30000.5"));
+  CHECK(harness.observations()[3U].best_ask == price("30001.0"));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Cold evidence preserves the semantic rejection and only the later valid book identity.
+  const auto evidence = close_and_collect(harness.runtime());
+  REQUIRE(evidence.diagnostics.size() == 1U);
+  CHECK(evidence.diagnostics.front().kind == runtime::RuntimeDiagnosticKind::MalformedInput);
+  CHECK(evidence.diagnostics.front().fields.detail_code ==
+        (0x00020000U | static_cast<std::uint32_t>(model::DomainErrorCode::InvalidMarketEvent)));
+  REQUIRE(evidence.sources.size() == 1U);
+  CHECK(evidence.sources.front().readiness == market_data::MarketReadiness::Ready);
+  REQUIRE(evidence.sources.front().book_identity.has_value());
+  CHECK(evidence.sources.front().book_identity->generation() == model::BookGeneration::initial());
+  CHECK(evidence.sources.front().book_identity->revision() == model::BookRevision::initial());
+  CHECK(evidence.sources.front().last_source_sequence == model::SequenceNumber{100U});
+  REQUIRE(evidence.trace_records.size() == 9U);
+  CHECK(evidence.trace_records[2U].fields().input_disposition ==
+        trace::RuntimeInputDisposition::MalformedRejected);
+  CHECK(evidence.trace_records[5U].fields().input_disposition ==
+        trace::RuntimeInputDisposition::SnapshotApplied);
+  CHECK(evidence.trace_records[8U].kind() == trace::RuntimeTraceEventKind::MarketCallback);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 // Attributable overload is an ordered source-loss fence, not a silently dropped market update.
 TEST_CASE("market runtime orders a capacity fence after older accepted work",
           "[runtime][market_runtime][m2][capacity]") {

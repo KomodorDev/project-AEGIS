@@ -548,7 +548,7 @@ TEST_CASE("market continuity policies are deterministic",
   }
 
   SECTION("newer-session delta resets to synchronizing without continuity") {
-    auto delta = fixture.update(market_data::MarketUpdateKind::Delta, 2U, 1U, 0U,
+    auto delta = fixture.update(market_data::MarketUpdateKind::Delta, 2U, 1U, std::nullopt,
                                 {{market_data::BookSide::Bid, price("100"), quantity("2")}}, 2U);
     const auto outcome = fixture.process(std::move(delta), 2U, 3U, 300U);
     REQUIRE(outcome);

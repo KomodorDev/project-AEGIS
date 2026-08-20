@@ -126,8 +126,9 @@ Give everything a clear name, label and measuring stick. The robot must never co
 in the [M2 exit-evidence file](milestones/m2-exit-evidence.md). The executor and market-validity
 contracts are accepted in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
 [ADR-0007](decisions/0007-market-state-validity.md). M1 has merged, and the recorded M2-only commits
-were deliberately rebased onto its `dev` merge commit. M2 still has no pull request; remote CI,
-review, and integration remain pending.
+were deliberately rebased onto its `dev` merge commit. At local evidence capture M2 had no pull
+request; live publication state belongs to GitHub, while remote CI, review, and integration remain
+pending.
 
 ### Outcome
 

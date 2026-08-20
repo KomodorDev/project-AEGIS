@@ -413,6 +413,7 @@ model::Result<std::optional<TurnReport>> MarketRuntime::run_one() {
 // --------------------------------------------------------
 // Progress through the one-turn wrapper so the last complete queue-age report is never skipped.
 model::Result<DriveReport> MarketRuntime::drive(std::size_t maximum_turns) {
+
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate ownership and recursion before a nonzero request can partially advance the queue.
   auto validation = deterministic_driver_->drive(0U);

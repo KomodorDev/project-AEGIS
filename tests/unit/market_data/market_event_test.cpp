@@ -369,9 +369,30 @@ TEST_CASE("normalized updates derive a deterministic timing-independent payload 
 }
 
 // --------------------------------------------------------
-// Every malformed enum, financial shape, duplicate key, and bound breach must fail before hashing.
+// Primitive sequence absence, malformed content, duplicate keys, and bound breaches fail before
+// hashing can publish semantic identity.
 TEST_CASE("normalized updates reject invalid shape and preserve stable errors",
           "[market_data][market_event]") {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Zero represents absent protocol sequence identity and cannot enter normalized market state.
+  auto zero_source_fields = update_fields(representative_changes());
+  zero_source_fields.source_sequence = model::SequenceNumber{0U};
+  const auto zero_source =
+      market_data::NormalizedMarketUpdate::create(std::move(zero_source_fields), 8U);
+  REQUIRE_FALSE(zero_source);
+  CHECK(zero_source.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::InvalidMarketEvent,
+                                     "market_update.source_sequence"));
+
+  auto zero_predecessor_fields = update_fields(representative_changes());
+  zero_predecessor_fields.predecessor_sequence = model::SequenceNumber{0U};
+  const auto zero_predecessor =
+      market_data::NormalizedMarketUpdate::create(std::move(zero_predecessor_fields), 8U);
+  REQUIRE_FALSE(zero_predecessor);
+  CHECK(zero_predecessor.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::InvalidMarketEvent,
+                                     "market_update.predecessor_sequence"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Unknown update and integrity enum values cannot silently acquire protocol meaning.

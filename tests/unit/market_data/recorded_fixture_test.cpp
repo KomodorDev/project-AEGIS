@@ -533,6 +533,22 @@ TEST_CASE("syntax failures stay separate from normalized market validation",
                                      "market_update.changes.quantity", 0U));
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Grammar may parse zero, but normalized source continuity treats it as absent identity.
+  const auto zero_source =
+      normalize_frame("AEGISMD|1|source.deribit.public|snapshot|0|none|2|1|ok:x|1|B,100,1");
+  REQUIRE_FALSE(zero_source);
+  CHECK(zero_source.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::InvalidMarketEvent,
+                                     "market_update.source_sequence"));
+
+  const auto zero_predecessor =
+      normalize_frame("AEGISMD|1|source.deribit.public|delta|2|0|3|1|ok:x|1|B,100,1");
+  REQUIRE_FALSE(zero_predecessor);
+  CHECK(zero_predecessor.error() ==
+        model::DomainError::at_field(model::DomainErrorCode::InvalidMarketEvent,
+                                     "market_update.predecessor_sequence"));
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Duplicate side/price keys are valid grammar but one invalid semantic normalized update.
   const auto duplicate =
       normalize_frame("AEGISMD|1|source.deribit.public|delta|2|1|3|1|ok:x|2|B,100,1|B,100,2");

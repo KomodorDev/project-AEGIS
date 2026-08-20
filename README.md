@@ -14,8 +14,9 @@ The accepted system design is in [the architecture overview](docs/architecture.m
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
 Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md)
 and the locally complete [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md). After M1
-merged, the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. M2 still
-has no pull request and makes no integration claim.
+merged, the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. The
+local evidence record was sealed before publication; live review state belongs to GitHub, and M2
+makes no integration claim.
 
 ## What M1 provides
 

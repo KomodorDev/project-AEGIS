@@ -4,14 +4,16 @@
 > exit-gate proof, named workload evidence, and conditions that prevent premature integration claims.
 
 **Status:** Local M2 implementation and exit-gate proof are complete on
-`codex/m2-deterministic-runtime` through rebased implementation and benchmark commit
-`a3c090819f219681bfe3b903565c87490028ccbf`. Normal, formatting, ASan+UBSan, TSan, release,
-deterministic replay, and M0/M2 benchmark-evidence checks passed locally. The M2 timing bundle is
-smoke evidence and makes no `REF-MAC-01` threshold claim.
+`codex/m2-deterministic-runtime` through the exact replay anchor
+`a3c090819f219681bfe3b903565c87490028ccbf` plus the post-audit source-sequence hardening in the
+current branch range. Normal, formatting, ASan+UBSan, TSan, release, deterministic replay, and
+M0/M2 benchmark-evidence checks passed locally. The M2 timing bundle is smoke evidence and makes no
+`REF-MAC-01` threshold claim.
 
 M1 merged with its reviewed head unchanged. On 2026-08-20, the eleven original M2 delivery commits
-were deliberately rebased onto M1's `dev` merge commit. No M2 pull request has been opened; remote
-CI, review, and integration remain pending. M2 is locally complete but is not integrated or closed.
+were deliberately rebased onto M1's `dev` merge commit. At local evidence capture, no M2 pull
+request had been opened. Live publication state is external to this pinned record; remote CI,
+review, and integration remain pending. M2 is locally complete but is not integrated or closed.
 
 ## Dependency and rebase record
 
@@ -99,6 +101,12 @@ The clean pre-rebase implementation/benchmark revision
 - strict warning-as-error builds and repository formatting/diff checks; and
 - M0 calibration plus M2 workload generation and independent evidence validation.
 
+The post-audit branch additionally rejects zero source and predecessor sequence sentinels before
+book state, proves fixture/domain separation, and contains a zero-sequence frame at the composed
+runtime boundary. That current branch passed 173/173 tests, comprising 170 unit cases and three
+deterministic scenarios, under normal, ASan+UBSan, and TSan profiles; formatting and diff checks also
+passed.
+
 The M2 scenario alone executes 471 assertions under each normal/sanitized profile. The reproducible
 benchmark commands are:
 
@@ -140,7 +148,7 @@ sessions; M8 owns transmission.
   exactly `796321825d701f3add83af104b7924eb2826fd07`.
 - The eleven original M2 delivery commits were deliberately replayed onto that merge commit with an
   exact `git range-diff`; M1's branch was not modified.
-- M2 still has no pull request.
-- Local implementation and exit checks are complete; remote CI, final review, and merge evidence
-  remain pending.
+- At local evidence capture, M2 had no pull request; live publication state belongs to GitHub.
+- Local implementation and exit checks are complete; remote CI, final review, integration, and
+  merge evidence remain pending.
 - Any M2 pull request must target `dev`; further base movement must be reconciled explicitly first.

@@ -263,6 +263,18 @@ model::Result<NormalizedMarketUpdate>
 NormalizedMarketUpdate::create(NormalizedMarketUpdateFields fields, std::size_t maximum_changes) {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Reject the primitive absence sentinel before continuity or payload identity can acquire
+  // meaning.
+  if (fields.source_sequence.value() == 0U) {
+    return model::Result<NormalizedMarketUpdate>::failure(
+        invalid_event(model::DomainErrorCode::InvalidMarketEvent, "market_update.source_sequence"));
+  }
+  if (fields.predecessor_sequence.has_value() && fields.predecessor_sequence->value() == 0U) {
+    return model::Result<NormalizedMarketUpdate>::failure(invalid_event(
+        model::DomainErrorCode::InvalidMarketEvent, "market_update.predecessor_sequence"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Validate closed enums and the immutable bound before interpreting any change content.
   if (!is_valid(fields.kind)) {
     return model::Result<NormalizedMarketUpdate>::failure(
@@ -321,6 +333,7 @@ NormalizedMarketUpdate::create(NormalizedMarketUpdateFields fields, std::size_t 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
+// --------------------------------------------------------
 // Validate one sanitized transition profile without granting strategy-publication authority.
 model::Result<void> validate_market_state_transition(const MarketStateEventFields& fields) {
 
