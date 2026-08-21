@@ -73,6 +73,46 @@ struct SequenceNumberTag {
 };
 
 // ########################################################################
+// Runtime and market ordinals are one-based and retain subsystem-specific exhaustion errors while
+// sharing one checked representation.
+#define AEGIS_ORDINAL_TAG(TagName, Field, ExhaustionCode)                                          \
+  struct TagName {                                                                                 \
+    static constexpr std::string_view field = Field;                                               \
+    static constexpr DomainErrorCode exhaustion_code = DomainErrorCode::ExhaustionCode;            \
+  }
+
+// ########################################################################
+// Configured market sources receive a canonical one-based runtime-policy position.
+AEGIS_ORDINAL_TAG(MarketSourceOrdinalTag, "market_source_ordinal", ExecutorCounterExhausted);
+
+// ########################################################################
+// Every ordinary admission attempt receives a one-based position, including rejected attempts.
+AEGIS_ORDINAL_TAG(AdmissionOrdinalTag, "admission_ordinal", ExecutorCounterExhausted);
+
+// ########################################################################
+// Only accepted work receives a distinct one-based local receive sequence.
+AEGIS_ORDINAL_TAG(ReceiveSequenceTag, "receive_sequence", ExecutorCounterExhausted);
+
+// ########################################################################
+// Completed owner turns receive positions independent from admission attempts.
+AEGIS_ORDINAL_TAG(TurnOrdinalTag, "turn_ordinal", ExecutorCounterExhausted);
+
+// ########################################################################
+// Strategy callbacks use a separate sequence so their order cannot be confused with owner turns.
+AEGIS_ORDINAL_TAG(CallbackOrdinalTag, "callback_ordinal", CallbackCounterExhausted);
+
+// ########################################################################
+// Every accepted full snapshot starts a one-based book generation.
+AEGIS_ORDINAL_TAG(BookGenerationTag, "book_generation", MarketCounterExhausted);
+
+// ########################################################################
+// Every committed snapshot or delta advances the globally monotonic book revision.
+AEGIS_ORDINAL_TAG(BookRevisionTag, "book_revision", MarketCounterExhausted);
+
+// ########################################################################
+#undef AEGIS_ORDINAL_TAG
+
+// ########################################################################
 // Session epochs and source sequences allow zero where their protocols require it, but increment
 // fails before unsigned wrap and reports the tag-specific stable field.
 template <typename Tag> class CheckedUnsigned {
@@ -115,6 +155,74 @@ public:
 
   // --------------------------------------------------------
 private:
+  std::uint64_t value_;
+};
+
+// ########################################################################
+// One-based ordinals reject absence at their factory boundary and fail before increment wrap. They
+// remain nominally distinct even when several runtime sequences advance together in one turn.
+template <typename Tag> class OneBasedOrdinal {
+public:
+
+  // --------------------------------------------------------
+  // Accept portable integer inputs only when they are positive and exactly representable.
+  template <CheckedIntegerInput Value>
+  [[nodiscard]] static Result<OneBasedOrdinal> from_value(Value value) {
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Zero is reserved for absence in primitive trace encodings; negative and wide values also
+    // fail.
+    if (!std::in_range<std::uint64_t>(value) || value == 0) {
+      return Result<OneBasedOrdinal>::failure(
+          DomainError::at_field(DomainErrorCode::InvalidValue, std::string{Tag::field}));
+    }
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Publish only a positive exactly represented ordinal.
+    return Result<OneBasedOrdinal>::success(OneBasedOrdinal{static_cast<std::uint64_t>(value)});
+
+    // ++++++++++++++++++++++++++++++++++++++++
+  }
+
+  // --------------------------------------------------------
+  // Return the first assigned position without a fallible construction path.
+  [[nodiscard]] static constexpr OneBasedOrdinal initial() noexcept { return OneBasedOrdinal{1U}; }
+
+  // --------------------------------------------------------
+  // Return the exact one-based position.
+  [[nodiscard]] constexpr std::uint64_t value() const noexcept { return value_; }
+
+  // --------------------------------------------------------
+  // Advance exactly once or report the tag's stable subsystem-specific exhaustion code.
+  [[nodiscard]] Result<OneBasedOrdinal> next() const {
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Reject the terminal value before unsigned arithmetic can wrap to the absence sentinel.
+    if (value_ == std::numeric_limits<std::uint64_t>::max()) {
+      return Result<OneBasedOrdinal>::failure(
+          DomainError::at_field(Tag::exhaustion_code, std::string{Tag::field}));
+    }
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Publish the representable successor in the same nominal domain.
+    return Result<OneBasedOrdinal>::success(OneBasedOrdinal{value_ + 1U});
+
+    // ++++++++++++++++++++++++++++++++++++++++
+  }
+
+  // --------------------------------------------------------
+  // Compare only ordinals from the same nominal domain.
+  friend constexpr bool operator==(OneBasedOrdinal, OneBasedOrdinal) = default;
+  friend constexpr auto operator<=>(OneBasedOrdinal, OneBasedOrdinal) = default;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Restrict raw construction to validated factories and checked successor generation.
+  explicit constexpr OneBasedOrdinal(std::uint64_t value) noexcept : value_{value} {}
+
+  // --------------------------------------------------------
   std::uint64_t value_;
 };
 
@@ -271,6 +379,16 @@ private:
 // Epochs, sequences, and revisions share checked mechanics but remain unrelated public types.
 using SessionEpoch = detail::CheckedUnsigned<detail::SessionEpochTag>;
 using SequenceNumber = detail::CheckedUnsigned<detail::SequenceNumberTag>;
+
+// ########################################################################
+// Runtime, source, callback, and book positions share one checked mechanism but cannot be mixed.
+using MarketSourceOrdinal = detail::OneBasedOrdinal<detail::MarketSourceOrdinalTag>;
+using AdmissionOrdinal = detail::OneBasedOrdinal<detail::AdmissionOrdinalTag>;
+using ReceiveSequence = detail::OneBasedOrdinal<detail::ReceiveSequenceTag>;
+using TurnOrdinal = detail::OneBasedOrdinal<detail::TurnOrdinalTag>;
+using CallbackOrdinal = detail::OneBasedOrdinal<detail::CallbackOrdinalTag>;
+using BookGeneration = detail::OneBasedOrdinal<detail::BookGenerationTag>;
+using BookRevision = detail::OneBasedOrdinal<detail::BookRevisionTag>;
 
 // ########################################################################
 // Revision aliases keep each configuration section nominally distinct over shared checked

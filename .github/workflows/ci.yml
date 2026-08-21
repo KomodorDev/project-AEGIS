@@ -1,5 +1,5 @@
-# Purpose: Build and inspect the M0 baseline on every supported compiler, run
-# sanitizer checks, and retain a machine-readable benchmark smoke result.
+# Purpose: Build and inspect the implemented M0-M2 baseline on every supported compiler, run
+# sanitizer checks, and retain machine-readable benchmark smoke results.
 name: Delivery baseline
 
 # Run for changes entering the integration branch and allow an operator to run
@@ -129,7 +129,7 @@ jobs:
           - name: ThreadSanitizer
             workflow: verify-tsan
     # Ask every sanitizer to fail immediately. Clang is selected explicitly
-    # because these M0 sanitizer profiles are qualified with the Clang runtime.
+    # because these sanitizer profiles are qualified with the Clang runtime.
     env:
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       CC: clang
@@ -155,10 +155,10 @@ jobs:
       - name: Configure, build, and test
         run: cmake --workflow --preset ${{ matrix.workflow }}
 
-  # Prove that the release benchmark executable and evidence collector work.
+  # Prove that the release benchmark executable and both evidence collectors work.
   # Hosted-runner timings are smoke evidence, not performance qualifications.
   benchmark-smoke:
-    name: Benchmark harness smoke test
+    name: M0 and M2 benchmark smoke tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Use Clang consistently for the retained benchmark context record.
@@ -182,13 +182,17 @@ jobs:
       # Build and test the optimized profile before collecting timing output.
       - name: Build the release profile
         run: cmake --workflow --preset benchmark
-      # Produce both raw Google Benchmark JSON and its environment manifest.
-      - name: Run the benchmark harness
-        run: python tools/run_benchmarks.py
-      # Reject missing fields, mismatched hashes, stale provenance, or a non-Release producer before
-      # an artifact can be mistaken for valid evidence.
+      # Produce isolated M0 and M2 raw JSON plus one complete environment manifest per suite.
+      - name: Run the benchmark workloads
+        run: |
+          python tools/run_benchmarks.py --suite m0
+          python tools/run_benchmarks.py --suite m2
+      # Reject missing fields, mismatched hashes, stale provenance, wrong workload records, or a
+      # non-Release producer before an artifact can be mistaken for valid evidence.
       - name: Validate the benchmark evidence
-        run: python tools/validate_benchmark_evidence.py
+        run: |
+          python tools/validate_benchmark_evidence.py --suite m0
+          python tools/validate_benchmark_evidence.py --suite m2
       # Preserve every generated JSON file for 90 days. The `*.json` glob
       # selects both result files, while `if-no-files-found: error` prevents a
       # falsely successful run that uploaded no evidence.
@@ -197,7 +201,7 @@ jobs:
         with:
           # Include the immutable commit SHA so artifacts from concurrent runs
           # are distinguishable without opening them.
-          name: m0-benchmark-${{ github.sha }}
+          name: m0-m2-benchmarks-${{ github.sha }}
           path: benchmark-results/*.json
           if-no-files-found: error
           retention-days: 90

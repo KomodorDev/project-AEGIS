@@ -1,0 +1,785 @@
+// Purpose: measure the three named M2 executor, callback, and coherent market-owner workloads with
+// explicit latency distributions and scoped C++ heap-allocation counts.
+
+#include "aegis/runtime/market_runtime.hpp"
+#include "reference_configuration.hpp"
+
+#include <algorithm>
+#include <benchmark/benchmark.h>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <memory>
+#include <new>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace aegis_benchmark_allocations {
+
+// Allocation tracking is thread-local and disabled by default, so fixture construction and Google
+// Benchmark bookkeeping remain outside every workload's reported allocation interval.
+thread_local bool tracking_enabled = false;
+thread_local std::uint64_t successful_allocations = 0U;
+
+// --------------------------------------------------------
+// Count one successful C++ heap allocation without allocating inside the observation path.
+void record_successful_allocation() noexcept {
+  if (tracking_enabled && successful_allocations != std::numeric_limits<std::uint64_t>::max()) {
+    ++successful_allocations;
+  }
+}
+
+// --------------------------------------------------------
+// Begin a non-nested measurement interval on the calling benchmark thread.
+void begin() noexcept {
+  successful_allocations = 0U;
+  tracking_enabled = true;
+}
+
+// --------------------------------------------------------
+// End the calling thread's interval and return its exact successful allocation count.
+[[nodiscard]] std::uint64_t finish() noexcept {
+  tracking_enabled = false;
+  return successful_allocations;
+}
+
+// --------------------------------------------------------
+// Allocate one ordinary block before publishing its successful allocation observation.
+[[nodiscard]] void* allocate(std::size_t size) {
+  void* const pointer = std::malloc(size == 0U ? 1U : size);
+  if (pointer == nullptr) {
+    throw std::bad_alloc{};
+  }
+  record_successful_allocation();
+  return pointer;
+}
+
+// --------------------------------------------------------
+// Honor C++ over-alignment through the platform allocator and count only successful blocks.
+[[nodiscard]] void* allocate_aligned(std::size_t size, std::align_val_t alignment) {
+  void* pointer = nullptr;
+  const auto byte_alignment = static_cast<std::size_t>(alignment);
+  if (posix_memalign(&pointer, byte_alignment, size == 0U ? 1U : size) != 0) {
+    throw std::bad_alloc{};
+  }
+  record_successful_allocation();
+  return pointer;
+}
+
+// --------------------------------------------------------
+
+} // namespace aegis_benchmark_allocations
+
+// --------------------------------------------------------
+// Interesting syntax: replaceable global allocation overloads let the scoped counter observe
+// library containers as well as allocations issued directly by this benchmark translation unit.
+void* operator new(std::size_t size) { return aegis_benchmark_allocations::allocate(size); }
+
+void* operator new[](std::size_t size) { return aegis_benchmark_allocations::allocate(size); }
+
+void* operator new(std::size_t size, std::align_val_t alignment) {
+  return aegis_benchmark_allocations::allocate_aligned(size, alignment);
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+  return aegis_benchmark_allocations::allocate_aligned(size, alignment);
+}
+
+// --------------------------------------------------------
+// Pair every replaceable delete form with the malloc-family implementation above.
+void operator delete(void* pointer) noexcept { std::free(pointer); }
+
+void operator delete[](void* pointer) noexcept { std::free(pointer); }
+
+void operator delete(void* pointer, std::size_t) noexcept { std::free(pointer); }
+
+void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer); }
+
+void operator delete(void* pointer, std::align_val_t) noexcept { std::free(pointer); }
+
+void operator delete[](void* pointer, std::align_val_t) noexcept { std::free(pointer); }
+
+void operator delete(void* pointer, std::size_t, std::align_val_t) noexcept { std::free(pointer); }
+
+void operator delete[](void* pointer, std::size_t, std::align_val_t) noexcept {
+  std::free(pointer);
+}
+
+// --------------------------------------------------------
+
+namespace {
+
+using namespace aegis;
+
+// Fixed iteration counts make p99.9 meaningful and bound the trace capacity needed by each fresh
+// benchmark fixture, independently of ambient benchmark-runner timing heuristics.
+constexpr std::int64_t distribution_iterations = 10'000;
+constexpr std::uint32_t distribution_trace_capacity = 20'016U;
+constexpr std::size_t retained_levels_per_side = 20U;
+
+// ########################################################################
+// One summary reports nearest-rank latency percentiles in the required microsecond unit.
+struct LatencySummary {
+  double p50_microseconds;
+  double p99_microseconds;
+  double p99_9_microseconds;
+};
+
+// ########################################################################
+
+// ########################################################################
+// The probe transfers copied callback observations to the outer benchmark loop without retaining
+// any turn-scoped event, book view, or context.
+struct CallbackProbe {
+  std::uint64_t callback_count{0U};
+  std::uint64_t state_callback_count{0U};
+  std::uint64_t checksum{0U};
+  std::size_t last_bid_count{0U};
+  std::size_t last_ask_count{0U};
+  std::optional<market_data::MarketUpdateKind> last_update_kind;
+
+  // --------------------------------------------------------
+  // Remove setup callback counts before either workload begins its measured iterations.
+  void reset() noexcept {
+    callback_count = 0U;
+    state_callback_count = 0U;
+  }
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// A trivially copied command gives BENCH-M2-EXEC-001 no behavior beyond proving handler invocation.
+struct NoopCommand {
+  std::uint64_t token;
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// Fail immediately when a benchmark fixture contains an invalid nominal identifier literal.
+template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
+  auto parsed = Identifier::parse(text);
+  if (!parsed) {
+    throw std::logic_error{"invalid identifier in M2 benchmark fixture"};
+  }
+  return std::move(parsed).value();
+}
+
+// --------------------------------------------------------
+// Execute one copied no-op command while keeping its invocation observable to the optimizer.
+[[nodiscard]] model::Result<void> run_noop(const NoopCommand& command,
+                                           const runtime::AcceptedTurnContext& context) noexcept {
+  auto token = command.token;
+  benchmark::DoNotOptimize(token);
+  benchmark::DoNotOptimize(context.turn_ordinal.value());
+  return model::Result<void>::success();
+}
+
+// --------------------------------------------------------
+// Convert one monotonic clock interval into its unsigned nanosecond duration.
+[[nodiscard]] std::uint64_t elapsed_nanoseconds(std::chrono::steady_clock::time_point started,
+                                                std::chrono::steady_clock::time_point finished) {
+  const auto elapsed =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(finished - started).count();
+  return static_cast<std::uint64_t>(elapsed);
+}
+
+// --------------------------------------------------------
+// Encode the sealed M1 and M2 identities in the exact grammar consumed by evidence tooling.
+[[nodiscard]] std::string
+benchmark_evidence_label(const configuration::StartupConfiguration& configuration,
+                         const runtime::RuntimePolicy& policy) {
+  return "configuration_fingerprint_sha256=" + configuration.fingerprint().to_hex() +
+         ";runtime_policy_fingerprint_sha256=" + policy.fingerprint().to_hex();
+}
+
+// --------------------------------------------------------
+// Convert integer nanoseconds to the seconds required by Google Benchmark manual timing.
+[[nodiscard]] double seconds(std::uint64_t nanoseconds) noexcept {
+  return static_cast<double>(nanoseconds) / 1'000'000'000.0;
+}
+
+// ########################################################################
+// This injected measurement clock brackets the exact strategy call made by BotRuntime. Its first
+// observation occurs immediately before virtual dispatch and its second immediately after return.
+class CallbackMeasurementClock final : public model::ClockProvider {
+public:
+
+  // --------------------------------------------------------
+  // Keep a stable local origin so every returned clock value is unsigned and process-local.
+  CallbackMeasurementClock() noexcept : origin_{std::chrono::steady_clock::now()} {}
+
+  // --------------------------------------------------------
+  // Request measurement of exactly one complete callback invocation.
+  void arm() noexcept {
+    armed_ = true;
+    active_ = false;
+    completed_ = false;
+    duration_nanoseconds_ = 0U;
+    allocation_count_ = 0U;
+  }
+
+  // --------------------------------------------------------
+  // Report whether both observations enclosing the requested callback were received.
+  [[nodiscard]] bool completed() const noexcept { return completed_; }
+
+  // --------------------------------------------------------
+  // Return the measured immediately-before to immediately-after callback duration.
+  [[nodiscard]] std::uint64_t duration_nanoseconds() const noexcept {
+    return duration_nanoseconds_;
+  }
+
+  // --------------------------------------------------------
+  // Return successful C++ heap allocations in the same callback-only interval.
+  [[nodiscard]] std::uint64_t allocation_count() const noexcept { return allocation_count_; }
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Turn consecutive armed observations into the callback start and finish boundaries while
+  // unarmed observations still provide the monotonic clock required by ordinary runtime setup.
+  [[nodiscard]] std::uint64_t monotonic_nanoseconds() noexcept override {
+    if (armed_ && !active_) {
+      aegis_benchmark_allocations::begin();
+      started_ = std::chrono::steady_clock::now();
+      active_ = true;
+      return since_origin(started_);
+    }
+
+    const auto observed = std::chrono::steady_clock::now();
+    if (armed_ && active_) {
+      duration_nanoseconds_ = elapsed_nanoseconds(started_, observed);
+      allocation_count_ = aegis_benchmark_allocations::finish();
+      completed_ = true;
+      armed_ = false;
+      active_ = false;
+    }
+    return since_origin(observed);
+  }
+
+  // --------------------------------------------------------
+  // Convert one steady observation into the provider's nonnegative local clock domain.
+  [[nodiscard]] std::uint64_t
+  since_origin(std::chrono::steady_clock::time_point observed) const noexcept {
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(observed - origin_).count();
+    return static_cast<std::uint64_t>(elapsed);
+  }
+
+  // --------------------------------------------------------
+  std::chrono::steady_clock::time_point origin_;
+  std::chrono::steady_clock::time_point started_{};
+  bool armed_{false};
+  bool active_{false};
+  bool completed_{false};
+  std::uint64_t duration_nanoseconds_{0U};
+  std::uint64_t allocation_count_{0U};
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// Select one deterministic nearest-rank percentile from an already sorted sample vector.
+[[nodiscard]] std::uint64_t nearest_rank(const std::vector<std::uint64_t>& sorted_samples,
+                                         std::size_t numerator, std::size_t denominator) {
+  const auto rank = (sorted_samples.size() * numerator + denominator - 1U) / denominator;
+  return sorted_samples.at(rank - 1U);
+}
+
+// --------------------------------------------------------
+// Sort one owned distribution after timing and convert its required percentiles to microseconds.
+[[nodiscard]] LatencySummary summarize(std::vector<std::uint64_t>& samples) {
+  std::sort(samples.begin(), samples.end());
+  constexpr double nanoseconds_per_microsecond = 1'000.0;
+  return LatencySummary{
+      static_cast<double>(nearest_rank(samples, 50U, 100U)) / nanoseconds_per_microsecond,
+      static_cast<double>(nearest_rank(samples, 99U, 100U)) / nanoseconds_per_microsecond,
+      static_cast<double>(nearest_rank(samples, 999U, 1'000U)) / nanoseconds_per_microsecond,
+  };
+}
+
+// --------------------------------------------------------
+// Publish the common distribution, throughput, sample, and scoped-allocation counters.
+void publish_distribution(benchmark::State& state, std::vector<std::uint64_t>& samples,
+                          std::uint64_t allocation_count, std::string_view throughput_name,
+                          std::string_view allocation_name) {
+  if (samples.empty()) {
+    return;
+  }
+  const auto summary = summarize(samples);
+  const auto sample_count = static_cast<double>(samples.size());
+  state.counters["p50_us"] = summary.p50_microseconds;
+  state.counters["p99_us"] = summary.p99_microseconds;
+  state.counters["p99_9_us"] = summary.p99_9_microseconds;
+  state.counters[std::string{throughput_name}] =
+      benchmark::Counter{sample_count, benchmark::Counter::kIsRate};
+  state.counters[std::string{allocation_name}] =
+      static_cast<double>(allocation_count) / sample_count;
+  state.counters["sample_count"] = sample_count;
+  state.SetItemsProcessed(static_cast<std::int64_t>(samples.size()));
+}
+
+// --------------------------------------------------------
+// Mix one exact unsigned observation into the benchmark-local deterministic strategy checksum.
+[[nodiscard]] std::uint64_t mix(std::uint64_t checksum, std::uint64_t value) noexcept {
+  return checksum ^ (value + 0x9e3779b97f4a7c15ULL + (checksum << 6U) + (checksum >> 2U));
+}
+
+// ########################################################################
+// The observe-only reference strategy consumes the complete coherent 20x20 view without retaining
+// a turn-scoped event, view, or context after synchronous return.
+class DeterministicReferenceStrategy final : public runtime::Strategy {
+public:
+
+  // --------------------------------------------------------
+  // Borrow one probe whose lifetime encloses the strategy and owning market runtime.
+  explicit DeterministicReferenceStrategy(CallbackProbe& probe) noexcept : probe_{&probe} {}
+
+  // --------------------------------------------------------
+  // Consume every visible level in canonical order and publish only copied scalar observations.
+  void on_market_data(const market_data::MarketEvent& event, const market_data::ReadyBookView& book,
+                      runtime::BotContext& context) noexcept override {
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Read the complete coherent book and attribution into a stable, allocation-free checksum.
+    auto checksum = mix(probe_->checksum, event.update().source_sequence().value());
+    checksum = mix(checksum, event.context().book_generation.value());
+    checksum = mix(checksum, event.context().book_revision.value());
+    checksum = mix(checksum, context.callback_ordinal().value());
+    checksum = mix(checksum, static_cast<std::uint64_t>(context.subscription_id().value().size()));
+    checksum = mix(checksum, static_cast<std::uint64_t>(book.bid_count()));
+    checksum = mix(checksum, static_cast<std::uint64_t>(book.ask_count()));
+    for (std::size_t index = 0U; index < book.bid_count(); ++index) {
+      const auto level = book.bid_at(index);
+      if (level) {
+        checksum = mix(checksum, static_cast<std::uint64_t>(level->price.coefficient()));
+        checksum = mix(checksum, static_cast<std::uint64_t>(level->quantity.coefficient()));
+      }
+    }
+    for (std::size_t index = 0U; index < book.ask_count(); ++index) {
+      const auto level = book.ask_at(index);
+      if (level) {
+        checksum = mix(checksum, static_cast<std::uint64_t>(level->price.coefficient()));
+        checksum = mix(checksum, static_cast<std::uint64_t>(level->quantity.coefficient()));
+      }
+    }
+    probe_->checksum = checksum;
+    probe_->last_bid_count = book.bid_count();
+    probe_->last_ask_count = book.ask_count();
+    probe_->last_update_kind = event.update().kind();
+    ++probe_->callback_count;
+
+    // ++++++++++++++++++++++++++++++++++++++++
+  }
+
+  // --------------------------------------------------------
+  // Fold sanitized readiness into the same scalar sink without receiving book access.
+  void on_market_state(const market_data::MarketStateEvent& event,
+                       runtime::BotContext& context) noexcept override {
+    probe_->checksum = mix(probe_->checksum, static_cast<std::uint64_t>(event.fields().readiness));
+    probe_->checksum = mix(probe_->checksum, context.callback_ordinal().value());
+    ++probe_->state_callback_count;
+  }
+
+  // --------------------------------------------------------
+private:
+  CallbackProbe* probe_;
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// Seal the accepted credential-free reference configuration before constructing M2 policy.
+[[nodiscard]] configuration::StartupConfiguration reference_configuration() {
+  auto created =
+      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  if (!created) {
+    throw std::logic_error{"invalid startup configuration in M2 benchmark fixture"};
+  }
+  return std::move(created).value();
+}
+
+// --------------------------------------------------------
+// Define the sole public BTC perpetual source used by both runtime workloads.
+[[nodiscard]] runtime::RuntimeSourceDefinition reference_source() {
+  return runtime::RuntimeSourceDefinition{
+      id<model::MarketSourceId>("source.deribit-btc-perpetual"),
+      id<model::VenueId>("deribit"),
+      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      id<model::VenueInstrumentId>("BTC-PERPETUAL"),
+      model::InstrumentMetadataRevision::initial(),
+  };
+}
+
+// --------------------------------------------------------
+// Fix all runtime capacities once, including enough canonical trace space for every fixed sample.
+[[nodiscard]] runtime::RuntimePolicy
+reference_policy(const configuration::StartupConfiguration& configuration) {
+  auto created = runtime::RuntimePolicy::create(
+      configuration,
+      runtime::RuntimePolicyParams{
+          runtime::RuntimePolicyLimits{1U, 4'096U, 64U, 20U, 1'000'000'000U, 2U, 32U,
+                                       distribution_trace_capacity, 32U, 1'000'000'000U},
+          {reference_source()},
+      });
+  if (!created) {
+    throw std::logic_error{"invalid runtime policy in M2 benchmark fixture"};
+  }
+  return std::move(created).value();
+}
+
+// --------------------------------------------------------
+// Append one half-tick BTC price without binary floating-point conversion.
+void append_half_tick_price(std::string& frame, std::uint32_t half_ticks) {
+  frame.append(std::to_string(half_ticks / 2U));
+  frame.append(half_ticks % 2U == 0U ? ".0" : ".5");
+}
+
+// --------------------------------------------------------
+// Build the authoritative 20-bid/20-ask snapshot entirely outside timed benchmark regions.
+[[nodiscard]] std::string snapshot_frame() {
+  std::string frame =
+      "AEGISMD|1|source.deribit-btc-perpetual|snapshot|100|none|1000|1|ok:bench-20x20|40";
+  frame.reserve(1'024U);
+  for (std::uint32_t index = 0U; index < retained_levels_per_side; ++index) {
+    frame.append("|B,");
+    append_half_tick_price(frame, 100'000U - index);
+    frame.push_back(',');
+    frame.append(std::to_string(index + 1U));
+  }
+  for (std::uint32_t index = 0U; index < retained_levels_per_side; ++index) {
+    frame.append("|A,");
+    append_half_tick_price(frame, 100'001U + index);
+    frame.push_back(',');
+    frame.append(std::to_string(index + 1U));
+  }
+  return frame;
+}
+
+// --------------------------------------------------------
+// Build one valid absolute delta while preserving the fixed 20x20 depth and top-level identities.
+[[nodiscard]] std::string delta_frame(std::uint64_t sequence) {
+  const auto predecessor = sequence - 1U;
+  const auto bid_quantity = sequence % 2U == 0U ? 23U : 21U;
+  const auto ask_quantity = sequence % 2U == 0U ? 24U : 22U;
+  return "AEGISMD|1|source.deribit-btc-perpetual|delta|" + std::to_string(sequence) + "|" +
+         std::to_string(predecessor) + "|" + std::to_string(1'000U + sequence) +
+         "|1|ok:bench-delta|2|B,50000.0," + std::to_string(bid_quantity) + "|A,50000.5," +
+         std::to_string(ask_quantity);
+}
+
+// --------------------------------------------------------
+// Transfer one bounded recorded frame into a caller-owned credential-free ingress attempt.
+[[nodiscard]] market_data::IngressFrameAttempt attempt(std::string frame) {
+  auto created = market_data::IngressFrameAttempt::create(
+      id<model::MarketSourceId>("source.deribit-btc-perpetual"), model::SessionEpoch{1U},
+      std::move(frame));
+  if (!created) {
+    throw std::logic_error{"invalid recorded frame in M2 benchmark fixture"};
+  }
+  return std::move(created).value();
+}
+
+// ########################################################################
+// One prebuilt runtime retains the fixed book and admits a fresh contiguous delta before each
+// measured owner turn; fixture construction, bootstrap, snapshot, and frame creation stay untimed.
+class MarketBenchmarkHarness final {
+public:
+
+  // --------------------------------------------------------
+  // Construct and bootstrap the single-firm, single-bot reference runtime at a coherent 20x20 book.
+  MarketBenchmarkHarness() : executor_clock_{100U} {
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Seal immutable configuration and policy before transferring strategy ownership.
+    auto configuration = reference_configuration();
+    auto policy = reference_policy(configuration);
+    evidence_label_ = benchmark_evidence_label(configuration, policy);
+    std::vector<runtime::BotStrategyRegistration> strategies;
+    strategies.push_back(runtime::BotStrategyRegistration{
+        id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+        std::make_unique<DeterministicReferenceStrategy>(probe_),
+    });
+    auto created =
+        runtime::MarketRuntime::create(std::move(configuration), std::move(policy), executor_clock_,
+                                       callback_measurement_clock_, std::move(strategies));
+    if (!created) {
+      throw std::logic_error{"invalid market runtime in M2 benchmark fixture"};
+    }
+    runtime_ = std::move(created).value();
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Run genuine bootstrap and snapshot turns before publishing the reusable benchmark fixture.
+    if (!runtime_->bind_to_current_thread()) {
+      throw std::logic_error{"failed to bind M2 benchmark runtime"};
+    }
+    const auto bootstrap = runtime_->run_one();
+    if (!bootstrap || !bootstrap.value()) {
+      throw std::logic_error{"failed to bootstrap M2 benchmark runtime"};
+    }
+    admit(snapshot_frame());
+    const auto snapshot = runtime_->run_one();
+    if (!snapshot || !snapshot.value() || probe_.last_bid_count != retained_levels_per_side ||
+        probe_.last_ask_count != retained_levels_per_side) {
+      throw std::logic_error{"failed to establish the M2 benchmark 20x20 book"};
+    }
+    probe_.reset();
+
+    // ++++++++++++++++++++++++++++++++++++++++
+  }
+
+  // --------------------------------------------------------
+  // Close and release deterministic ownership before the runtime destroys borrowed clock state.
+  ~MarketBenchmarkHarness() {
+    runtime_->close();
+    static_cast<void>(runtime_->release_from_current_thread());
+  }
+
+  // --------------------------------------------------------
+  // Admit the next contiguous delta outside its later owner-execution measurement interval.
+  void admit_delta(std::uint64_t sequence) { admit(delta_frame(sequence)); }
+
+  // --------------------------------------------------------
+  // Run one already-admitted delta through the shared serialized owner.
+  [[nodiscard]] model::Result<std::optional<runtime::TurnReport>> run_one() {
+    return runtime_->run_one();
+  }
+
+  // --------------------------------------------------------
+  // Borrow the scalar-only callback probe used to verify the coherent strategy observation.
+  [[nodiscard]] CallbackProbe& probe() noexcept { return probe_; }
+
+  // --------------------------------------------------------
+  // Borrow the injected clock that brackets one callback at BotRuntime's invocation boundary.
+  [[nodiscard]] CallbackMeasurementClock& callback_measurement_clock() noexcept {
+    return callback_measurement_clock_;
+  }
+
+  // --------------------------------------------------------
+  // Borrow the immutable configuration/runtime-policy identity attached to this workload record.
+  [[nodiscard]] const std::string& evidence_label() const noexcept { return evidence_label_; }
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Require one nonblocking accepted decision while setup remains outside workload timing.
+  void admit(std::string frame) {
+    auto admitted = runtime_->try_admit(attempt(std::move(frame)));
+    if (!admitted || admitted.value().outcome != runtime::AdmissionOutcome::Accepted) {
+      throw std::logic_error{"failed to admit M2 benchmark frame"};
+    }
+  }
+
+  // --------------------------------------------------------
+  CallbackProbe probe_;
+  model::DeterministicClockProvider executor_clock_;
+  CallbackMeasurementClock callback_measurement_clock_;
+  std::string evidence_label_;
+  std::unique_ptr<runtime::MarketRuntime> runtime_;
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// BENCH-M2-EXEC-001 measures successful admission plus one completed no-op serialized owner turn.
+void benchmark_executor_turn(benchmark::State& state) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Seal common provenance, then construct, preallocate, and bind the executor before timing.
+  auto configuration = reference_configuration();
+  auto policy = reference_policy(configuration);
+  state.SetLabel(benchmark_evidence_label(configuration, policy));
+  model::DeterministicClockProvider clock{100U};
+  runtime::SerializedExecutor executor{policy.limits().ingress_capacity, clock,
+                                       policy.limits().maximum_drive_turns};
+  if (!executor.bind_to_current_thread()) {
+    state.SkipWithError("failed to bind BENCH-M2-EXEC-001 executor");
+    return;
+  }
+  std::uint64_t token = 0U;
+  std::uint64_t allocation_count = 0U;
+  std::uint64_t total_nanoseconds = 0U;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Require successful admission first, then time only owner execution through turn completion.
+  for ([[maybe_unused]] const auto iteration : state) {
+    ++token;
+    auto admitted = executor.try_admit(runtime::WorkItem::make<run_noop>(NoopCommand{token}));
+    if (!admitted || admitted.value().outcome != runtime::AdmissionOutcome::Accepted) {
+      state.SkipWithError("BENCH-M2-EXEC-001 admission did not succeed");
+      break;
+    }
+    aegis_benchmark_allocations::begin();
+    const auto started = std::chrono::steady_clock::now();
+    auto completed = executor.run_one();
+    const auto finished = std::chrono::steady_clock::now();
+    allocation_count += aegis_benchmark_allocations::finish();
+    const auto duration = elapsed_nanoseconds(started, finished);
+    total_nanoseconds += duration;
+    state.SetIterationTime(seconds(duration));
+    if (!completed || !completed.value()) {
+      state.SkipWithError("BENCH-M2-EXEC-001 turn did not complete");
+      break;
+    }
+    benchmark::DoNotOptimize(completed.value()->completed_turns);
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Publish the exact required units using the completed iteration count.
+  const auto iterations = static_cast<double>(state.iterations());
+  if (iterations != 0.0) {
+    state.counters["ns_per_turn"] = static_cast<double>(total_nanoseconds) / iterations;
+    state.counters["turns_per_second"] =
+        benchmark::Counter{iterations, benchmark::Counter::kIsRate};
+    state.counters["allocations_per_turn"] = static_cast<double>(allocation_count) / iterations;
+    state.counters["sample_count"] = iterations;
+    state.SetItemsProcessed(state.iterations());
+  }
+  static_cast<void>(executor.release_from_current_thread());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// BENCH-M2-CALLBACK-001 reports only entry-to-return strategy time on each coherent Ready view.
+void benchmark_reference_callback(benchmark::State& state) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Build the runtime and fixed book once, then reserve all percentile storage before measurement.
+  MarketBenchmarkHarness harness;
+  state.SetLabel(harness.evidence_label());
+  std::vector<std::uint64_t> samples;
+  samples.reserve(static_cast<std::size_t>(distribution_iterations));
+  std::uint64_t allocation_count = 0U;
+  std::uint64_t sequence = 101U;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Let the owner prepare and invoke each callback; the injected measurement clock brackets the
+  // virtual strategy call and excludes parsing, book mutation, trace preparation, and dispatch.
+  for ([[maybe_unused]] const auto iteration : state) {
+    harness.admit_delta(sequence);
+    const auto callback_count_before = harness.probe().callback_count;
+    const auto state_callback_count_before = harness.probe().state_callback_count;
+    harness.callback_measurement_clock().arm();
+    auto completed = harness.run_one();
+    if (!completed || !completed.value()) {
+      state.SkipWithError("BENCH-M2-CALLBACK-001 owner turn did not complete");
+      break;
+    }
+    if (!harness.callback_measurement_clock().completed()) {
+      state.SkipWithError("BENCH-M2-CALLBACK-001 callback measurement did not close");
+      break;
+    }
+    if (harness.probe().callback_count != callback_count_before + 1U ||
+        harness.probe().state_callback_count != state_callback_count_before ||
+        harness.probe().last_update_kind != market_data::MarketUpdateKind::Delta ||
+        harness.probe().last_bid_count != retained_levels_per_side ||
+        harness.probe().last_ask_count != retained_levels_per_side) {
+      state.SkipWithError("BENCH-M2-CALLBACK-001 strategy did not observe one 20x20 view");
+      break;
+    }
+    const auto duration = harness.callback_measurement_clock().duration_nanoseconds();
+    samples.push_back(duration);
+    allocation_count += harness.callback_measurement_clock().allocation_count();
+    state.SetIterationTime(seconds(duration));
+    benchmark::DoNotOptimize(harness.probe().checksum);
+    ++sequence;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Publish the required callback percentiles, rate, and callback-local allocation mean.
+  publish_distribution(state, samples, allocation_count, "callbacks_per_second",
+                       "allocations_per_callback");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// BENCH-M2-MD-001 measures one complete owner turn from delta execution through callback return.
+void benchmark_market_data_turn(benchmark::State& state) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Establish the fixed 20x20 book and preallocate percentile storage before timed owner turns.
+  MarketBenchmarkHarness harness;
+  state.SetLabel(harness.evidence_label());
+  std::vector<std::uint64_t> samples;
+  samples.reserve(static_cast<std::size_t>(distribution_iterations));
+  std::uint64_t allocation_count = 0U;
+  std::uint64_t sequence = 101U;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Admission stays outside the specified interval; time the full synchronous owner turn that
+  // parses, applies, commits, traces, dispatches one callback, and returns its completion report.
+  for ([[maybe_unused]] const auto iteration : state) {
+    harness.admit_delta(sequence);
+    const auto callback_count_before = harness.probe().callback_count;
+    const auto state_callback_count_before = harness.probe().state_callback_count;
+    aegis_benchmark_allocations::begin();
+    const auto started = std::chrono::steady_clock::now();
+    auto completed = harness.run_one();
+    const auto finished = std::chrono::steady_clock::now();
+    allocation_count += aegis_benchmark_allocations::finish();
+    const auto duration = elapsed_nanoseconds(started, finished);
+    if (!completed || !completed.value() ||
+        harness.probe().callback_count != callback_count_before + 1U ||
+        harness.probe().state_callback_count != state_callback_count_before ||
+        harness.probe().last_update_kind != market_data::MarketUpdateKind::Delta ||
+        harness.probe().last_bid_count != retained_levels_per_side ||
+        harness.probe().last_ask_count != retained_levels_per_side) {
+      state.SkipWithError("BENCH-M2-MD-001 owner turn did not commit one 20x20 callback");
+      break;
+    }
+    samples.push_back(duration);
+    state.SetIterationTime(seconds(duration));
+    benchmark::DoNotOptimize(harness.probe().checksum);
+    ++sequence;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Publish the required full-turn percentiles, rate, and owner-interval allocation mean.
+  publish_distribution(state, samples, allocation_count, "events_per_second",
+                       "allocations_per_event");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+
+} // namespace
+
+// --------------------------------------------------------
+// Register the fixed-size executor workload with explicit manual nanosecond timing.
+BENCHMARK(benchmark_executor_turn)
+    ->Name("BENCH-M2-EXEC-001/executor.admit-and-run-noop")
+    ->Iterations(distribution_iterations)
+    ->UseManualTime()
+    ->Unit(benchmark::kNanosecond);
+
+// --------------------------------------------------------
+// Register callback-only timing with enough fixed samples for a stable p99.9 observation.
+BENCHMARK(benchmark_reference_callback)
+    ->Name("BENCH-M2-CALLBACK-001/strategy.reference-ready-view")
+    ->Iterations(distribution_iterations)
+    ->UseManualTime()
+    ->Unit(benchmark::kMicrosecond);
+
+// --------------------------------------------------------
+// Register the full synchronous 20x20 market owner-turn workload.
+BENCHMARK(benchmark_market_data_turn)
+    ->Name("BENCH-M2-MD-001/market.delta-20x20-and-callback")
+    ->Iterations(distribution_iterations)
+    ->UseManualTime()
+    ->Unit(benchmark::kMicrosecond);
+
+// --------------------------------------------------------

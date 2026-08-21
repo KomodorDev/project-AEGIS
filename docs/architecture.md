@@ -28,6 +28,8 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [ADR-0003: Dedicated Deribit testnet account](decisions/0003-dedicated-testnet-account.md)
 - [ADR-0004: Deterministic domain value contracts](decisions/0004-domain-value-contracts.md)
 - [ADR-0005: Immutable configuration provenance](decisions/0005-immutable-configuration-provenance.md)
+- [ADR-0006: Bounded deterministic runtime](decisions/0006-bounded-deterministic-runtime.md)
+- [ADR-0007: Market-state validity](decisions/0007-market-state-validity.md)
 - [M0 reference scenario](reference-scenario.md)
 - [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
@@ -278,7 +280,9 @@ For the first implementation, one dedicated thread and serialized executor owns 
 
 #### In-memory order books
 
-**Status:** In-memory single-owner working state is **Accepted**. The synchronization behavior below is **Proposed**; exact representation, retained depth and historical retention remain **Open**.
+**Status:** In-memory single-owner working state and the M2 synchronization behavior below are
+**Accepted and implemented**. The runtime policy fixes a bounded retained depth for one process;
+later venue depth selection and historical retention remain **Open**.
 
 For every subscribed venue/instrument that requires order-book data, the normalized market-data core maintains the current working book in memory. A venue adapter normally supplies an initial snapshot followed by ordered incremental updates.
 
@@ -289,9 +293,18 @@ On one serialized executor turn, AEGIS:
 3. transitions the book's readiness state; and
 4. dispatches a normalized event or read-only view only after the update is complete.
 
-A strategy therefore observes either the coherent state before an update or the coherent state after it, never a half-applied book. If a sequence gap, checksum failure, incompatible metadata change or excessive staleness makes the book unreliable, AEGIS marks it non-ready and obtains a fresh snapshot before treating it as tradable again.
+A strategy therefore observes either the coherent state before an update or the coherent state after
+it, never a half-applied book. `Synchronizing`, `Ready`, `Stale`, and `Invalid` are explicit. A
+sequence gap, checksum failure, incompatible metadata change, rejected attributable input, or
+excessive staleness makes the book non-ready; only a valid full snapshot starts a new `Ready`
+generation. [ADR-0007](decisions/0007-market-state-validity.md) defines the complete transition
+table and separates non-ready state callbacks from Ready-only market-data callbacks.
 
-The latency-sensitive data plane needs the current working book, not necessarily its entire history. Historical raw messages, normalized events or book snapshots may be copied asynchronously to off-path storage for replay and research. The required depth—top of book, a fixed number of levels or the full venue book—and the long-term retention policy should follow concrete strategy and recovery requirements.
+The latency-sensitive data plane needs the current working book, not necessarily its entire history.
+M2 uses fixed-capacity scratch and committed storage at an immutable configured retained depth; its
+reference and named market-data benchmark retain 20 levels per side. Historical raw messages,
+normalized events or book snapshots may later be copied asynchronously to off-path storage for
+replay and research. Venue-specific full-depth requirements and long-term retention remain open.
 
 The following diagram returns to the end-to-end order path and shows where asynchronous venue events
 and control-plane snapshots re-enter the serialized data-plane owner.

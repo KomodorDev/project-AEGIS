@@ -3,8 +3,9 @@
 > **Purpose:** Define how AEGIS quality is measured, name stable benchmark/load workloads, and record
 > the initial correctness and latency targets that later milestones must prove or deliberately revise.
 
-**Status:** Provisional M0 baseline. Workload definitions are stable identifiers; thresholds may be
-revised with recorded measurements and rationale.
+**Status:** M0 calibration and all three M2 workloads are executable. Workload identifiers are
+stable; thresholds remain provisional and may be revised only with recorded measurements and
+rationale.
 
 ## Measurement rules
 
@@ -58,9 +59,9 @@ same operation even if its implementation evolves.
 | Workload ID | Definition | Primary units | First owner |
 |---|---|---|---|
 | `BENCH-M0-HARNESS-001` | Benchmark-runner calibration loop with no product behavior | ns/iteration, iterations/s | M0 |
-| `BENCH-M2-EXEC-001` | Admit and run one no-op serialized executor turn | ns/turn, turns/s, allocations/turn | M2 |
+| `BENCH-M2-EXEC-001` | Successfully admit one no-op command, then measure its serialized owner execution through turn completion | ns/turn, turns/s, allocations/turn | M2 |
 | `BENCH-M2-CALLBACK-001` | Invoke the deterministic reference strategy on a prebuilt coherent read-only view, measured strictly from callback entry to return | latency µs p50/p99/p99.9, callbacks/s, allocations/callback | M2 |
-| `BENCH-M2-MD-001` | Run one full synchronous owner turn: apply a valid BTC-PERPETUAL delta to a fixed 20-level book and dispatch one deterministic bot callback | latency µs p50/p99/p99.9, events/s, allocations/event | M2 |
+| `BENCH-M2-MD-001` | Run one full synchronous owner turn: apply a valid BTC-PERPETUAL delta to a fixed 20-level-per-side book and dispatch one deterministic bot callback | latency µs p50/p99/p99.9, events/s, allocations/event | M2 |
 | `BENCH-M3-SUBMIT-001` | Authorized canonical limit request through route, risk reservation, OMS, encoding, and successful fake write initiation | latency µs p50/p99/p99.9, orders/s, allocations/order | M3 |
 | `BENCH-M3-SUBMIT-002` | Same request rejected inline by risk before OMS admission | latency µs p50/p99/p99.9, rejections/s, allocations/request | M3 |
 | `LOAD-M10-REF-001` | One instrument and bot for 10 minutes at 20,000 market events/s plus 100 submit attempts/s | callback and submission latency, queue age/depth, utilization, rates, counts, RSS MiB, trace hash | M10 |
@@ -104,7 +105,7 @@ python3 tools/run_benchmarks.py
 python3 tools/validate_benchmark_evidence.py
 ```
 
-The runner writes `benchmark-results/m0-harness.json` plus
+The default runner writes `benchmark-results/m0-harness.json` plus
 `benchmark-results/m0-context.json`. It rebuilds the release benchmark immediately before measuring;
 the context manifest records the required environment/tool fields and SHA-256 digests of the raw
 result, executable, and non-committed worktree state. The validator checks the schema, hashes,
@@ -112,3 +113,27 @@ workload identity, release mode, and current Git provenance before CI uploads th
 `AEGIS_BENCHMARK_POWER_MODE` and
 `AEGIS_BENCHMARK_HOST_ISOLATION`, and `AEGIS_BENCHMARK_THERMAL_STATE` to truthful descriptions for a
 controlled run; their default value is `uncontrolled`, which makes the result smoke evidence only.
+
+## Running the M2 workloads
+
+The M2 suite uses the same Release executable but an exact isolated filter:
+
+```sh
+cmake --workflow --preset benchmark
+python3 tools/run_benchmarks.py --suite m2
+python3 tools/validate_benchmark_evidence.py --suite m2
+```
+
+It writes `benchmark-results/m2-runtime.json` and `benchmark-results/m2-context.json`. Each workload
+uses exactly 10,000 measured samples; fixture construction, capacity preallocation, runtime
+bootstrap, and the initial 20×20 snapshot are outside the measured intervals. The executor record
+reports `ns_per_turn`, `turns_per_second`, and `allocations_per_turn`. Callback and market-owner
+records report `p50_us`, `p99_us`, `p99_9_us`, their named operation rate, and their scoped
+allocation count.
+
+Every M2 raw record carries the same `AEGISCFG` and runtime-policy SHA-256 identities. The independent
+validator checks exact workload names, units, samples, counters, percentile order, file/executable
+hashes, Git/worktree provenance, and those fingerprints. It classifies ordinary results as smoke and
+permits the callback p99 threshold claim only when the manifest exactly identifies `REF-MAC-01` and
+the power, host-isolation, and thermal fields use the published controlled values. Missing or
+free-form control claims never qualify a timing result.

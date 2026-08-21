@@ -15,6 +15,12 @@ add_executable(
   # These tests prove an observation grant never synthesizes or enables execution permission.
   unit/execution/execution_route_test.cpp
   unit/market_data/subscription_test.cpp
+  # Market-event tests pin normalized ordering, duplicate identity, and sanitized state publication.
+  unit/market_data/market_event_test.cpp
+  # Book-state tests pin transactional commit, continuity, readiness, and exact trace preflight.
+  unit/market_data/market_state_machine_test.cpp
+  # Fixture tests pin strict parsing, bounded failure, and policy-backed source normalization.
+  unit/market_data/recorded_fixture_test.cpp
   # These primitive tests pin stable Result/error contracts and nominal identifier grammar.
   unit/model/domain_error_result_test.cpp
   # Fixed-point tests pin canonical storage, explicit rounding, and overflow behavior.
@@ -31,8 +37,18 @@ add_executable(
   unit/model/time_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
+  # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
+  unit/runtime/runtime_policy_test.cpp
+  # Diagnostics and bot tests pin accepted-prefix detail and canonical strategy dispatch.
+  unit/runtime/runtime_diagnostics_test.cpp
+  unit/runtime/bot_runtime_test.cpp
+  # Coordinator tests prove recorded ingress reaches books and strategies within one owner turn.
+  unit/runtime/market_runtime_test.cpp
+  # Executor tests pin bounded admission, fence ordering, owner turns, and driver equivalence.
+  unit/runtime/serialized_executor_test.cpp
   # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
+  unit/trace/runtime_trace_test.cpp
   # Version tests ensure the compiled library reports the configured project identity.
   unit/version_test.cpp)
 target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
@@ -52,3 +68,11 @@ target_link_libraries(aegis_m1_reference_scenario_tests PRIVATE aegis_test_suppo
                                                                 Catch2::Catch2WithMain)
 aegis_configure_owned_target(aegis_m1_reference_scenario_tests)
 catch_discover_tests(aegis_m1_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)
+
+# Replay the complete M2 validity table through both owner drivers and compare canonical evidence.
+add_executable(aegis_m2_reference_scenario_tests
+               deterministic_scenarios/m2_reference_scenario_test.cpp)
+target_link_libraries(aegis_m2_reference_scenario_tests PRIVATE aegis_test_support
+                                                                Catch2::Catch2WithMain)
+aegis_configure_owned_target(aegis_m2_reference_scenario_tests)
+catch_discover_tests(aegis_m2_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)

@@ -20,13 +20,16 @@ option(AEGIS_WARNINGS_AS_ERRORS "Treat warnings in AEGIS-owned targets as errors
 option(AEGIS_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 option(AEGIS_ENABLE_UNDEFINED_SANITIZER "Enable UndefinedBehaviorSanitizer" OFF)
 option(AEGIS_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
-option(AEGIS_BUILD_BENCHMARKS "Build the M0 benchmark harness" ON)
+option(AEGIS_BUILD_BENCHMARKS "Build the named M0 and M2 benchmark workloads" ON)
 
 # Load reusable project policies from cmake/ProjectOptions.cmake and create their interface targets.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ProjectOptions)
 
 aegis_create_project_options()
+
+# Resolve the standard thread runtime used by the dedicated serialized-owner driver.
+find_package(Threads REQUIRED)
 
 # Build the AEGIS library and provide the namespaced alias consumers should link against.
 add_library(
@@ -38,6 +41,13 @@ add_library(
   # Data subscriptions and execution routes remain separate compiled permission boundaries.
   src/aegis/execution/execution_route.cpp
   src/aegis/market_data/subscription.cpp
+  # Normalized market events own venue-neutral input identity and post-commit callback contracts.
+  src/aegis/market_data/market_event.cpp
+  # Fixed-capacity books publish only complete Ready views through one transactional state owner.
+  src/aegis/market_data/order_book.cpp
+  src/aegis/market_data/market_state_machine.cpp
+  # Recorded fixtures parse bounded credential-free bytes before policy-backed normalization.
+  src/aegis/market_data/recorded_fixture.cpp
   # One compiled arithmetic kernel keeps every nominal decimal domain on identical checked rules.
   src/aegis/model/fixed_point.cpp
   # Identifier grammar is compiled; its Result and error primitives remain header-only.
@@ -52,8 +62,21 @@ add_library(
   src/aegis/model/time.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
+  # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
+  src/aegis/runtime/runtime_policy.cpp
+  # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
+  src/aegis/runtime/market_runtime.cpp
+  # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
+  src/aegis/runtime/runtime_diagnostics.cpp
+  # Bot dispatch owns one strategy per bot and invokes canonical state-before-market callbacks.
+  src/aegis/runtime/bot_runtime.cpp
+  # Both runtime drivers share one bounded attempt-ordered serialized turn processor.
+  src/aegis/runtime/serialized_executor.cpp
+  src/aegis/runtime/dedicated_executor_driver.cpp
   # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
   src/aegis/trace/trace.cpp
+  # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
+  src/aegis/trace/runtime_trace.cpp
   # Version reporting exposes the configured project identity without adding runtime dependencies.
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
@@ -63,6 +86,7 @@ target_include_directories(
   aegis
   PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 target_compile_definitions(aegis PRIVATE AEGIS_PROJECT_VERSION="${PROJECT_VERSION}")
+target_link_libraries(aegis PRIVATE Threads::Threads)
 aegis_configure_owned_target(aegis)
 
 # Enable CTest and CMake's pinned source-dependency mechanism.

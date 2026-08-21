@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Reject incomplete or internally inconsistent M0 benchmark-evidence bundles."""
+"""Reject incomplete or internally inconsistent M0 or M2 benchmark-evidence bundles."""
 
 # Interesting syntax: postponed annotations let the script use modern type hints on every supported
 # Python version without evaluating those hints while the module is imported.
@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import re
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -17,11 +19,57 @@ from typing import Any
 
 # Reuse the runner's byte-exact algorithm so generation and validation cannot interpret a dirty
 # working tree differently.
-from run_benchmarks import worktree_fingerprint
+from run_benchmarks import (
+    CONTROLLED_HOST_ISOLATION,
+    CONTROLLED_POWER_MODE,
+    CONTROLLED_THERMAL_STATE,
+    M0_BENCHMARK_FILTER,
+    M0_RUN_NAME,
+    M0_WORKLOAD_ID,
+    M2_BENCHMARK_FILTER,
+    M2_RUN_NAMES,
+    M2_SAMPLE_COUNT,
+    M2_WORKLOAD_IDS,
+    worktree_fingerprint,
+)
 
-WORKLOAD_ID = "BENCH-M0-HARNESS-001"
-RUN_NAME = f"{WORKLOAD_ID}/harness.noop"
 EXPECTED_AGGREGATES = {"mean", "median", "stddev", "cv"}
+
+# Each exact M2 run has one published time unit and a workload-specific counter contract. Counter
+# field names encode their units because Google Benchmark's JSON schema has no per-counter unit key.
+M2_RECORD_CONTRACTS = {
+    M2_RUN_NAMES[0]: {
+        "time_unit": "ns",
+        "counters": ("ns_per_turn", "turns_per_second", "allocations_per_turn"),
+        "allocation_counter": "allocations_per_turn",
+    },
+    M2_RUN_NAMES[1]: {
+        "time_unit": "us",
+        "counters": (
+            "p50_us",
+            "p99_us",
+            "p99_9_us",
+            "callbacks_per_second",
+            "allocations_per_callback",
+        ),
+        "allocation_counter": "allocations_per_callback",
+    },
+    M2_RUN_NAMES[2]: {
+        "time_unit": "us",
+        "counters": (
+            "p50_us",
+            "p99_us",
+            "p99_9_us",
+            "events_per_second",
+            "allocations_per_event",
+        ),
+        "allocation_counter": "allocations_per_event",
+    },
+}
+VALID_M2_FINGERPRINT_LABEL = re.compile(
+    r"configuration_fingerprint_sha256=([0-9a-f]{64});"
+    r"runtime_policy_fingerprint_sha256=([0-9a-f]{64})"
+)
 
 
 # --------------------------------------------------------
@@ -98,12 +146,92 @@ def require_string_list(document: dict[str, Any], key: str) -> list[str]:
 
 
 # --------------------------------------------------------
-# Defines the command-line contract and repository-relative result default.
+# Extracts a required finite nonnegative numeric observation.
+def require_nonnegative_number(document: dict[str, Any], key: str, *, location: str) -> float:
+    """Return one finite nonnegative number without accepting booleans as integers."""
+
+    value = document.get(key)
+    require(
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0,
+        f"{location} {key} must be a finite nonnegative number",
+    )
+    assert isinstance(value, (int, float)) and not isinstance(value, bool)
+    return float(value)
+
+
+# --------------------------------------------------------
+# Parses one exact M2 configuration-attribution label.
+def m2_fingerprint_pair(record: dict[str, Any], *, location: str) -> tuple[str, str]:
+    """Return the two lowercase SHA-256 fingerprints encoded in one exact M2 record label."""
+
+    label = record.get("label")
+    require(isinstance(label, str), f"{location} label must be a string")
+    assert isinstance(label, str)
+    match = VALID_M2_FINGERPRINT_LABEL.fullmatch(label)
+    require(match is not None, f"{location} label has invalid fingerprint grammar")
+    assert match is not None
+    return match.group(1), match.group(2)
+
+
+# --------------------------------------------------------
+# Independently verifies every published REF-MAC-01 qualification condition.
+def require_ref_mac_01_context(manifest: dict[str, Any]) -> None:
+    """Reject a qualification label unless all hardware, toolchain, and control facts are exact."""
+
+    # Qualification is conjunctive: unknown, approximate, or free-form conditions remain smoke.
+    require(
+        str(manifest.get("operating_system", "")).startswith("macOS-15."),
+        "qualification operating_system must identify macOS 15",
+    )
+    require(manifest.get("host_model") == "MacBookPro18,2", "qualification host_model mismatch")
+    require(manifest.get("machine") == "arm64", "qualification machine must equal arm64")
+    require(manifest.get("cpu_model") == "Apple M1 Max", "qualification cpu_model mismatch")
+    require(
+        manifest.get("total_memory_bytes") == 32 * 1024 * 1024 * 1024,
+        "qualification memory must equal 32 GiB",
+    )
+    require(
+        manifest.get("logical_core_count") == 10,
+        "qualification logical_core_count must equal 10",
+    )
+    require(
+        manifest.get("physical_core_count") == 10,
+        "qualification physical_core_count must equal 10",
+    )
+    require(
+        str(manifest.get("compiler", "")).startswith("Apple clang version 16."),
+        "qualification compiler must identify AppleClang 16",
+    )
+    require(
+        manifest.get("power_mode") == CONTROLLED_POWER_MODE,
+        f"qualification power_mode must equal {CONTROLLED_POWER_MODE}",
+    )
+    require(
+        manifest.get("host_isolation") == CONTROLLED_HOST_ISOLATION,
+        f"qualification host_isolation must equal {CONTROLLED_HOST_ISOLATION}",
+    )
+    require(
+        manifest.get("thermal_state") == CONTROLLED_THERMAL_STATE,
+        f"qualification thermal_state must equal {CONTROLLED_THERMAL_STATE}",
+    )
+
+
+# --------------------------------------------------------
+# Defines the suite selector and repository-relative result default.
 def parse_arguments() -> argparse.Namespace:
-    """Accept an alternate result directory while defaulting to the repository output path."""
+    """Select M0 by default or one explicit suite and repository-relative evidence directory."""
 
     repository = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--suite",
+        choices=("m0", "m2"),
+        default="m0",
+        help="benchmark evidence suite to validate (default: m0)",
+    )
     parser.add_argument(
         "--results-dir",
         type=Path,
@@ -113,32 +241,22 @@ def parse_arguments() -> argparse.Namespace:
 
 
 # --------------------------------------------------------
-# Validates the complete benchmark bundle and its repository provenance.
-def main() -> int:
-    """Validate schema, hashes, workload identity, build mode, and repository provenance."""
+# Validates the build, host, hash, and raw-producer fields shared by every suite.
+def validate_common_bundle(
+    raw: dict[str, Any], manifest: dict[str, Any], raw_path: Path
+) -> tuple[Path, list[str]]:
+    """Validate common manifest context and return its resolved executable and benchmark command."""
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Resolves fixed bundle names from the same repository-relative default used by the runner.
-    arguments = parse_arguments()
-    repository = Path(__file__).resolve().parents[1]
-    results_dir = arguments.results_dir.resolve()
-    raw_path = results_dir / "m0-harness.json"
-    manifest_path = results_dir / "m0-context.json"
-    raw = read_json_object(raw_path)
-    manifest = read_json_object(manifest_path)
-
-    # ++++++++++++++++++++++++++++++++++++++++
-    # Requires the stable M0 identity and optimized build properties promised by the docs.
+    # Require one optimized Ninja build and an explicit dirty-state observation.
     require(manifest.get("schema_version") == 1, "schema_version must equal 1")
-    require(manifest.get("workload_id") == WORKLOAD_ID, "unexpected workload_id")
     require(manifest.get("build_preset") == "release", "build_preset must equal release")
     require(manifest.get("build_type") == "Release", "build_type must equal Release")
     require(manifest.get("build_system") == "Ninja", "build_system must equal Ninja")
-    require(manifest.get("sample_count") == 3, "sample_count must equal 3")
     require(type(manifest.get("git_worktree_dirty")) is bool, "git_worktree_dirty must be boolean")
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Verifies required descriptive fields together with numeric host topology and memory.
+    # Verify required descriptive fields together with numeric host topology and memory.
     for key in (
         "generated_at_utc",
         "git_revision",
@@ -172,7 +290,7 @@ def main() -> int:
     )
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Cross-checks the raw file, recorded commands, and executable against recorded hashes.
+    # Cross-check the raw file, recorded commands, and executable against recorded hashes.
     require(manifest["benchmark_result"] == raw_path.name, "benchmark_result names the wrong file")
     require(manifest["benchmark_result_sha256"] == sha256(raw_path), "raw result SHA-256 mismatch")
     executable = Path(manifest["benchmark_executable"]).resolve()
@@ -195,9 +313,13 @@ def main() -> int:
         f"--benchmark_out={raw_path}" in benchmark_command,
         "benchmark_command writes to another result file",
     )
+    require(
+        "--benchmark_out_format=json" in benchmark_command,
+        "benchmark_command does not request JSON output",
+    )
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Inspects producer context so manifest claims cannot drift from the raw benchmark output.
+    # Inspect producer context so manifest claims cannot drift from the raw benchmark output.
     raw_context = raw.get("context")
     require(isinstance(raw_context, dict), "raw benchmark context must be an object")
     assert isinstance(raw_context, dict)
@@ -214,9 +336,36 @@ def main() -> int:
         Path(str(raw_context.get("executable"))).resolve() == executable,
         "raw result names another executable",
     )
+    return executable, benchmark_command
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Requires every aggregate to represent the named workload and configured repetition count.
+
+
+# --------------------------------------------------------
+# Preserves the established M0 aggregate and command contract while accepting its new exact filter.
+def validate_m0(
+    raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]
+) -> None:
+    """Validate the M0 calibration identity, repetitions, aggregates, and optional legacy filter."""
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Retain every original schema-one M0 identity and sample requirement.
+    require(manifest.get("workload_id") == M0_WORKLOAD_ID, "unexpected workload_id")
+    require(manifest.get("sample_count") == 3, "sample_count must equal 3")
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # New runs must carry the exact anchored M0 filter; an absent filter remains accepted so the
+    # validator stays backward-compatible with already-retained schema-one M0 bundles.
+    filters = [
+        argument for argument in benchmark_command if argument.startswith("--benchmark_filter=")
+    ]
+    require(
+        filters in ([], [f"--benchmark_filter={M0_BENCHMARK_FILTER}"]),
+        "M0 benchmark_command has a wrong or ambiguous filter",
+    )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Require every raw record to remain an aggregate of the sole calibration workload.
     benchmarks = raw.get("benchmarks")
     require(isinstance(benchmarks, list) and bool(benchmarks), "raw benchmarks must be nonempty")
     assert isinstance(benchmarks, list)
@@ -225,14 +374,16 @@ def main() -> int:
         require(isinstance(benchmark, dict), f"benchmark record {index} must be an object")
         assert isinstance(benchmark, dict)
         require(
-            benchmark.get("run_name") == RUN_NAME, f"benchmark record {index} has wrong run_name"
+            benchmark.get("run_name") == M0_RUN_NAME,
+            f"benchmark record {index} has wrong run_name",
         )
         require(
-            benchmark.get("repetitions") == 3, f"benchmark record {index} has wrong repetitions"
+            benchmark.get("repetitions") == 3,
+            f"benchmark record {index} has wrong repetitions",
         )
         name = benchmark.get("name")
         require(
-            isinstance(name, str) and name.startswith(f"{RUN_NAME}_"),
+            isinstance(name, str) and name.startswith(f"{M0_RUN_NAME}_"),
             f"benchmark record {index} has wrong name",
         )
         aggregate = benchmark.get("aggregate_name")
@@ -241,7 +392,145 @@ def main() -> int:
     require(EXPECTED_AGGREGATES <= aggregates, "raw result is missing required aggregates")
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Proves the manifest describes the exact repository state used for validation.
+
+
+# --------------------------------------------------------
+# Validates exact M2 identities, metrics, attribution, and controlled-host threshold eligibility.
+def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]) -> str:
+    """Validate all three fixed M2 workloads and return their evidence classification."""
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Require one exact suite identity, ordered workload list, and fixed sample count per workload.
+    require(manifest.get("benchmark_suite") == "m2", "benchmark_suite must equal m2")
+    require(manifest.get("workload_ids") == list(M2_WORKLOAD_IDS), "unexpected M2 workload_ids")
+    require(
+        manifest.get("sample_count") == M2_SAMPLE_COUNT,
+        f"sample_count must equal {M2_SAMPLE_COUNT}",
+    )
+    filters = [
+        argument for argument in benchmark_command if argument.startswith("--benchmark_filter=")
+    ]
+    require(
+        filters == [f"--benchmark_filter={M2_BENCHMARK_FILTER}"],
+        "M2 benchmark_command must carry the exact anchored suite filter",
+    )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Index exactly three non-aggregate raw records by their complete registered run identities.
+    benchmarks = raw.get("benchmarks")
+    require(
+        isinstance(benchmarks, list) and len(benchmarks) == len(M2_RUN_NAMES),
+        "raw M2 benchmarks must contain exactly three records",
+    )
+    assert isinstance(benchmarks, list)
+    records: dict[str, dict[str, Any]] = {}
+    fingerprint_pairs: set[tuple[str, str]] = set()
+    for index, record in enumerate(benchmarks):
+        location = f"benchmark record {index}"
+        require(isinstance(record, dict), f"{location} must be an object")
+        assert isinstance(record, dict)
+        run_name = record.get("run_name")
+        require(run_name in M2_RECORD_CONTRACTS, f"{location} has an unexpected run_name")
+        assert isinstance(run_name, str)
+        require(run_name not in records, f"{location} duplicates {run_name}")
+        require(record.get("name") == run_name, f"{location} name must equal run_name")
+        require(record.get("run_type") == "iteration", f"{location} must be an iteration record")
+        require(record.get("repetitions") == 1, f"{location} repetitions must equal 1")
+        records[run_name] = record
+        fingerprint_pairs.add(m2_fingerprint_pair(record, location=location))
+    require(set(records) == set(M2_RUN_NAMES), "raw M2 records have wrong identities")
+    require(len(fingerprint_pairs) == 1, "M2 records do not share one fingerprint pair")
+    configuration_fingerprint, runtime_policy_fingerprint = next(iter(fingerprint_pairs))
+    require(
+        manifest.get("configuration_fingerprint_sha256") == configuration_fingerprint,
+        "configuration fingerprint does not match raw M2 labels",
+    )
+    require(
+        manifest.get("runtime_policy_fingerprint_sha256") == runtime_policy_fingerprint,
+        "runtime-policy fingerprint does not match raw M2 labels",
+    )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Validate units, fixed samples, general timings, and every workload-specific counter.
+    for run_name in M2_RUN_NAMES:
+        record = records[run_name]
+        contract = M2_RECORD_CONTRACTS[run_name]
+        location = run_name
+        require(
+            record.get("iterations") == M2_SAMPLE_COUNT, f"{location} iterations must equal 10000"
+        )
+        require(record.get("threads") == 1, f"{location} threads must equal 1")
+        require(record.get("time_unit") == contract["time_unit"], f"{location} has wrong time_unit")
+        require_nonnegative_number(record, "real_time", location=location)
+        require_nonnegative_number(record, "cpu_time", location=location)
+        sample_count = require_nonnegative_number(record, "sample_count", location=location)
+        require(sample_count == M2_SAMPLE_COUNT, f"{location} sample_count must equal 10000")
+        for counter in contract["counters"]:
+            assert isinstance(counter, str)
+            require_nonnegative_number(record, counter, location=location)
+        allocation_counter = contract["allocation_counter"]
+        assert isinstance(allocation_counter, str)
+        require_nonnegative_number(record, allocation_counter, location=location)
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Tail counters must form a monotonic distribution for both percentile-bearing workloads.
+    for run_name in M2_RUN_NAMES[1:]:
+        record = records[run_name]
+        p50 = require_nonnegative_number(record, "p50_us", location=run_name)
+        p99 = require_nonnegative_number(record, "p99_us", location=run_name)
+        p99_9 = require_nonnegative_number(record, "p99_9_us", location=run_name)
+        require(p50 <= p99 <= p99_9, f"{run_name} percentile counters are not monotonic")
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Smoke evidence must contain no threshold claim. Only exact controlled REF-MAC-01 facts may
+    # authorize the published M2 callback p99 qualification and cause its threshold to be tested.
+    classification = manifest.get("evidence_classification")
+    require(classification in ("smoke", "qualification"), "invalid evidence_classification")
+    callback_p99 = require_nonnegative_number(
+        records[M2_RUN_NAMES[1]], "p99_us", location=M2_RUN_NAMES[1]
+    )
+    if classification == "smoke":
+        require(
+            "qualification_reference" not in manifest and "threshold_claims" not in manifest,
+            "smoke evidence must not contain a threshold claim",
+        )
+        return "smoke"
+
+    require_ref_mac_01_context(manifest)
+    require(
+        manifest.get("qualification_reference") == "REF-MAC-01",
+        "qualification_reference must equal REF-MAC-01",
+    )
+    claims = manifest.get("threshold_claims")
+    require(
+        isinstance(claims, list) and len(claims) == 1, "qualification needs one threshold claim"
+    )
+    assert isinstance(claims, list)
+    require(isinstance(claims[0], dict), "qualification threshold claim must be an object")
+    assert isinstance(claims[0], dict)
+    claim = claims[0]
+    require(
+        claim.get("workload_id") == M2_WORKLOAD_IDS[1]
+        and claim.get("metric") == "p99_us"
+        and claim.get("operator") == "<="
+        and claim.get("limit") == 100.0
+        and claim.get("observed") == callback_p99
+        and type(claim.get("passed")) is bool
+        and claim.get("passed") == (callback_p99 <= 100.0),
+        "callback qualification claim does not match the raw p99 observation",
+    )
+    require(callback_p99 <= 100.0, "BENCH-M2-CALLBACK-001 p99 exceeds 100 microseconds")
+    return "qualification"
+
+    # ++++++++++++++++++++++++++++++++++++++++
+
+
+# --------------------------------------------------------
+# Proves that a manifest still describes the exact checkout being validated.
+def validate_repository_provenance(manifest: dict[str, Any], repository: Path) -> None:
+    """Cross-check Git revision, tree, dirty state, and byte-exact worktree fingerprint."""
+
+    # A committed revision alone is insufficient because benchmarkable source may be dirty.
     require(
         manifest["git_revision"] == command_output(["git", "rev-parse", "HEAD"], cwd=repository),
         "git_revision does not match the current checkout",
@@ -253,16 +542,50 @@ def main() -> int:
     )
     dirty = bool(command_output(["git", "status", "--porcelain"], cwd=repository))
     require(
-        manifest["git_worktree_dirty"] == dirty, "git_worktree_dirty no longer matches checkout"
+        manifest["git_worktree_dirty"] == dirty,
+        "git_worktree_dirty no longer matches checkout",
     )
     require(
         manifest["git_worktree_fingerprint_sha256"] == worktree_fingerprint(repository),
         "git_worktree_fingerprint_sha256 no longer matches checkout",
     )
 
+
+# --------------------------------------------------------
+# Validates the selected complete benchmark bundle and its current repository provenance.
+def main() -> int:
+    """Validate schema, hashes, workload metrics, qualification policy, and Git provenance."""
+
     # ++++++++++++++++++++++++++++++++++++++++
-    # Reports success only after every independent evidence invariant has passed.
-    print(f"validated {WORKLOAD_ID} evidence in {results_dir}")
+    # Resolve suite-specific bundle names from the same default used by the runner.
+    arguments = parse_arguments()
+    suite = arguments.suite
+    repository = Path(__file__).resolve().parents[1]
+    results_dir = arguments.results_dir.resolve()
+    raw_name, manifest_name = (
+        ("m0-harness.json", "m0-context.json")
+        if suite == "m0"
+        else ("m2-runtime.json", "m2-context.json")
+    )
+    raw_path = results_dir / raw_name
+    manifest_path = results_dir / manifest_name
+    raw = read_json_object(raw_path)
+    manifest = read_json_object(manifest_path)
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Validate common evidence first, then apply only the selected milestone's record contract.
+    _, benchmark_command = validate_common_bundle(raw, manifest, raw_path)
+    if suite == "m0":
+        validate_m0(raw, manifest, benchmark_command)
+        summary = M0_WORKLOAD_ID
+    else:
+        classification = validate_m2(raw, manifest, benchmark_command)
+        summary = f"M2 runtime {classification}"
+    validate_repository_provenance(manifest, repository)
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Report a smoke classification without asserting that its observed p99 meets a host threshold.
+    print(f"validated {summary} evidence in {results_dir}")
     return 0
 
     # ++++++++++++++++++++++++++++++++++++++++
