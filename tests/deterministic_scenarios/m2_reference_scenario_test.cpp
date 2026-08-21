@@ -740,17 +740,17 @@ void check_callback_sequence(const ReplayResult& replayed) {
   for (std::size_t index = 0U; index < replayed.callbacks.size(); ++index) {
     const auto& callback = replayed.callbacks[index];
     REQUIRE(std::holds_alternative<ObservedStateCallback>(callback) == is_state[index]);
-    const auto& context = std::visit(
-        [](const auto& value) -> const ObservedBotContext& { return value.context; }, callback);
-    CHECK(context.firm_id == id<model::FirmId>("firm.aegis-lab"));
-    CHECK(context.desk_id == id<model::DeskId>("desk.digital-assets"));
-    CHECK(context.bot_id == id<model::BotId>("bot.deribit-btc-perpetual-reference"));
-    CHECK(context.strategy_id == id<model::StrategyId>("strategy.deterministic-reference"));
-    CHECK(context.subscription_id ==
+    const auto* context =
+        std::visit([](const auto& value) { return std::addressof(value.context); }, callback);
+    CHECK(context->firm_id == id<model::FirmId>("firm.aegis-lab"));
+    CHECK(context->desk_id == id<model::DeskId>("desk.digital-assets"));
+    CHECK(context->bot_id == id<model::BotId>("bot.deribit-btc-perpetual-reference"));
+    CHECK(context->strategy_id == id<model::StrategyId>("strategy.deterministic-reference"));
+    CHECK(context->subscription_id ==
           id<model::SubscriptionId>("subscription.deribit-btc-perpetual-book"));
-    CHECK(context.callback_ordinal.value() == index + 1U);
-    CHECK(context.configuration_fingerprint == replayed.evidence.configuration_fingerprint);
-    CHECK(context.runtime_policy_fingerprint == replayed.evidence.runtime_policy_fingerprint);
+    CHECK(context->callback_ordinal.value() == index + 1U);
+    CHECK(context->configuration_fingerprint == replayed.evidence.configuration_fingerprint);
+    CHECK(context->runtime_policy_fingerprint == replayed.evidence.runtime_policy_fingerprint);
     if (const auto* state = std::get_if<ObservedStateCallback>(&callback)) {
       REQUIRE(state_index < expected_state.size());
       CHECK(state->event.readiness == expected_state[state_index]);
