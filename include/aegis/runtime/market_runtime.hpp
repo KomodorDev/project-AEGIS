@@ -1,15 +1,20 @@
-// Purpose: compose recorded fixture ingress, transactional source state, and canonical bot
-// dispatch behind one bounded serialized owner without exposing its mutable executor.
+// Purpose: compose recorded fixture ingress, transactional source state, canonical bot dispatch,
+// and an optional concrete fake-only submission stack behind one bounded serialized owner.
 
 #pragma once
 
 #include "aegis/configuration/startup_configuration.hpp"
 #include "aegis/market_data/recorded_fixture.hpp"
+#include "aegis/oms/outbound_oms.hpp"
+#include "aegis/risk/reservation_ledger.hpp"
 #include "aegis/runtime/bot_runtime.hpp"
 #include "aegis/runtime/dedicated_executor_driver.hpp"
+#include "aegis/runtime/fake_submission_runtime.hpp"
 #include "aegis/runtime/runtime_diagnostics.hpp"
 #include "aegis/runtime/serialized_executor.hpp"
+#include "aegis/runtime/submission_diagnostics.hpp"
 #include "aegis/trace/runtime_trace.hpp"
+#include "aegis/trace/submission_trace.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +24,13 @@
 #include <vector>
 
 namespace aegis::runtime {
+
+// ########################################################################
+// The concrete coordinator remains a runtime-private composition detail owned behind a stable
+// pointer; only MarketRuntime's out-of-line implementation requires its complete definition.
+class SubmissionCoordinator;
+
+// ########################################################################
 
 // ########################################################################
 // Runtime lifecycle distinguishes source bootstrap, ordinary operation, deliberate closure, and
@@ -78,8 +90,73 @@ struct MarketRuntimeSourceEvidence {
 // ########################################################################
 
 // ########################################################################
-// Final evidence owns canonical bytes, digest, bounded diagnostic prefix, and source summaries so
-// it remains valid independently of the runtime object's later destruction.
+// One copied OMS row preserves its complete immutable admission plus the final owner-local state.
+struct SubmissionOmsOrderEvidence {
+  oms::OutboundOrderAdmission admission;
+  oms::OutboundOrderState state;
+
+  // --------------------------------------------------------
+  friend bool operator==(const SubmissionOmsOrderEvidence&,
+                         const SubmissionOmsOrderEvidence&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// One copied fake accepted slot owns the exact bytes and every assigned local causal identity.
+struct SubmissionAcceptedWriteEvidence {
+  model::SubmissionAttemptId attempt_id;
+  model::EncoderInvocationOrdinal encoder_invocation_ordinal;
+  model::InitiatorInvocationOrdinal initiator_invocation_ordinal;
+  model::FakeWriteOrdinal write_ordinal;
+  std::vector<std::byte> bytes;
+
+  // --------------------------------------------------------
+  friend bool operator==(const SubmissionAcceptedWriteEvidence&,
+                         const SubmissionAcceptedWriteEvidence&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// Quiescent M3 evidence owns all deterministic policy identities, canonical and diagnostic
+// prefixes, retained OMS/risk state, accepted fake slots, and exact terminal fault status.
+struct SubmissionRuntimeEvidence {
+  risk::RiskPolicyFingerprint risk_policy_fingerprint;
+  model::RiskPolicyRevision risk_policy_revision;
+  execution::SubmissionPolicyFingerprint submission_policy_fingerprint;
+  std::vector<trace::SubmissionTraceRecord> trace_records;
+  std::vector<std::byte> canonical_trace_bytes;
+  model::Sha256Digest canonical_trace_digest;
+  std::vector<SubmissionDiagnosticRecord> diagnostics;
+  std::uint64_t dropped_diagnostics;
+  std::vector<SubmissionOmsOrderEvidence> oms_orders;
+  std::uint32_t oms_order_count;
+  std::vector<risk::ReservationEvidence> held_reservations;
+  std::uint32_t held_reservation_count;
+  std::vector<risk::RiskScopeExposureEvidence> scope_exposures;
+  std::vector<SubmissionAcceptedWriteEvidence> accepted_writes;
+  std::uint64_t encoder_invocations_consumed;
+  std::uint64_t initiator_invocations_consumed;
+  bool runtime_faulted;
+  std::optional<model::DomainError> terminal_error;
+
+  // --------------------------------------------------------
+  friend bool operator==(const SubmissionRuntimeEvidence&,
+                         const SubmissionRuntimeEvidence&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// Final evidence owns M2 canonical replay state plus the optional M3 fake-submission bundle so it
+// remains valid independently of the runtime object's later destruction.
 struct MarketRuntimeEvidence {
   configuration::ConfigurationFingerprint configuration_fingerprint;
   RuntimePolicyFingerprint runtime_policy_fingerprint;
@@ -93,6 +170,7 @@ struct MarketRuntimeEvidence {
   std::optional<BotDispatchReport> last_dispatch;
   std::optional<model::DomainError> fault;
   std::optional<TurnReport> last_completed_turn;
+  std::optional<SubmissionRuntimeEvidence> submission;
 
   // --------------------------------------------------------
   // Structural equality makes whole cold replay bundles directly comparable across drivers.
@@ -104,8 +182,8 @@ struct MarketRuntimeEvidence {
 // ########################################################################
 
 // ########################################################################
-// MarketRuntime is the stable heap-owned M2 composition root and the sole handler allowed to
-// mutate source state in accepted command and discontinuity turns.
+// MarketRuntime is the stable heap-owned composition root and the sole handler allowed to mutate
+// source state or install direct fake submission in accepted owner turns.
 class MarketRuntime final : public SourceDiscontinuityHandler {
 public:
 
@@ -115,6 +193,15 @@ public:
   create(configuration::StartupConfiguration configuration, RuntimePolicy policy,
          model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
          std::vector<BotStrategyRegistration> strategies);
+
+  // --------------------------------------------------------
+  // Validate and own one concrete credential-free fake stack before any callback can submit.
+  [[nodiscard]] static model::Result<std::unique_ptr<MarketRuntime>>
+  create_with_fake_submission(configuration::StartupConfiguration configuration,
+                              RuntimePolicy policy, model::ClockProvider& executor_clock,
+                              model::ClockProvider& callback_measurement_clock,
+                              std::vector<BotStrategyRegistration> strategies,
+                              FakeSubmissionRuntimeParams submission_params);
 
   // --------------------------------------------------------
   // Stop a dedicated owner, if present, before borrowed clocks and owned executor state disappear.
@@ -240,6 +327,20 @@ private:
                 model::ClockProvider& callback_measurement_clock);
 
   // --------------------------------------------------------
+  // Share stable-address construction while keeping observation-only and fake-only entry points
+  // explicit and preventing a generic transport dependency from entering the composition root.
+  [[nodiscard]] static model::Result<std::unique_ptr<MarketRuntime>>
+  create_impl(configuration::StartupConfiguration configuration, RuntimePolicy policy,
+              model::ClockProvider& executor_clock,
+              model::ClockProvider& callback_measurement_clock,
+              std::vector<BotStrategyRegistration> strategies,
+              std::optional<FakeSubmissionRuntimeParams> submission_params);
+
+  // --------------------------------------------------------
+  // Copy the complete optional submission owner only after the enclosing runtime is quiescent.
+  [[nodiscard]] model::Result<SubmissionRuntimeEvidence> copy_submission_evidence() const;
+
+  // --------------------------------------------------------
   // Bridge fixed inline executor commands into stable-address owner methods.
   [[nodiscard]] static model::Result<void>
   execute_frame(const FrameCommand& command, const AcceptedTurnContext& context) noexcept;
@@ -310,6 +411,7 @@ private:
   trace::RuntimeTraceSink trace_sink_;
   RuntimeDiagnosticSink diagnostics_;
   std::vector<market_data::MarketStateMachine> market_states_;
+  std::unique_ptr<SubmissionCoordinator> submission_coordinator_;
   std::unique_ptr<BotRuntime> bot_runtime_;
   std::unique_ptr<SerializedExecutor> executor_;
   std::unique_ptr<DeterministicExecutorDriver> deterministic_driver_;

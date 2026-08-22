@@ -1,10 +1,11 @@
-// Purpose: compose bounded recorded ingress, transactional market state, and canonical strategy
-// dispatch on the shared deterministic or dedicated serialized owner.
+// Purpose: compose bounded recorded ingress, transactional market state, canonical strategy
+// dispatch, and optional direct fake submission on the deterministic or dedicated serialized owner.
 
 #include "aegis/runtime/market_runtime.hpp"
 
 #include "aegis/market_data/market_state_machine.hpp"
 #include "aegis/model/domain_error.hpp"
+#include "submission_coordinator.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -215,12 +216,36 @@ MarketRuntime::MarketRuntime(configuration::StartupConfiguration configuration,
 }
 
 // --------------------------------------------------------
-// Validate the complete composition, preallocate owner state, and enqueue only the first bootstrap.
+// Preserve the observation-only M2 composition by installing no submission coordinator.
 model::Result<std::unique_ptr<MarketRuntime>>
 MarketRuntime::create(configuration::StartupConfiguration configuration, RuntimePolicy policy,
                       model::ClockProvider& executor_clock,
                       model::ClockProvider& callback_measurement_clock,
                       std::vector<BotStrategyRegistration> strategies) {
+  return create_impl(std::move(configuration), std::move(policy), executor_clock,
+                     callback_measurement_clock, std::move(strategies), std::nullopt);
+}
+
+// --------------------------------------------------------
+// Install only the concrete validated in-memory fake stack named by the M3 composition boundary.
+model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_with_fake_submission(
+    configuration::StartupConfiguration configuration, RuntimePolicy policy,
+    model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
+    std::vector<BotStrategyRegistration> strategies,
+    FakeSubmissionRuntimeParams submission_params) {
+  return create_impl(std::move(configuration), std::move(policy), executor_clock,
+                     callback_measurement_clock, std::move(strategies),
+                     std::optional<FakeSubmissionRuntimeParams>{std::move(submission_params)});
+}
+
+// --------------------------------------------------------
+// Validate the complete composition, preallocate owner state, and enqueue only the first bootstrap.
+model::Result<std::unique_ptr<MarketRuntime>>
+MarketRuntime::create_impl(configuration::StartupConfiguration configuration, RuntimePolicy policy,
+                           model::ClockProvider& executor_clock,
+                           model::ClockProvider& callback_measurement_clock,
+                           std::vector<BotStrategyRegistration> strategies,
+                           std::optional<FakeSubmissionRuntimeParams> submission_params) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject mixed startup and runtime provenance before constructing any mutable subsystem.
@@ -238,6 +263,20 @@ MarketRuntime::create(configuration::StartupConfiguration configuration, Runtime
   // Allocate the composition root first so every queued command can retain its final address.
   auto runtime = std::unique_ptr<MarketRuntime>{new MarketRuntime{
       std::move(configuration), std::move(policy), executor_clock, callback_measurement_clock}};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Validate and allocate the entire fake-only stack before constructing callback capabilities.
+  if (submission_params) {
+    auto submission = SubmissionCoordinator::create(runtime->configuration_, runtime->policy_,
+                                                    std::move(*submission_params));
+    if (!submission) {
+      return model::Result<std::unique_ptr<MarketRuntime>>::failure(submission.error());
+    }
+    runtime->submission_coordinator_ = std::move(submission).value();
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preallocate and construct every source state before callback dispatch becomes reachable.
   runtime->market_states_.reserve(runtime->policy_.source_capacity());
   for (const auto& source : runtime->policy_.sources()) {
     const auto* const metadata = runtime->configuration_.find_instrument_metadata(
@@ -255,9 +294,9 @@ MarketRuntime::create(configuration::StartupConfiguration configuration, Runtime
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal exact strategy coverage before creating the executor that can make callbacks reachable.
-  auto bots =
-      BotRuntime::create(runtime->configuration_, runtime->policy_, callback_measurement_clock,
-                         runtime->trace_sink_, runtime->diagnostics_, std::move(strategies));
+  auto bots = BotRuntime::create(
+      runtime->configuration_, runtime->policy_, callback_measurement_clock, runtime->trace_sink_,
+      runtime->diagnostics_, std::move(strategies), {}, runtime->submission_coordinator_.get());
   if (!bots) {
     return model::Result<std::unique_ptr<MarketRuntime>>::failure(bots.error());
   }
@@ -570,6 +609,115 @@ MarketRuntimeStatus MarketRuntime::status() const {
 }
 
 // --------------------------------------------------------
+// Copy all M3 evidence through immutable lower-layer inspection after owner release.
+model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence() const {
+  if (!submission_coordinator_) {
+    return failure<SubmissionRuntimeEvidence>(DomainErrorCode::ExecutionNotPermitted,
+                                              "market_runtime.submission_capability");
+  }
+  const auto& coordinator = *submission_coordinator_;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Materialize AEGISSTS bytes and digest from the same accepted canonical record prefix.
+  auto canonical_bytes = coordinator.trace_sink().canonical_bytes();
+  if (!canonical_bytes) {
+    return model::Result<SubmissionRuntimeEvidence>::failure(canonical_bytes.error());
+  }
+  auto canonical_digest = coordinator.trace_sink().digest();
+  if (!canonical_digest) {
+    return model::Result<SubmissionRuntimeEvidence>::failure(canonical_digest.error());
+  }
+  const auto trace_span = coordinator.trace_sink().records();
+  std::vector<trace::SubmissionTraceRecord> trace_records{trace_span.begin(), trace_span.end()};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Copy the retained noncanonical prefix and exact saturation accounting.
+  std::vector<SubmissionDiagnosticRecord> diagnostics;
+  diagnostics.reserve(coordinator.diagnostics().size());
+  for (std::size_t index = 0U; index < coordinator.diagnostics().size(); ++index) {
+    const auto* const record = coordinator.diagnostics().at(index);
+    if (record != nullptr) {
+      diagnostics.push_back(*record);
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Copy every permanent OMS row in admission order, including terminal LocallyFailed records.
+  const auto& outbound = coordinator.outbound_oms();
+  std::vector<SubmissionOmsOrderEvidence> oms_orders;
+  oms_orders.reserve(outbound.size());
+  for (std::size_t index = 0U; index < outbound.size(); ++index) {
+    const auto* const record = outbound.record_at(index);
+    if (record == nullptr) {
+      return failure<SubmissionRuntimeEvidence>(DomainErrorCode::InvalidOmsState,
+                                                "market_runtime.submission_oms_evidence");
+    }
+    oms_orders.push_back(SubmissionOmsOrderEvidence{record->admission(), record->state()});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Select every currently Held reusable slot and preserve the full canonical scope-cell view.
+  const auto& reservations = coordinator.reservations();
+  std::vector<risk::ReservationEvidence> held_reservations;
+  held_reservations.reserve(reservations.held_reservation_count());
+  for (std::size_t index = 0U; index < reservations.capacity(); ++index) {
+    const auto* const reservation = reservations.reservation_at(index);
+    if (reservation != nullptr && reservation->state == risk::ReservationState::Held) {
+      held_reservations.push_back(*reservation);
+    }
+  }
+  if (held_reservations.size() != reservations.held_reservation_count()) {
+    return failure<SubmissionRuntimeEvidence>(DomainErrorCode::InvalidRiskReservationState,
+                                              "market_runtime.submission_reservations");
+  }
+  std::vector<risk::RiskScopeExposureEvidence> scope_exposures;
+  scope_exposures.reserve(reservations.scope_evidence_count());
+  for (std::size_t index = 0U; index < reservations.scope_evidence_count(); ++index) {
+    auto exposure = reservations.scope_evidence_at(index);
+    if (!exposure) {
+      return failure<SubmissionRuntimeEvidence>(DomainErrorCode::InvalidRiskReservationState,
+                                                "market_runtime.submission_scope_evidence");
+    }
+    scope_exposures.push_back(std::move(*exposure));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Own each fake accepted slot's exact bytes so evidence outlives the runtime and fake buffers.
+  std::vector<SubmissionAcceptedWriteEvidence> accepted_writes;
+  accepted_writes.reserve(coordinator.initiator().accepted_writes().size());
+  for (const auto& write : coordinator.initiator().accepted_writes()) {
+    const auto bytes = write.bytes();
+    accepted_writes.push_back(
+        SubmissionAcceptedWriteEvidence{write.attempt_id(), write.encoder_invocation_ordinal(),
+                                        write.initiator_invocation_ordinal(), write.write_ordinal(),
+                                        std::vector<std::byte>{bytes.begin(), bytes.end()}});
+  }
+
+  return model::Result<SubmissionRuntimeEvidence>::success(SubmissionRuntimeEvidence{
+      reservations.policy().fingerprint(),
+      reservations.policy().revision(),
+      coordinator.policy().fingerprint(),
+      std::move(trace_records),
+      std::move(canonical_bytes).value(),
+      std::move(canonical_digest).value(),
+      std::move(diagnostics),
+      coordinator.diagnostics().dropped_count(),
+      std::move(oms_orders),
+      outbound.size(),
+      std::move(held_reservations),
+      reservations.held_reservation_count(),
+      std::move(scope_exposures),
+      std::move(accepted_writes),
+      coordinator.encoder().invocations_consumed(),
+      coordinator.initiator().invocations_consumed(),
+      coordinator.runtime_faulted(),
+      coordinator.terminal_error(),
+  });
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 // Copy complete replay evidence only after no owner or future admission can mutate it.
 model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
   std::lock_guard driver_lock{driver_mutex_};
@@ -640,12 +788,21 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
     reported_fault = executor_->terminal_error();
   }
 
+  std::optional<SubmissionRuntimeEvidence> submission;
+  if (submission_coordinator_) {
+    auto copied = copy_submission_evidence();
+    if (!copied) {
+      return model::Result<MarketRuntimeEvidence>::failure(copied.error());
+    }
+    submission.emplace(std::move(copied).value());
+  }
+
   return model::Result<MarketRuntimeEvidence>::success(MarketRuntimeEvidence{
       configuration_.fingerprint(), policy_.fingerprint(), std::move(trace_records),
       std::move(canonical_bytes).value(), std::move(canonical_digest).value(),
       std::move(diagnostic_records), diagnostics_.dropped_count(), std::move(sources),
       executor_state, published_last_dispatch_, std::move(reported_fault),
-      newer_report(last_completed_turn_, dedicated_report)});
+      newer_report(last_completed_turn_, dedicated_report), std::move(submission)});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -1048,6 +1205,12 @@ void MarketRuntime::finish_outcome(const BotDispatchPlan& plan,
     auto appended = diagnostics_.append(diagnostic->kind, std::move(diagnostic->fields));
     if (!appended && !post_commit_fault) {
       post_commit_fault.emplace(appended.error());
+    }
+  }
+  if (!post_commit_fault) {
+    if (submission_coordinator_ && submission_coordinator_->runtime_faulted()) {
+      post_commit_fault = submission_coordinator_->terminal_error().value_or(DomainError::at_field(
+          DomainErrorCode::SubmissionEvidenceExhausted, "market_runtime.submission_runtime"));
     }
   }
   if (!post_commit_fault) {
