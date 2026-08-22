@@ -65,6 +65,9 @@ add_library(
   src/aegis/model/time.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
+  # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
+  src/aegis/risk/exposure.cpp
+  src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
   # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.

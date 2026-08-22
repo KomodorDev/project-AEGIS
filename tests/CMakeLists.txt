@@ -40,6 +40,9 @@ add_executable(
   unit/model/time_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
+  # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.
+  unit/risk/risk_policy_test.cpp
+  unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
   unit/runtime/runtime_policy_test.cpp
   # Diagnostics and bot tests pin accepted-prefix detail and canonical strategy dispatch.
