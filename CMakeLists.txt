@@ -139,19 +139,26 @@ if(AEGIS_BUILD_BENCHMARKS)
 endif()
 
 # Discover every owned C++ and Python source at configure time and pass both lists to the format
-# targets. Keeping the Python list automatic prevents a newly added tool from escaping CI linting.
+# targets. Keeping headers and tooling tests automatic prevents new owned files from escaping CI.
 # Interesting syntax: CONFIGURE_DEPENDS asks CMake to reconfigure when matching files appear/disappear.
 file(
   GLOB_RECURSE AEGIS_CXX_FORMAT_FILES
   CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.cpp")
 file(
   GLOB_RECURSE AEGIS_PYTHON_FORMAT_FILES
   CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.py")
+  "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.py")
 aegis_add_format_targets(CXX_FILES ${AEGIS_CXX_FORMAT_FILES} PYTHON_FILES
                          ${AEGIS_PYTHON_FORMAT_FILES})
