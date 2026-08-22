@@ -102,6 +102,17 @@ TEST_CASE("owner-local route authorization applies the canonical rejection order
   CHECK(routes.authorize(*peer, request(route_id)).reason ==
         execution::SubmissionReason::RouteNotOwned);
 
+  auto disabled_configuration =
+      configuration::StartupConfiguration::create(test_support::two_firm_configuration_params());
+  REQUIRE(disabled_configuration);
+  const auto disabled_routes = catalog(disabled_configuration.value());
+  const auto* const disabled_owner = disabled_configuration.value().organization().find_bot(
+      id<model::BotId>("bot.deribit-btc-perpetual-reference"));
+  REQUIRE(disabled_owner != nullptr);
+  const auto disabled_route_id = disabled_configuration.value().routes().routes().front().id;
+  CHECK(disabled_routes.authorize(*disabled_owner, request(disabled_route_id)).reason ==
+        execution::SubmissionReason::RouteDisabled);
+
   auto wrong_instrument = request(route_id);
   wrong_instrument.instrument_id = id<model::InstrumentId>("ETH-USD-PERPETUAL");
   CHECK(routes.authorize(*owner, wrong_instrument).reason ==
