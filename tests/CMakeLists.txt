@@ -1,4 +1,5 @@
-# Purpose: compile and register AEGIS unit tests with CTest.
+# Purpose: compile and register AEGIS unit, tooling, and M1-M3 deterministic-scenario tests with
+# CTest.
 
 # Keep the exact accepted startup inputs in one owned fixture library so unit and scenario evidence
 # cannot silently diverge on configuration provenance.
@@ -94,3 +95,12 @@ target_link_libraries(aegis_m2_reference_scenario_tests PRIVATE aegis_test_suppo
                                                                 Catch2::Catch2WithMain)
 aegis_configure_owned_target(aegis_m2_reference_scenario_tests)
 catch_discover_tests(aegis_m2_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)
+
+# Replay every M3 local submission outcome under two manual owners and one dedicated owner, then
+# compare the complete callback, result, trace, OMS, reservation, diagnostic, and fake-write bundle.
+add_executable(aegis_m3_reference_scenario_tests
+               deterministic_scenarios/m3_reference_scenario_test.cpp)
+target_link_libraries(aegis_m3_reference_scenario_tests PRIVATE aegis_test_support
+                                                                Catch2::Catch2WithMain)
+aegis_configure_owned_target(aegis_m3_reference_scenario_tests)
+catch_discover_tests(aegis_m3_reference_scenario_tests PROPERTIES LABELS deterministic_scenario)
