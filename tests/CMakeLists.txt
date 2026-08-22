@@ -38,6 +38,8 @@ add_executable(
   unit/model/sha256_test.cpp
   # Time tests prove nominal clock separation, checked deltas, revisions, and injected progression.
   unit/model/time_test.cpp
+  # OMS tests pin duplicate-before-capacity admission and the complete local M3 transition table.
+  unit/oms/outbound_oms_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
   # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.

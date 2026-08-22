@@ -54,13 +54,18 @@ The complete transition table is:
 | `PendingInitiation` | definite pre-acceptance initiation failure | `LocallyFailed` |
 | `PendingInitiation` | accepted and initiated | `WriteInitiated` |
 | `PendingInitiation` | accepted but outcome lost | `SubmissionUnknown` |
+| `WriteInitiated` | latched post-acceptance internal fault invalidates completed local evidence | `SubmissionUnknown` |
 
-Terminal states have no outgoing M3 transition. A repeated operation or any operation from the
-wrong source state returns `InvalidOmsState` without mutation. Admission tests exact duplicate
-identity before table capacity, so `DuplicateOrderIdentity` wins when both conditions are true.
-Duplicate identity and fixed-capacity exhaustion are ordinary OMS non-admission outcomes. They occur
-after risk reservation in the canonical path, so the coordinator releases that reservation exactly
-once. No admitted record exists for an OMS non-admission.
+`LocallyFailed` and `SubmissionUnknown` are terminal. `WriteInitiated` has no ordinary outgoing M3
+transition; its sole exceptional transition is the conservative internal-fault containment row
+above. That downgrade does not release exposure, retry the order, or claim initiation did not occur.
+It records that the runtime can no longer present trustworthy completed local evidence and therefore
+requires reconciliation. A repeated operation or any operation from the wrong source state returns
+`InvalidOmsState` without mutation. Admission tests exact duplicate identity before table capacity,
+so `DuplicateOrderIdentity` wins when both conditions are true. Duplicate identity and fixed-capacity
+exhaustion are ordinary OMS non-admission outcomes. They occur after risk reservation in the
+canonical path, so the coordinator releases that reservation exactly once. No admitted record exists
+for an OMS non-admission.
 
 ### Exact deterministic fake encoder
 

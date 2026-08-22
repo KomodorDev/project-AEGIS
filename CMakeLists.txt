@@ -63,6 +63,8 @@ add_library(
   src/aegis/model/sha256.cpp
   # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp
+  # Outbound OMS retains local admission/state/provenance but owns no risk release or communication.
+  src/aegis/oms/outbound_oms.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
   # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
