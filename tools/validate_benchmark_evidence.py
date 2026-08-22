@@ -610,6 +610,19 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
         require(record.get("name") == run_name, f"{location} name must equal run_name")
         require(record.get("run_type") == "iteration", f"{location} must be an iteration record")
         require(record.get("repetitions") == 1, f"{location} repetitions must equal 1")
+        # Google Benchmark can attach failure or skip status to otherwise complete-looking metrics.
+        for status_key in ("error_occurred", "skipped"):
+            if status_key in record:
+                require(
+                    record.get(status_key) is False,
+                    f"{location} {status_key} must be false when present",
+                )
+        for message_key in ("error_message", "skip_message"):
+            if message_key in record:
+                require(
+                    record.get(message_key) == "",
+                    f"{location} {message_key} must be empty when present",
+                )
         records[run_name] = record
         provenance_by_run[run_name] = m3_provenance(record, location=location)
     require(set(records) == set(M3_RUN_NAMES), "raw M3 records have wrong identities")

@@ -157,6 +157,14 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
         """Accept only the two explicitly supported evidence classifications."""
 
         raw, manifest, command = smoke_fixture()
+        raw["benchmarks"][0].update(
+            {
+                "error_occurred": False,
+                "skipped": False,
+                "error_message": "",
+                "skip_message": "",
+            }
+        )
         self.assertEqual(validator.validate_m3(raw, manifest, command), "smoke")
         qualify(manifest, raw)
         self.assertEqual(validator.validate_m3(raw, manifest, command), "qualification")
@@ -181,6 +189,18 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
             ),
             "nonmonotonic percentiles": lambda raw, manifest, command: raw["benchmarks"][0].update(
                 {"p50_us": 9.0, "p99_us": 8.0}
+            ),
+            "error status": lambda raw, manifest, command: raw["benchmarks"][0].__setitem__(
+                "error_occurred", True
+            ),
+            "skip status": lambda raw, manifest, command: raw["benchmarks"][0].__setitem__(
+                "skipped", True
+            ),
+            "error message": lambda raw, manifest, command: raw["benchmarks"][0].__setitem__(
+                "error_message", "benchmark failed"
+            ),
+            "skip message": lambda raw, manifest, command: raw["benchmarks"][0].__setitem__(
+                "skip_message", "benchmark skipped"
             ),
             "manifest provenance mismatch": lambda raw, manifest, command: manifest[
                 "workload_provenance"

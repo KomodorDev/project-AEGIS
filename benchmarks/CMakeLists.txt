@@ -7,6 +7,7 @@ add_executable(
   aegis_benchmarks
   harness_benchmark.cpp
   m2_runtime_benchmark.cpp
+  m3_submission_benchmark.cpp
   support/allocation_tracking.cpp
   support/distribution_metrics.cpp)
 
