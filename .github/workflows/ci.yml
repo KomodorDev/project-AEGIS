@@ -1,4 +1,4 @@
-# Purpose: Build and inspect the implemented M0-M2 baseline on every supported compiler, run
+# Purpose: Build and inspect the implemented M0-M3 baseline on every supported compiler, run
 # sanitizer checks, and retain machine-readable benchmark smoke results.
 name: Delivery baseline
 
@@ -155,10 +155,10 @@ jobs:
       - name: Configure, build, and test
         run: cmake --workflow --preset ${{ matrix.workflow }}
 
-  # Prove that the release benchmark executable and both evidence collectors work.
+  # Prove that the release benchmark executable and all three evidence collectors work.
   # Hosted-runner timings are smoke evidence, not performance qualifications.
   benchmark-smoke:
-    name: M0 and M2 benchmark smoke tests
+    name: M0, M2, and M3 benchmark smoke tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     # Use Clang consistently for the retained benchmark context record.
@@ -182,26 +182,28 @@ jobs:
       # Build and test the optimized profile before collecting timing output.
       - name: Build the release profile
         run: cmake --workflow --preset benchmark
-      # Produce isolated M0 and M2 raw JSON plus one complete environment manifest per suite.
+      # Produce isolated M0, M2, and M3 raw JSON plus one complete environment manifest per suite.
       - name: Run the benchmark workloads
         run: |
           python tools/run_benchmarks.py --suite m0
           python tools/run_benchmarks.py --suite m2
+          python tools/run_benchmarks.py --suite m3
       # Reject missing fields, mismatched hashes, stale provenance, wrong workload records, or a
       # non-Release producer before an artifact can be mistaken for valid evidence.
       - name: Validate the benchmark evidence
         run: |
           python tools/validate_benchmark_evidence.py --suite m0
           python tools/validate_benchmark_evidence.py --suite m2
-      # Preserve every generated JSON file for 90 days. The `*.json` glob
-      # selects both result files, while `if-no-files-found: error` prevents a
-      # falsely successful run that uploaded no evidence.
+          python tools/validate_benchmark_evidence.py --suite m3
+      # Preserve every generated JSON file for 90 days. The `*.json` glob selects all six
+      # raw/context files from the three suites, while `if-no-files-found: error` prevents a falsely
+      # successful run that uploaded no evidence.
       - name: Upload machine-readable benchmark evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # Include the immutable commit SHA so artifacts from concurrent runs
           # are distinguishable without opening them.
-          name: m0-m2-benchmarks-${{ github.sha }}
+          name: m0-m2-m3-benchmarks-${{ github.sha }}
           path: benchmark-results/*.json
           if-no-files-found: error
           retention-days: 90
