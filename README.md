@@ -1,23 +1,28 @@
 # AEGIS
 
 > **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1/M2
-> baseline and accepted M3 local-submission contracts without mistaking them for a connected system.
+> baseline and locally complete M3 fake-submission slice without mistaking it for a connected system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
 adds a bounded serialized owner, recorded fixture playback, transactional market books, and
-Ready-only strategy dispatch. The reference slice remains deliberately narrow: one Deribit
-testnet account alias, one BTC inverse perpetual, one active subscribed bot, and no exchange
-connectivity.
+Ready-only strategy dispatch. M3 locally adds route authorization, exact fixed risk, outbound OMS
+admission, exact fake encoding, and an in-memory fake write-initiation boundary. The reference slice
+remains deliberately narrow: one Deribit testnet account alias, one BTC inverse perpetual, one
+active subscribed bot, and no exchange connectivity.
 
 M3's canonical order, fixed startup risk, outbound OMS, and conservative fake-initiation contracts
-are accepted in ADR-0008 and ADR-0009. Their implementation and exit evidence are in progress; the
-accepted design adds only deterministic in-memory fakes and does not add exchange connectivity.
+are accepted in ADR-0008 and ADR-0009 and locally implemented on
+`codex/m3-canonical-submission`. Its [M3 exit-evidence record](docs/milestones/m3-exit-evidence.md)
+anchors the verified implementation and smoke benchmark producer. The branch is unpublished, has
+no pull request or remote CI evidence, and is not merged into `dev`; the integrated baseline remains
+M2. M3 adds only deterministic in-memory fakes and no exchange connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
-Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md)
-and the integrated [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md). After M1 merged,
+Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md),
+the integrated [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md), and the local-only
+[M3 exit-evidence record](docs/milestones/m3-exit-evidence.md). After M1 merged,
 the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. M2 then ended at
 feature head `4b5d89e834b45fef30fca87689937770d2c2ab35`, which
 [PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) merged unchanged into `dev` as
@@ -61,6 +66,28 @@ credential, order, risk, OMS, or transmission boundary.
   bounded diagnostics, re-entry rejection, and exact pre-commit callback/trace reservation.
 - Canonical `AEGISRTS` replay evidence. The complete M2 scenario reproduces all 28 callbacks and 71
   trace records byte-for-byte under two manual runs and the dedicated driver.
+
+## What M3 provides locally
+
+These are credential-free in-process submission capabilities. They stop at a structurally offline
+fake accepted-slot boundary; they do not encode or transmit a venue-native order.
+
+- A bot-bound `submit` capability whose firm, desk, bot, strategy, account, venue, and local order
+  identity cannot be supplied by strategy code; the requested instrument must exactly match the
+  authorized route projection.
+- Explicit owner-local route authorization followed by deterministic limit-only, GTC, no-flags
+  economic validation against exact metadata precision, minimum quantity, lot step, and price tick.
+- One immutable canonical risk-policy snapshot, exact checked fixed-point inverse-contract
+  exposure, bot/desk/firm/account/route/instrument/venue scopes, and atomic check-and-reserve with
+  exact-once definitive rollback.
+- Bounded outbound OMS admission with duplicate-identity and capacity results, exact deterministic
+  `AEGISFOE` encoding, and a final in-memory fake initiator that is structurally incapable of live
+  communication.
+- Three disjoint local results: known local rejection, local fake `WriteInitiated`, and conservative
+  `SubmissionUnknown`. The latter retains exposure and is never automatically retried. Neither
+  `WriteInitiated` nor `SubmissionUnknown` is an exchange acknowledgement.
+- Bounded canonical `AEGISSTS` evidence, bounded diagnostics, deterministic manual/dedicated replay,
+  named submission benchmarks, and a fail-closed forbidden-capability audit.
 
 ## Quick start
 
@@ -107,18 +134,24 @@ python3 tools/run_benchmarks.py
 python3 tools/validate_benchmark_evidence.py
 python3 tools/run_benchmarks.py --suite m2
 python3 tools/validate_benchmark_evidence.py --suite m2
+python3 tools/run_benchmarks.py --suite m3
+python3 tools/validate_benchmark_evidence.py --suite m3
+python3 tools/check_forbidden_capabilities.py
 ```
 
 The benchmark runner first rebuilds its Release target, then writes raw timing output and a context
 manifest. The validator independently checks workload identity, units, samples, fingerprints, build
 mode, hashes, and Git provenance. The no-argument commands retain the M0 calibration contract; the
-explicit M2 suite runs the executor, callback, and complete market-owner workloads. An M2 result is
-only a `REF-MAC-01` qualification when every required host-control field is truthfully set and
-validated; otherwise it is smoke evidence.
+explicit M2 suite runs the executor, callback, and complete market-owner workloads. The explicit M3
+suite runs successful fake initiation and inline risk rejection. An M2 or M3 result is only a
+`REF-MAC-01` qualification when every required host-control field is truthfully set and validated;
+otherwise it is smoke evidence. The M3 exit record deliberately reports its uncontrolled clean run
+as smoke and makes no provisional p99 threshold claim.
 
-The build contains no exchange session, order-transmission capability, credential lookup, socket,
-or production endpoint. The first market and account assumptions are described in
-[the reference scenario](docs/reference-scenario.md).
+The build contains no exchange session, native/live exchange order-transmission capability,
+credential lookup, socket, or production endpoint. M3's accepted-slot copy is only an in-memory
+fake and is never an exchange acknowledgement. The first market and account assumptions are
+described in [the reference scenario](docs/reference-scenario.md).
 
 ## Milestone records
 
@@ -138,3 +171,4 @@ or production endpoint. The first market and account assumptions are described i
 - [M0 exit evidence](docs/milestones/m0-exit-evidence.md)
 - [M1 exit evidence](docs/milestones/m1-exit-evidence.md)
 - [M2 exit evidence](docs/milestones/m2-exit-evidence.md)
+- [M3 exit evidence](docs/milestones/m3-exit-evidence.md)

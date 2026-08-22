@@ -3,9 +3,10 @@
 > **Purpose:** Define how AEGIS quality is measured, name stable benchmark/load workloads, and record
 > the initial correctness and latency targets that later milestones must prove or deliberately revise.
 
-**Status:** M0 calibration and all three M2 workloads are executable. Workload identifiers are
-stable; thresholds remain provisional and may be revised only with recorded measurements and
-rationale.
+**Status:** M0 calibration, all three M2 workloads, and both M3 submission workloads are executable.
+Workload identifiers are stable; thresholds remain provisional and may be revised only with
+recorded measurements and rationale. The locally recorded M3 bundle is smoke evidence, not
+controlled-host qualification.
 
 ## Measurement rules
 
@@ -137,3 +138,60 @@ hashes, Git/worktree provenance, and those fingerprints. It classifies ordinary 
 permits the callback p99 threshold claim only when the manifest exactly identifies `REF-MAC-01` and
 the power, host-isolation, and thermal fields use the published controlled values. Missing or
 free-form control claims never qualify a timing result.
+
+## Running the M3 workloads
+
+The M3 suite uses the same Release executable but an exact filter containing only the two submission
+records:
+
+```sh
+cmake --workflow --preset benchmark
+python3 tools/run_benchmarks.py --suite m3
+python3 tools/validate_benchmark_evidence.py --suite m3
+```
+
+It writes `benchmark-results/m3-submission.json` and
+`benchmark-results/m3-context.json`. Each record uses exactly 10,000 manual-time samples, one
+repetition, one thread, and microsecond units. The required full names are:
+
+- `BENCH-M3-SUBMIT-001/submission.authorized-limit-fake-initiation/iterations:10000/manual_time`;
+- `BENCH-M3-SUBMIT-002/submission.inline-risk-rejection/iterations:10000/manual_time`.
+
+Both records report `p50_us`, `p99_us`, `p99_9_us`, and `sample_count`.
+`BENCH-M3-SUBMIT-001` additionally reports `orders_per_second` and
+`allocations_per_order`; `BENCH-M3-SUBMIT-002` reports `rejections_per_second` and
+`allocations_per_request`. The independent validator requires finite nonnegative values, exact
+record count/name/unit/sample fields, monotonic percentiles, no skipped/error status, and the exact
+workload-specific counters.
+
+The successful interval starts with the first operation inside the bot-bound `submit` entry and ends
+at the monotonic reading captured immediately after the fake initiator copies the accepted slot; the
+returned local outcome carries that endpoint. Later OMS/trace finalization and result-return work
+are excluded from that latency. The risk-rejection interval starts at the same entry and ends with
+the completed local rejection immediately before return. Request construction, fixture
+construction, preallocation, runtime
+bootstrap, and the initial Ready callback are outside both intervals. Network round trips and
+exchange acknowledgement timing cannot enter either fixture because M3 contains no network or
+exchange session.
+
+Latency samples and the named operation rate use those internal start/end readings. Allocation
+tracking instead starts immediately before `context.submit(request)` and stops immediately after the
+whole call returns. It therefore also covers successful post-endpoint OMS/trace/result finalization;
+the required allocation count is not made artificially smaller by stopping at the latency endpoint.
+
+The two workload labels and the context manifest carry the exact ordered provenance fields:
+`workload_id`, configuration fingerprint/revision, organization revision, M2 runtime-policy
+fingerprint, risk-policy fingerprint/revision, submission-policy fingerprint, route/revision,
+account, venue, instrument, metadata revision, and order namespace. The workloads use the same
+value-identical request, configuration, runtime policy, route/account/instrument metadata,
+capacities, scripts, and namespace. Only the authored bot risk limit changes: workload 002 lowers
+the single-order-quantity limit, which changes the risk snapshot and bound submission-policy
+fingerprints and rejects before reservation and OMS.
+
+The runner labels the default `uncontrolled` control values as `smoke`. A smoke manifest must contain
+neither `qualification_reference` nor `threshold_claims`, and CI remains smoke regardless of its
+observed numbers. A controlled qualification requires exact `REF-MAC-01` host/tool facts, the three
+published control strings, two ordered claims bound to the raw records, and both p99 limits to pass:
+50 microseconds for workload 001 and 25 microseconds for workload 002. The [M3 exit-evidence
+record](milestones/m3-exit-evidence.md) reports the clean local run honestly as smoke and makes no
+threshold claim.

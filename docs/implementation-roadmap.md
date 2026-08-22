@@ -165,12 +165,17 @@ Teach the robot to listen to market messages one at a time and build an order-bo
 
 ## M3 — Canonical Submission, Inline Risk and OMS Contract
 
-**Contract status (2026-08-22):** The complete M3 order, route, fixed-risk, reservation, outbound
-OMS, deterministic fake-initiation, result, and evidence contracts are accepted in
-[ADR-0008](decisions/0008-canonical-submission-and-fixed-risk.md) and
-[ADR-0009](decisions/0009-outbound-oms-and-fake-initiation.md). Implementation and exit evidence are
-in progress on `codex/m3-canonical-submission` from M2 merge baseline
-`d7733bb16a52d5ec954338f861d798d8c6620dad`.
+**Local implementation status (2026-08-22):** The complete M3 order, route, fixed-risk,
+reservation, outbound OMS, deterministic fake-initiation, result, and evidence contracts are
+accepted in [ADR-0008](decisions/0008-canonical-submission-and-fixed-risk.md) and
+[ADR-0009](decisions/0009-outbound-oms-and-fake-initiation.md). They are locally implemented on
+`codex/m3-canonical-submission` at clean producer
+`27087d4da423546041295de43e7fa2fb31425b63`, with tree
+`2e339a5d97bdc9b6bd4522e754c6052783cb01b4`, from M2 merge baseline
+`d7733bb16a52d5ec954338f861d798d8c6620dad`. The [M3 exit-evidence
+record](milestones/m3-exit-evidence.md) maps every gate and records local verification plus
+uncontrolled smoke timing. The branch is unpublished, has no pull request or remote CI evidence,
+and is not merged into `dev`; the integrated baseline remains M2.
 
 ### Outcome
 
@@ -238,6 +243,8 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 - Apply every private event through OMS reconciliation before changing reservations or inventory.
 - Attribute fills immediately to bot, desk and firm positions and to every non-organizational exposure scope enforced by risk, including account, route, instrument and venue where applicable.
 - Notify the bot only after owner-local OMS, reservation, exposure and inventory updates complete.
+- Add the longitudinal reference driver: one injected `SubmitReferenceIntent` causes exactly one
+  fixed M3 request on the next Ready callback and never submits it again automatically.
 - Decide recovery authority and crash consistency before networking: stable identities across restart, journal/snapshot ordering and durability guarantees, replay/live-catch-up boundary, local-versus-exchange source-of-truth rules and quarantine of unknown/external orders.
 - Define audit events now, including order, route/account, configuration, metadata and risk-policy provenance; durable storage arrives in M9.
 - Add fake journal/reconciliation adapters and inject a crash at every lifecycle transition.
@@ -248,6 +255,8 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 - Model/property tests prove total worst-case exposure is never understated through partial fills, rejection, cancellation, replacement, fill-before-ack, duplicates and ambiguous transmission outcomes.
 - Position and exposure aggregates reconcile after every event across bot, desk, firm, account, route, instrument and venue scopes used by the v1 risk model.
 - A bot callback caused by an order event observes the updated state and cannot double-apply the event.
+- The longitudinal reference scenario submits its fixed intent exactly once and does not turn an
+  ambiguous result, replay, reconnect, or later callback into an automatic retry.
 - Fake-backed restart and live-catch-up scenarios converge at every injected crash point without reusing a client identity or releasing uncertain exposure.
 - Unknown or externally created orders cannot be silently attributed; the affected account is conservatively quarantined pending reconciliation.
 
@@ -365,7 +374,7 @@ Turn on the send button only for the pretend-money exchange. Practice sending, c
 
 ### Exit Gate
 
-- Market event → strategy → canonical validation → route → risk → OMS → native submission → private event → inventory succeeds end to end in the sandbox.
+- Market event → strategy → route authorization → canonical validation → local identity → risk → OMS → native submission → private event → inventory succeeds end to end in the sandbox.
 - Submit, acknowledgement and cancel smoke flows work; a fill is demonstrated when the sandbox can reliably provide one.
 - Deterministic tests cover reject, fill-before-ack, partial/cumulative fills, client-ID collision, rate limit, write overflow, timeout, disconnect, late event and ambiguous submission.
 - Ambiguous outcomes retain conservative exposure and enter reconciliation; no retry can create a duplicate economic order silently.

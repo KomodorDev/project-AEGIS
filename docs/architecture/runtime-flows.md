@@ -3,10 +3,11 @@
 > **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 local submission
 > boundaries sequence complete work without implying hidden thread hops or partial state.
 
-**Status: Implemented M2 market flow and accepted M3 local-submission flow.** M2 implements the
-recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic, and replay
-branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and deterministic fake
-boundaries; private sessions, exchange events, dynamic risk, and recovery remain later work.
+**Status: Implemented M2 market flow and locally implemented M3 local-submission flow.** M2
+implements the recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic,
+and replay branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and
+deterministic fake boundaries, and the unpublished M3 feature branch implements Flow 2. Private
+sessions, exchange events, dynamic risk, and recovery remain later work.
 
 Return to the [architecture overview](../architecture.md) or read
 [ADR-0001](../decisions/0001-serialized-data-plane-execution.md),
@@ -79,16 +80,21 @@ sequenceDiagram
 ```
 
 State transitions use a separate `on_market_state` callback and never carry a tradable book. The M2
-observation-only composition installs no submission authority. The M3 composition adds only the
-bot-bound fake submission boundary shown in Flow 2, without adding an executor hop inside a
-callback.
+observation-only composition installs no submission authority. The locally implemented M3
+composition adds only the bot-bound fake submission boundary shown in Flow 2, without adding an
+executor hop inside a callback.
 
 `MarketRuntime` composes this flow without a producer-side mutation path. Both the manual and
 dedicated drivers invoke the same turn processor; the M2 reference scenario proves that their copied
 callback vectors, structured diagnostics, `AEGISRTS` records, canonical bytes, and digest agree
 exactly.
 
-## 2. Order Submission
+## 2. Order Submission — Locally Implemented M3
+
+The unpublished M3 feature branch implements this complete direct flow. The [M3 exit-evidence
+record](../milestones/m3-exit-evidence.md) pins the ordinary result matrix, exact traces, retained
+state, and same-turn proof. No M3 submission component or repository fixture in this flow has live
+communication capability.
 
 ```mermaid
 sequenceDiagram
@@ -168,7 +174,7 @@ no socket, endpoint, credential, private session, or exchange participant. A bou
 session-local write sequencer and its overload policy remain M8 work and cannot become a pre-risk
 service queue.
 
-## 3. Acknowledgements, Rejections and Fills
+## 3. Acknowledgements, Rejections and Fills — M4 and Later
 
 ```mermaid
 sequenceDiagram
@@ -205,9 +211,13 @@ sequenceDiagram
     Note over R,C: Control-plane reporting is asynchronous and cannot delay the callback path
 ```
 
-Every private order or execution event shown here passes through OMS reconciliation. A fill cannot update a reporting ledger while bypassing OMS or the immediate position state used by subsequent risk decisions. The exact OMS states and reservation effects for acknowledgements, rejections, partial fills, cancellations and out-of-order exchange events remain open.
+This flow is not implemented by M3. Every later private order or execution event shown here must pass
+through OMS reconciliation. A fill cannot update a reporting ledger while bypassing OMS or the
+immediate position state used by subsequent risk decisions. M4 owns the exact OMS states and
+reservation effects for acknowledgements, rejections, partial fills, cancellations, and
+out-of-order exchange events.
 
-## 4. Risk Snapshot Publication and Enforcement
+## 4. Risk Snapshot Publication and Enforcement — M5 and Later
 
 ```mermaid
 sequenceDiagram
@@ -244,6 +254,8 @@ sequenceDiagram
     E->>B: Invoke the next strategy callback
     B->>S: submit OrderRequest
     S->>S: Authorize configured execution route
+    S->>S: Validate exact canonical economics
+    S->>S: Generate collision-safe local OrderId
     S->>G: check_and_reserve using installed snapshot and current exposure
     G->>G: Enforce budgets and modes, then reserve or reject
 
@@ -257,9 +269,9 @@ sequenceDiagram
     Note over S,G: No synchronous call to the coordinator or UI occurs
 ```
 
-M3 installs one complete immutable startup snapshot and does not execute this dynamic publication
-flow. M5 must preserve the complete-snapshot and monotonic-adoption rules shown here so a callback
-never observes a partial or older authority.
+M3 implements only one complete immutable startup snapshot and does not execute this dynamic
+publication flow. M5 must preserve the complete-snapshot and monotonic-adoption rules shown here so
+a callback never observes a partial or older authority.
 
 ## Cross-Flow Invariants
 
@@ -269,9 +281,9 @@ never observes a partial or older authority.
   input creates an ordered discontinuity fence before later source work.
 - Market updates commit completely before canonical subscription dispatch; only `Ready` callbacks
   receive a book view.
-- Strategy submission, route authorization, risk check and reservation, OMS admission, exact fake
-  encoding, and fake write initiation remain one direct executor-local path in M3. Native encoding
-  and real initiation remain M8.
+- Capability/evidence checks, route authorization, canonical validation, identity generation, risk
+  check/reservation, OMS admission, exact fake encoding, and fake write initiation remain one direct
+  executor-local path in M3. Native encoding and real initiation remain M8.
 - The OMS cannot be bypassed by outbound orders or inbound private-order events.
 - Fill-driven position and exposure changes are visible before a bot receives the fill event or can make another risk decision.
 - Control-plane aggregation, monitoring and UI work never blocks the latency-sensitive path.
