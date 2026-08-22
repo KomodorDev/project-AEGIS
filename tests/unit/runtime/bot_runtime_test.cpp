@@ -23,8 +23,8 @@ namespace {
 using namespace aegis;
 
 // ########################################################################
-// Strategy context exposes only the normalized submission entry and never raw route, socket, or
-// credential capabilities. The observation-only runtime makes that method fail closed.
+// Strategy context exposes only the normalized submission entry and never raw route/account,
+// encoder/initiator, socket, or credential capabilities. Observation-only composition fails closed.
 template <typename Value>
 concept HasSubmit = requires(Value& value, const execution::OrderRequest& request) {
   { value.submit(request) } -> std::same_as<execution::SubmitResult>;
@@ -34,6 +34,15 @@ template <typename Value>
 concept HasRoute = requires(Value value) { value.route; };
 
 template <typename Value>
+concept HasRawAccount = requires(Value value) { value.account; };
+
+template <typename Value>
+concept HasEncoder = requires(Value value) { value.encoder; };
+
+template <typename Value>
+concept HasInitiator = requires(Value value) { value.initiator; };
+
+template <typename Value>
 concept HasSocket = requires(Value value) { value.socket; };
 
 template <typename Value>
@@ -41,6 +50,9 @@ concept HasCredentials = requires(Value value) { value.credentials; };
 
 static_assert(HasSubmit<runtime::BotContext>);
 static_assert(!HasRoute<runtime::BotContext>);
+static_assert(!HasRawAccount<runtime::BotContext>);
+static_assert(!HasEncoder<runtime::BotContext>);
+static_assert(!HasInitiator<runtime::BotContext>);
 static_assert(!HasSocket<runtime::BotContext>);
 static_assert(!HasCredentials<runtime::BotContext>);
 static_assert(!std::is_default_constructible_v<runtime::BotContext>);

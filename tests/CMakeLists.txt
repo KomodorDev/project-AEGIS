@@ -51,8 +51,9 @@ add_executable(
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
   unit/runtime/runtime_policy_test.cpp
-  # Runtime diagnostics tests pin the bounded noncanonical submission prefix.
+  # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
+  unit/runtime/submission_coordinator_test.cpp
   unit/runtime/submission_diagnostics_test.cpp
   unit/runtime/bot_runtime_test.cpp
   # Coordinator tests prove recorded ingress reaches books and strategies within one owner turn.
@@ -66,6 +67,9 @@ add_executable(
   # Version tests ensure the compiled library reports the configured project identity.
   unit/version_test.cpp)
 target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
+
+# Only focused repository-owned unit tests may include runtime-private coordinator contracts.
+target_include_directories(aegis_unit_tests PRIVATE "${PROJECT_SOURCE_DIR}/src")
 
 # Treat test code as owned code, so it receives the project's strict compiler policies.
 aegis_configure_owned_target(aegis_unit_tests)

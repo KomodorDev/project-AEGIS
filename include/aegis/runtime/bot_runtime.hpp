@@ -5,6 +5,7 @@
 
 #include "aegis/configuration/startup_configuration.hpp"
 #include "aegis/execution/order_submission.hpp"
+#include "aegis/execution/submission_measurement_clock.hpp"
 #include "aegis/market_data/market_state_machine.hpp"
 #include "aegis/model/result.hpp"
 #include "aegis/model/time.hpp"
@@ -13,6 +14,7 @@
 #include "aegis/runtime/runtime_policy.hpp"
 #include "aegis/trace/runtime_trace.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -21,6 +23,13 @@
 #include <vector>
 
 namespace aegis::runtime {
+
+// ########################################################################
+// Keep this public header on leaf order/result contracts; concrete submission composition is needed
+// only by out-of-line runtime implementation and stable non-owning pointers.
+class SubmissionCoordinator;
+
+// ########################################################################
 
 // ########################################################################
 // Forward-declare the strategy owner so turn-scoped context and plan capabilities can restrict
@@ -102,29 +111,35 @@ private:
   // Bind immutable configured identity once; callback-local values are installed only by dispatch.
   BotContext(organization::BotAttribution attribution,
              configuration::ConfigurationFingerprint configuration_fingerprint,
-             RuntimePolicyFingerprint runtime_policy_fingerprint) noexcept
-      : attribution_{std::move(attribution)},
-        configuration_fingerprint_{std::move(configuration_fingerprint)},
-        runtime_policy_fingerprint_{std::move(runtime_policy_fingerprint)} {}
+             RuntimePolicyFingerprint runtime_policy_fingerprint,
+             SubmissionCoordinator* submission_coordinator) noexcept;
 
   // --------------------------------------------------------
   // Activate one persistent context immediately before its owning synchronous strategy callback.
-  void activate(const model::SubscriptionId& subscription_id,
-                model::CallbackOrdinal callback_ordinal) noexcept {
-    subscription_id_ = &subscription_id;
-    callback_ordinal_ = callback_ordinal;
-  }
+  void activate(const model::SubscriptionId& subscription_id, model::TurnOrdinal owner_turn_ordinal,
+                model::CallbackOrdinal callback_ordinal,
+                model::ProcessingTimestamp processing_timestamp) noexcept;
 
   // --------------------------------------------------------
   // Remove callback-local observation authority before another callback can reuse the object.
-  void deactivate() noexcept { subscription_id_ = nullptr; }
+  void deactivate() noexcept;
+
+  // --------------------------------------------------------
+  // Return one process-local token whose thread-local storage address distinguishes owner threads.
+  [[nodiscard]] static std::uintptr_t current_thread_token() noexcept;
 
   // --------------------------------------------------------
   organization::BotAttribution attribution_;
   const model::SubscriptionId* subscription_id_{nullptr};
+  model::TurnOrdinal owner_turn_ordinal_{model::TurnOrdinal::initial()};
   model::CallbackOrdinal callback_ordinal_{model::CallbackOrdinal::initial()};
+  model::ProcessingTimestamp processing_timestamp_{0U};
   configuration::ConfigurationFingerprint configuration_fingerprint_;
   RuntimePolicyFingerprint runtime_policy_fingerprint_;
+  SubmissionCoordinator* submission_coordinator_;
+  execution::SteadySubmissionMeasurementClock capability_absent_measurement_clock_;
+  execution::SubmissionMeasurementClock* submission_measurement_clock_;
+  std::atomic<std::uintptr_t> active_owner_token_{0U};
 };
 
 // ########################################################################
@@ -302,7 +317,8 @@ public:
   create(const configuration::StartupConfiguration& configuration, const RuntimePolicy& policy,
          model::ClockProvider& measurement_clock, trace::RuntimeTraceSink& trace_sink,
          RuntimeDiagnosticSink& diagnostics, std::vector<BotStrategyRegistration> registrations,
-         BotRuntimeCounterSeed counter_seed = {});
+         BotRuntimeCounterSeed counter_seed = {},
+         SubmissionCoordinator* submission_coordinator = nullptr);
 
   // --------------------------------------------------------
   // One-time moves publish the factory result before any plan can bind to the final object address.

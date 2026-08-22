@@ -163,8 +163,11 @@ The latch has one exact result rule. A fault proven to occur before accepted-slo
 order identities exactly when those identities already exist, after the owned guard has released a
 current reservation. A fault at or after accepted-slot copy, or one that loses certainty about that
 boundary, returns `SubmissionUnknown`, retains
-exposure, and requires reconciliation even if the scripted action had been successful. Every later
-submit while the latch is set returns `LocallyRejected` at `Internal` with
+exposure, transitions authoritative OMS state to reconciliation-required `SubmissionUnknown`, and
+requires reconciliation even if the scripted action had been successful. An already accepted
+`WriteInitiated` trace record remains valid historical evidence when a later completion append is the
+fault; no replacement canonical record is invented after that failure. Every later submit while the
+latch is set returns `LocallyRejected` at `Internal` with
 `SubmissionRuntimeFaulted`, no attempt or order identity, and no trace or diagnostic mutation. The
 latched check occurs with the other context gates before attempt generation.
 

@@ -82,7 +82,8 @@ add_library(
   src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
   src/aegis/runtime/runtime_diagnostics.cpp
-  # Runtime owns the bounded noncanonical submission diagnostic prefix.
+  # Runtime owns direct submission composition and its bounded noncanonical diagnostic prefix.
+  src/aegis/runtime/submission_coordinator.cpp
   src/aegis/runtime/submission_diagnostics.cpp
   # Bot dispatch owns one strategy per bot and invokes canonical state-before-market callbacks.
   src/aegis/runtime/bot_runtime.cpp
