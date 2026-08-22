@@ -15,6 +15,7 @@ add_executable(
   # These tests prove an observation grant never synthesizes or enables execution permission.
   unit/execution/execution_route_test.cpp
   # M3 request and owner-local route tests pin vocabulary, validation, and authorization precedence.
+  unit/execution/fake_order_encoder_test.cpp
   unit/execution/order_request_test.cpp
   unit/execution/route_authorization_test.cpp
   unit/market_data/subscription_test.cpp

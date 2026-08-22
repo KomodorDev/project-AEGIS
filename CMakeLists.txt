@@ -40,6 +40,7 @@ add_library(
   src/aegis/configuration/startup_configuration.cpp
   # Execution owns explicit grants plus canonical local request validation and route authorization.
   src/aegis/execution/execution_route.cpp
+  src/aegis/execution/fake_order_encoder.cpp
   src/aegis/execution/order_validation.cpp
   src/aegis/execution/submission_route.cpp
   # Market-data subscriptions remain observation permissions and never grant execution authority.
