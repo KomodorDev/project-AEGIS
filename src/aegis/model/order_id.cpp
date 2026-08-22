@@ -174,6 +174,16 @@ Result<OrderId> DeterministicOrderIdProvider::next() {
 }
 
 // --------------------------------------------------------
+// Emit one prebuilt trusted identity at a time; reaching the finite end is permanently exhausted.
+Result<OrderId> ScriptedOrderIdProvider::next() {
+  if (next_index_ == identities_.size()) {
+    return Result<OrderId>::failure(
+        DomainError::at_field(DomainErrorCode::CounterExhausted, "order_counter"));
+  }
+  return Result<OrderId>::success(identities_[next_index_++]);
+}
+
+// --------------------------------------------------------
 // Production always selects the real operating-system source; injection remains private test
 // access.
 Result<ProductionOrderIdProvider> ProductionOrderIdProvider::create() {
