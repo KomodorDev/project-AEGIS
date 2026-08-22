@@ -32,6 +32,14 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
+  # =============================================================================
+  # JOB MAP — four job definitions expand into seven independent CI jobs.
+  # 1: formatting | 2-4: compiler/platform builds | 5-6: sanitizers | 7: benchmarks
+  # =============================================================================
+
+  # =============================================================================
+  # JOB 1 OF 7 — FORMATTING
+  # =============================================================================
   # Formatting is a separate fast gate so style failures are easy to identify.
   format:
     name: clang-format 18
@@ -60,6 +68,9 @@ jobs:
       - name: Check formatting
         run: cmake --build --preset format --target format-check
 
+  # =============================================================================
+  # JOBS 2-4 OF 7 — BUILD AND TEST ON THREE COMPILER/PLATFORM COMBINATIONS
+  # =============================================================================
   # Compile and test once for every supported compiler family and host platform.
   build-test:
     # Matrix fields are addressed with `${{ matrix.field }}` and are substituted
@@ -111,6 +122,9 @@ jobs:
       - name: Configure, build, and test
         run: cmake --workflow --preset verify
 
+  # =============================================================================
+  # JOBS 5-6 OF 7 — SANITIZER TEST RUNS
+  # =============================================================================
   # Re-run the test suite under runtime instrumentation that catches memory,
   # undefined-behavior, and data-race defects ordinary tests may miss.
   sanitizers:
@@ -155,6 +169,9 @@ jobs:
       - name: Configure, build, and test
         run: cmake --workflow --preset ${{ matrix.workflow }}
 
+  # =============================================================================
+  # JOB 7 OF 7 — M0 AND M2 BENCHMARK SMOKE TESTS
+  # =============================================================================
   # Prove that the release benchmark executable and both evidence collectors work.
   # Hosted-runner timings are smoke evidence, not performance qualifications.
   benchmark-smoke:
