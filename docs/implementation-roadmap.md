@@ -122,13 +122,15 @@ Give everything a clear name, label and measuring stick. The robot must never co
 
 ## M2 — Deterministic Runtime and Market-State Validity
 
-**Status:** Local implementation and exit-gate evidence are complete on the rebased branch recorded
-in the [M2 exit-evidence file](milestones/m2-exit-evidence.md). The executor and market-validity
-contracts are accepted in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
-[ADR-0007](decisions/0007-market-state-validity.md). M1 has merged, and the recorded M2-only commits
-were deliberately rebased onto its `dev` merge commit. At local evidence capture M2 had no pull
-request; live publication state belongs to GitHub, while remote CI, review, and integration remain
-pending.
+**Integration status (2026-08-21):** Implemented on `codex/m2-deterministic-runtime` through feature
+head `4b5d89e834b45fef30fca87689937770d2c2ab35`, then merged unchanged into `dev` by
+[PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) as
+`d7733bb16a52d5ec954338f861d798d8c6620dad`. The executor and market-validity contracts are accepted
+in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
+[ADR-0007](decisions/0007-market-state-validity.md). The [M2 exit-evidence
+file](milestones/m2-exit-evidence.md) preserves the revision-specific local verification and smoke
+benchmark evidence separately from the later integration commit; integration does not turn that
+smoke timing into controlled-host qualification.
 
 ### Outcome
 

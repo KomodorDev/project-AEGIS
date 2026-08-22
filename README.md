@@ -1,7 +1,7 @@
 # AEGIS
 
-> **Purpose:** Give a new contributor the shortest safe path to understand the M1 domain kernel and
-> locally complete M2 deterministic runtime without mistaking either for a connected trading system.
+> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1 domain
+> kernel and M2 deterministic runtime without mistaking either for a connected trading system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
@@ -13,10 +13,12 @@ connectivity.
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
 Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md)
-and the locally complete [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md). After M1
-merged, the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. The
-local evidence record was sealed before publication; live review state belongs to GitHub, and M2
-makes no integration claim.
+and the integrated [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md). After M1 merged,
+the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. M2 then ended at
+feature head `4b5d89e834b45fef30fca87689937770d2c2ab35`, which
+[PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) merged unchanged into `dev` as
+`d7733bb16a52d5ec954338f861d798d8c6620dad`. The exit record keeps its revision-specific local
+verification and smoke-benchmark evidence separate from that later integration fact.
 
 ## What M1 provides
 
