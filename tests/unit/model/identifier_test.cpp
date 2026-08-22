@@ -1,4 +1,5 @@
-// Purpose: prove every textual identity obeys its grammar and remains nominally distinct.
+// Purpose: prove every textual identity obeys its grammar, remains nominally distinct, and copies
+// through fixed inline storage without changing canonical bytes.
 
 #include "aegis/model/identifier.hpp"
 
@@ -22,6 +23,10 @@ static_assert(!std::is_same_v<MarketSourceId, VenueId>);
 static_assert(!std::is_convertible_v<FirmId, DeskId>);
 static_assert(!std::is_convertible_v<LogicalAccountId, VenueAccountId>);
 static_assert(!std::is_constructible_v<FirmId, std::string>);
+static_assert(std::is_trivially_copyable_v<FirmId>);
+static_assert(std::is_trivially_copyable_v<VenueId>);
+static_assert(std::is_trivially_copyable_v<InstrumentId>);
+static_assert(std::is_trivially_copyable_v<VenueInstrumentId>);
 
 // --------------------------------------------------------
 // The reference vocabulary is a compatibility fixture for every public identifier kind.
@@ -117,6 +122,10 @@ TEST_CASE("valid identifiers expose immutable canonical bytes", "[model][id]") {
   const auto parsed = FirmId::parse("firm.aegis-lab");
   REQUIRE(parsed);
   CHECK(parsed.value().value() == "firm.aegis-lab");
+
+  const auto copied = parsed.value();
+  CHECK(copied == parsed.value());
+  CHECK(copied.value().data() != parsed.value().value().data());
 }
 
 // --------------------------------------------------------

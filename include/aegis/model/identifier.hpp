@@ -4,10 +4,13 @@
 
 #include "aegis/model/result.hpp"
 
+#include <algorithm>
+#include <array>
 #include <compare>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
-#include <utility>
 
 namespace aegis::model {
 namespace detail {
@@ -16,6 +19,15 @@ namespace detail {
 // Grammar selection is closed and internal; public identifiers expose validated values, not a
 // caller-selectable grammar mode.
 enum class IdentifierGrammar { Organization, Venue, Instrument, Adapter };
+
+// ########################################################################
+
+// Trait and validator code share these exact capacities so inline storage can never accept less
+// than the public grammar or retain unused unbounded space.
+inline constexpr std::size_t maximum_organization_identifier_size = 64U;
+inline constexpr std::size_t maximum_venue_identifier_size = 32U;
+inline constexpr std::size_t maximum_instrument_identifier_size = 64U;
+inline constexpr std::size_t maximum_adapter_identifier_size = 128U;
 
 // ########################################################################
 // Interesting syntax: incomplete tag types parameterize one implementation into unrelated nominal
@@ -80,6 +92,7 @@ template <typename Tag> struct IdentifierTraits;
     static constexpr IdentifierGrammar grammar = IdentifierGrammar::Organization;                  \
     static constexpr std::string_view prefix = Prefix;                                             \
     static constexpr std::string_view field = Field;                                               \
+    static constexpr std::size_t maximum_size = maximum_organization_identifier_size;              \
   }
 
 // ########################################################################
@@ -124,6 +137,7 @@ template <> struct IdentifierTraits<VenueIdTag> {
   static constexpr IdentifierGrammar grammar = IdentifierGrammar::Venue;
   static constexpr std::string_view prefix{};
   static constexpr std::string_view field = "venue_id";
+  static constexpr std::size_t maximum_size = maximum_venue_identifier_size;
 };
 
 // ########################################################################
@@ -132,6 +146,7 @@ template <> struct IdentifierTraits<InstrumentIdTag> {
   static constexpr IdentifierGrammar grammar = IdentifierGrammar::Instrument;
   static constexpr std::string_view prefix{};
   static constexpr std::string_view field = "instrument_id";
+  static constexpr std::size_t maximum_size = maximum_instrument_identifier_size;
 };
 
 // ########################################################################
@@ -142,6 +157,7 @@ template <> struct IdentifierTraits<InstrumentIdTag> {
     static constexpr IdentifierGrammar grammar = IdentifierGrammar::Adapter;                       \
     static constexpr std::string_view prefix{};                                                    \
     static constexpr std::string_view field = Field;                                               \
+    static constexpr std::size_t maximum_size = maximum_adapter_identifier_size;                   \
   }
 
 // ########################################################################
@@ -166,13 +182,13 @@ AEGIS_ADAPTER_ID_TRAITS(VenueAccountIdTag, "venue_account_id");
 } // namespace detail
 
 // ########################################################################
-// Construction is factory-only so every stored string has already passed its type's exact grammar;
-// the owning value is then immutable through the public API.
+// Construction is factory-only so every inline byte has passed its type's exact bounded grammar;
+// copies remain allocation-free and immutable through the public API.
 template <typename Tag> class Identifier {
 public:
 
   // --------------------------------------------------------
-  // Validate and own one identifier string using the grammar selected by its nominal tag.
+  // Validate and copy one identifier into trait-sized inline storage without heap allocation.
   [[nodiscard]] static Result<Identifier> parse(std::string_view value) {
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -180,7 +196,7 @@ public:
     using Traits = detail::IdentifierTraits<Tag>;
 
     // ++++++++++++++++++++++++++++++++++++++++
-    // Reject invalid text before allocating the owned identifier value.
+    // Reject invalid text before publishing the bounded nominal value.
     if (!detail::is_valid_identifier(value, Traits::grammar, Traits::prefix)) {
       return Result<Identifier>::failure(
           DomainError::at_field(DomainErrorCode::InvalidIdentifier, std::string{Traits::field}));
@@ -188,14 +204,16 @@ public:
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish only a value that has passed its complete nominal grammar.
-    return Result<Identifier>::success(Identifier{std::string{value}});
+    return Result<Identifier>::success(Identifier{value});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
 
   // --------------------------------------------------------
   // Borrow the immutable validated spelling without transferring ownership.
-  [[nodiscard]] std::string_view value() const noexcept { return value_; }
+  [[nodiscard]] std::string_view value() const noexcept {
+    return {value_.data(), static_cast<std::size_t>(size_)};
+  }
 
   // --------------------------------------------------------
   // Interesting syntax: defaulted hidden friends compare only the same tag instantiation, making
@@ -207,11 +225,16 @@ public:
 private:
 
   // --------------------------------------------------------
-  // Restrict raw-string construction to the validated parse factory.
-  explicit Identifier(std::string value) : value_{std::move(value)} {}
+  // Restrict raw-text construction to the validated parse factory and preserve zeroed tail bytes.
+  explicit Identifier(std::string_view value) noexcept
+      : size_{static_cast<std::uint8_t>(value.size())} {
+    std::copy(value.begin(), value.end(), value_.begin());
+  }
 
   // --------------------------------------------------------
-  std::string value_;
+  static_assert(detail::IdentifierTraits<Tag>::maximum_size <= 255U);
+  std::array<char, detail::IdentifierTraits<Tag>::maximum_size> value_{};
+  std::uint8_t size_{};
 };
 
 // ########################################################################
