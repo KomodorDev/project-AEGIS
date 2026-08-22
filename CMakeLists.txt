@@ -91,6 +91,8 @@ add_library(
   src/aegis/trace/trace.cpp
   # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
   src/aegis/trace/runtime_trace.cpp
+  # Submission trace owns separate bounded AEGISSTS evidence so M2 callback preflight is unchanged.
+  src/aegis/trace/submission_trace.cpp
   # Version reporting exposes the configured project identity without adding runtime dependencies.
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)

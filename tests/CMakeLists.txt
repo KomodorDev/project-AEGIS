@@ -61,6 +61,7 @@ add_executable(
   # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
   unit/trace/runtime_trace_test.cpp
+  unit/trace/submission_trace_test.cpp
   # Version tests ensure the compiled library reports the configured project identity.
   unit/version_test.cpp)
 target_link_libraries(aegis_unit_tests PRIVATE aegis_test_support Catch2::Catch2WithMain)
