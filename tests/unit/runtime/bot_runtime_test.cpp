@@ -1,5 +1,5 @@
-// Purpose: prove exact bot ownership, canonical multi-firm subscription dispatch, bounded callback
-// measurement, and deterministic re-entry rejection for the M2 strategy runtime.
+// Purpose: prove exact bot ownership, persistent bot-bound context semantics, canonical multi-firm
+// subscription dispatch, bounded callback measurement, and deterministic re-entry rejection.
 
 #include "aegis/market_data/market_state_machine.hpp"
 #include "aegis/runtime/bot_runtime.hpp"
@@ -7,6 +7,7 @@
 
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -22,10 +23,12 @@ namespace {
 using namespace aegis;
 
 // ########################################################################
-// Strategy context remains an observation-only capability rather than an accidental M3 order or
-// transport boundary.
+// Strategy context exposes only the normalized submission entry and never raw route, socket, or
+// credential capabilities. The observation-only runtime makes that method fail closed.
 template <typename Value>
-concept HasSubmit = requires(Value value) { value.submit; };
+concept HasSubmit = requires(Value& value, const execution::OrderRequest& request) {
+  { value.submit(request) } -> std::same_as<execution::SubmitResult>;
+};
 
 template <typename Value>
 concept HasRoute = requires(Value value) { value.route; };
@@ -36,10 +39,13 @@ concept HasSocket = requires(Value value) { value.socket; };
 template <typename Value>
 concept HasCredentials = requires(Value value) { value.credentials; };
 
-static_assert(!HasSubmit<runtime::BotContext>);
+static_assert(HasSubmit<runtime::BotContext>);
 static_assert(!HasRoute<runtime::BotContext>);
 static_assert(!HasSocket<runtime::BotContext>);
 static_assert(!HasCredentials<runtime::BotContext>);
+static_assert(!std::is_default_constructible_v<runtime::BotContext>);
+static_assert(!std::is_copy_constructible_v<runtime::BotContext>);
+static_assert(!std::is_move_constructible_v<runtime::BotContext>);
 static_assert(!std::is_default_constructible_v<runtime::BotDispatchPlan>);
 static_assert(!std::is_aggregate_v<runtime::BotDispatchPlan>);
 
@@ -123,6 +129,25 @@ public:
   }
 
   // --------------------------------------------------------
+  // Exercise the normalized submission API from a callback and retain only the context address for
+  // a lifetime-safe post-callback observation while the owning BotRuntime remains alive.
+  void configure_submission_probe(execution::OrderRequest request) {
+    submission_request_ = std::move(request);
+  }
+
+  // --------------------------------------------------------
+  // Borrow the copied local result produced by the configured submission probe.
+  [[nodiscard]] const std::optional<execution::SubmitResult>& submission_result() const noexcept {
+    return submission_result_;
+  }
+
+  // --------------------------------------------------------
+  // Return the persistent context address observed during the most recent callback.
+  [[nodiscard]] runtime::BotContext* retained_context_for_test() const noexcept {
+    return retained_context_for_test_;
+  }
+
+  // --------------------------------------------------------
   // Report whether the test-only callback-local trace append consumed its selected slot.
   [[nodiscard]] bool trace_slot_consumed() const noexcept { return trace_slot_consumed_; }
 
@@ -195,6 +220,10 @@ private:
   // Execute nested-dispatch and clock controls only after the immutable observation is captured.
   void exercise_callback_controls(runtime::BotContext& context,
                                   model::TurnOrdinal turn_ordinal) noexcept {
+    retained_context_for_test_ = &context;
+    if (submission_request_) {
+      submission_result_ = context.submit(*submission_request_);
+    }
     if (trace_sink_ != nullptr) {
       trace::RuntimeTraceFields fields;
       fields.bot_id = context.bot_id();
@@ -243,6 +272,9 @@ private:
   std::uint64_t callback_advance_nanoseconds_{0U};
   std::vector<model::DomainErrorCode> reentry_errors_;
   std::vector<model::DomainErrorCode> owner_reentry_errors_;
+  std::optional<execution::OrderRequest> submission_request_;
+  std::optional<execution::SubmitResult> submission_result_;
+  runtime::BotContext* retained_context_for_test_{nullptr};
   bool trace_slot_consumed_{false};
   bool clock_advance_failed_{false};
 };
@@ -518,6 +550,16 @@ TEST_CASE("bot runtime dispatches only the subscribed bot with complete attribut
   registrations.push_back(registration("bot.subsidiary-reference", 2U, observations, subsidiary));
   registrations.push_back(
       registration("bot.deribit-btc-perpetual-reference", 1U, observations, primary));
+  const execution::OrderRequest observation_only_request{
+      id<model::RouteId>("route.deribit-testnet-btc-perpetual"),
+      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      execution::OrderSide::Buy,
+      execution::OrderType::Limit,
+      execution::TimeInForce::GoodTilCancelled,
+      price("60000"),
+      quantity("1"),
+  };
+  primary->configure_submission_probe(observation_only_request);
 
   auto created = runtime::BotRuntime::create(configuration, policy, clock, trace_sink, diagnostics,
                                              std::move(registrations));
@@ -551,6 +593,18 @@ TEST_CASE("bot runtime dispatches only the subscribed bot with complete attribut
   const auto initial_report = bot_runtime.dispatch(initial_plan.value(), initialized.value());
   REQUIRE(initial_report);
   CHECK(initial_report.value().state_callbacks == 1U);
+  REQUIRE(primary->submission_result());
+  CHECK(primary->submission_result()->disposition() ==
+        execution::SubmitDisposition::LocallyRejected);
+  CHECK(primary->submission_result()->stage() == execution::SubmissionStage::Context);
+  CHECK(primary->submission_result()->reason() ==
+        execution::SubmissionReason::SubmissionCapabilityUnavailable);
+  CHECK_FALSE(primary->submission_result()->attempt_id());
+  CHECK_FALSE(primary->submission_result()->order_id());
+  REQUIRE(primary->retained_context_for_test() != nullptr);
+  const auto outside_callback =
+      primary->retained_context_for_test()->submit(observation_only_request);
+  CHECK(outside_callback.reason() == execution::SubmissionReason::SubmissionCapabilityUnavailable);
 
   const auto too_small_plan = bot_runtime.preflight(model::MarketSourceOrdinal::initial(),
                                                     ordinal<model::TurnOrdinal>(2U), 1U);

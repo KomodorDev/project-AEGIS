@@ -1,5 +1,5 @@
-// Purpose: validate bot-strategy ownership and perform synchronous canonical subscription dispatch
-// with callback trace, re-entry, and duration evidence.
+// Purpose: validate bot-strategy ownership, maintain persistent bot-bound contexts, and perform
+// synchronous canonical subscription dispatch with callback trace, re-entry, and duration evidence.
 
 #include "aegis/runtime/bot_runtime.hpp"
 
@@ -153,6 +153,18 @@ template <typename Grant>
 } // namespace
 
 // --------------------------------------------------------
+// Fail closed without touching owner-local submission state when this M2 runtime installed no M3
+// capability; a later fake-submission composition replaces this branch with the direct coordinator.
+execution::SubmitResult BotContext::submit(const execution::OrderRequest& request) noexcept {
+  static_cast<void>(request);
+  return execution::SubmitResult::locally_rejected(
+      execution::SubmissionStage::Context,
+      execution::SubmissionReason::SubmissionCapabilityUnavailable);
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
 // Validate provenance and exact strategy coverage, then preallocate canonical grant routing.
 model::Result<BotRuntime>
 BotRuntime::create(const configuration::StartupConfiguration& configuration,
@@ -201,12 +213,16 @@ BotRuntime::create(const configuration::StartupConfiguration& configuration,
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Transfer one strategy object per configured bot before any grant stores a stable heap pointer.
+  // Transfer one strategy and persistent context per configured bot before any grant stores stable
+  // heap pointers. Fingerprints and attribution are copied so later BotRuntime moves cannot dangle.
   std::vector<StrategyEntry> strategies;
   strategies.reserve(registrations.size());
-  for (auto& registration : registrations) {
-    strategies.push_back(
-        StrategyEntry{std::move(registration.bot_id), std::move(registration.strategy)});
+  for (std::size_t index = 0U; index < registrations.size(); ++index) {
+    auto& registration = registrations[index];
+    auto context = std::unique_ptr<BotContext>{
+        new BotContext{attributions[index], configuration.fingerprint(), policy.fingerprint()}};
+    strategies.push_back(StrategyEntry{std::move(registration.bot_id), attributions[index],
+                                       std::move(registration.strategy), std::move(context)});
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -239,7 +255,7 @@ BotRuntime::create(const configuration::StartupConfiguration& configuration,
       }
       grants.push_back(Grant{source.ordinal(),
                              trace::RuntimeTraceSource::from_runtime_source(source), subscription,
-                             *attribution, strategy->strategy.get()});
+                             *attribution, strategy->strategy.get(), strategy->context.get()});
     }
     const auto matching_count = grants.size() - source_begin;
     if (matching_count != static_cast<std::size_t>(source.matching_subscription_count())) {
@@ -627,9 +643,8 @@ BotRuntime::dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnO
     active_reentry_attempts_ = 0U;
     active_reentry_diagnostic_kind_.reset();
 
-    BotContext context{prepared.grant->attribution, prepared.grant->subscription.id,
-                       prepared.callback_ordinal, configuration_fingerprint_,
-                       runtime_policy_fingerprint_};
+    auto& context = *prepared.grant->context;
+    context.activate(prepared.grant->subscription.id, prepared.callback_ordinal);
     const auto started = measurement_clock_->processing_now();
     if (prepared.state_callback) {
       prepared.grant->strategy->on_market_state(outcome.state_event().value(), context);
@@ -640,6 +655,7 @@ BotRuntime::dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnO
       ++report.market_callbacks;
     }
     const auto finished = measurement_clock_->processing_now();
+    context.deactivate();
 
     const auto reentry_attempts = active_reentry_attempts_;
     const auto reentry_diagnostic_kind = active_reentry_diagnostic_kind_;
