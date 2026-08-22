@@ -165,6 +165,13 @@ Teach the robot to listen to market messages one at a time and build an order-bo
 
 ## M3 — Canonical Submission, Inline Risk and OMS Contract
 
+**Contract status (2026-08-22):** The complete M3 order, route, fixed-risk, reservation, outbound
+OMS, deterministic fake-initiation, result, and evidence contracts are accepted in
+[ADR-0008](decisions/0008-canonical-submission-and-fixed-risk.md) and
+[ADR-0009](decisions/0009-outbound-oms-and-fake-initiation.md). Implementation and exit evidence are
+in progress on `codex/m3-canonical-submission` from M2 merge baseline
+`d7733bb16a52d5ec954338f861d798d8c6620dad`.
+
 ### Outcome
 
 A strategy can submit a canonical order through route authorization, a fixed v1 risk model, OMS admission and fake write initiation while definitive and uncertain transmission outcomes remain distinct.
@@ -175,11 +182,17 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ### Scope
 
-- Decide the route/account selection interface and owner-local route installation mechanism.
-- Narrow the supported v1 order types, time-in-force values and flags. Canonicalize and validate tick, lot, instrument and venue-filter constraints before risk; either defer market orders or define a deterministic worst-case price/collar.
-- Define the fixed v1 inline risk vocabulary and exposure calculation before implementing reservations: order size, worst-case position/notional, open orders and applicable bot, desk, firm, account, route, instrument and venue caps.
-- Define `OrderRequest`, collision-safe client order identity, `SubmitResult` and stable rejection reasons.
-- Record the conceptual OMS/reservation state machine and ownership ADR before dependent implementation. It must distinguish a failure proven to occur before transport acceptance from `SubmissionUnknown` after acceptance may have occurred.
+- Implement the accepted explicit `RouteId` and owner-local route projection; the route selects the
+  account, venue and instrument under bot-bound authority.
+- Implement the accepted limit-only, GTC, no-flags vocabulary. Canonically validate positive exact
+  price/quantity, metadata scale, tick, minimum quantity, lot step, instrument, and inverse-contract
+  economics before risk; market orders and price collars are deferred.
+- Implement the fixed v1 six-limit model at bot, desk, firm, account, route, instrument, and venue
+  scopes using the exact conservative exposure calculation defined by ADR-0008.
+- Implement the accepted `OrderRequest`, collision-safe client order identity, `SubmitResult`, and
+  stable rejection reasons.
+- Implement the accepted outbound OMS/reservation transition matrix. It distinguishes a failure
+  proven before fake acceptance from `SubmissionUnknown` after acceptance may have occurred.
 - Install an initial immutable risk snapshot and implement owner-local canonical validation, check-and-reserve and minimal outbound OMS states.
 - Implement a fake encoder and fake asynchronous transport initiator. Encoding must preserve exactly the economics that risk approved; it may not silently round or reinterpret them.
 - Attach configuration, instrument metadata, route/account and risk-policy provenance to each admitted order.
@@ -187,12 +200,23 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ### Exit Gate
 
-- Deterministic scenarios cover unauthorized route, invalid order, risk rejection, duplicate local identity, OMS non-admission, encoding failure, write-initiation failure and successful initiation.
+- Deterministic scenarios cover unauthorized route, invalid order, risk rejection, duplicate local
+  identity, OMS non-admission, encoding failure, definite pre-acceptance initiation failure,
+  ambiguous post-acceptance `SubmissionUnknown`, and successful local fake initiation.
 - A failure proven to occur before transport acceptance creates no reservation or releases it exactly once. An ambiguous post-initiation failure retains conservative exposure in an explicit reconciliation-required state.
 - Missing or invalid policy starts fail closed; no default-constructed snapshot can authorize an order.
 - Property tests show the fixed risk model never understates worst-case exposure for the supported order vocabulary.
 - The strategy → route → risk → OMS → write-initiation path has no blocking I/O, database call, serialization boundary, general-purpose queue, remote call or executor hop.
 - The successful local result is never represented as an exchange acknowledgement.
+- `BENCH-M3-SUBMIT-001` reports `p50_us`, `p99_us`, `p99_9_us`, `sample_count`,
+  `orders_per_second`, and `allocations_per_order`; its provisional controlled-host p99 limit is
+  50 microseconds.
+- `BENCH-M3-SUBMIT-002` reports `p50_us`, `p99_us`, `p99_9_us`, `sample_count`,
+  `rejections_per_second`, and `allocations_per_request`; its provisional controlled-host p99 limit
+  is 25 microseconds.
+- Each benchmark starts at the bot-bound submit entry and ends at its required local rejection or
+  fake initiation endpoint. Network and acknowledgement timing are excluded. Uncontrolled runs are
+  labelled smoke and never presented as qualification evidence.
 
 ---
 

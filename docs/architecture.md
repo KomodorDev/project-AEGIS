@@ -30,6 +30,8 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [ADR-0005: Immutable configuration provenance](decisions/0005-immutable-configuration-provenance.md)
 - [ADR-0006: Bounded deterministic runtime](decisions/0006-bounded-deterministic-runtime.md)
 - [ADR-0007: Market-state validity](decisions/0007-market-state-validity.md)
+- [ADR-0008: Canonical bot-bound submission and fixed risk](decisions/0008-canonical-submission-and-fixed-risk.md)
+- [ADR-0009: Outbound OMS and conservative fake initiation](decisions/0009-outbound-oms-and-fake-initiation.md)
 - [M0 reference scenario](reference-scenario.md)
 - [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
@@ -333,8 +335,8 @@ Strategy callback
 → authorize the configured execution route
 → check and reserve local risk capacity inline
 → register the order with the order management system
-→ encode exchange-native order
-→ initiate asynchronous socket write
+→ encode an exact deterministic fake order
+→ initiate the in-memory asynchronous-write analogue
 ```
 
 It must not require:
@@ -347,56 +349,51 @@ It must not require:
 - A network call to a separate risk service
 - A thread hop merely to approve the order
 
-An asynchronous stream may eventually require a bounded, session-local write sequencer when another write is already in progress. That mechanism would sit after OMS admission, would not be a general-purpose event bus, and would not move the risk decision to another execution context. Its capacity and admission-failure policy remain **Open**.
+M3 stops at a fixed-capacity in-memory fake initiator. A real asynchronous stream may eventually
+require a bounded, session-local write sequencer when another write is already in progress. That M8
+mechanism would sit after OMS admission, would not be a general-purpose event bus, and would not move
+the risk decision to another execution context.
 
-The bot submits a small, fixed-size `OrderRequest`:
+The bot submits a small, bounded-field `OrderRequest` by const reference:
 
 ```cpp
 struct OrderRequest {
-    InstrumentId instrument;
-    Venue venue;
-    Side side;
+    RouteId route_id;
+    InstrumentId instrument_id;
+    OrderSide side;
     OrderType type;
-    PriceTicks price;
-    QuantityLots quantity;
+    TimeInForce time_in_force;
+    Price price;
+    Quantity quantity;
 };
 ```
 
-Submission performs route authorization followed by an immediate risk check. The route context and function names below are illustrative; the final route-selection API remains open:
+Submission performs explicit route authorization, canonical economic validation, and the immediate
+fixed M3 risk check in that order. The function names below remain illustrative, while the
+`RouteId`, limit-only, GTC, fixed-risk, and conservative result semantics are accepted in ADR-0008
+and ADR-0009:
 
 ```cpp
-SubmitResult Engine::submit_order(
-    BotId bot_id,
-    const OrderRequest& request
-) {
-    auto route = execution_routes_.authorize(bot_id, request);
-
-    if (!route) {
-        return SubmitResult::rejected(route.error());
-    }
-
-    auto approval = pre_trade_risk_.check_and_reserve(
-        bot_id,
-        request,
-        route.value()
-    );
-
-    if (!approval) {
-        return SubmitResult::rejected(approval.error());
-    }
-
-    return order_manager_.submit(
-        bot_id,
-        request,
-        route.value(),
-        approval.reservation()
-    );
+SubmitResult BotContext::submit(const OrderRequest& request) noexcept {
+    return submission_->submit(callback_token_, request);
 }
 ```
 
+`submission_` and `callback_token_` are private runtime-minted capabilities in this illustration.
+Strategy code can call the single normalized operation but cannot obtain or forge either value. The
+coordinator owns the complete validation, identity, risk, OMS, encoding, initiation, and rollback
+sequence shown in Runtime Flow 2. The two identifiers own bounded strings, so constructing or
+copying a request may allocate; that work occurs before entry to the direct and measured submit
+path. Submission itself borrows the already constructed request.
+
 The risk check and exposure reservation form one atomic operation. The v1 data-plane executor runs this operation to completion, so another submission cannot interleave and consume the same available capacity.
 
-Order acknowledgements, rejections and fills are processed asynchronously on later turns of the same executor. They reconcile OMS state before reservations and immediate inventory are updated and before the originating bot receives its order event. The detailed OMS states and reservation transitions remain **Open**.
+M3 distinguishes `WriteInitiated` from `SubmissionUnknown`; neither is an exchange acknowledgement.
+A definite pre-acceptance failure releases its reservation exactly once, while both initiation and
+uncertainty retain conservative exposure. Order acknowledgements, rejections and fills begin in M4
+and are processed asynchronously on later turns of the same executor. They reconcile OMS state
+before reservations and immediate inventory are updated and before the originating bot receives its
+order event. Detailed private-event transitions remain **Open** for M4.
 
 ## Hierarchical Risk Budgets
 

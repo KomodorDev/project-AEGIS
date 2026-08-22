@@ -1,7 +1,7 @@
 # AEGIS
 
-> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1 domain
-> kernel and M2 deterministic runtime without mistaking either for a connected trading system.
+> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1/M2
+> baseline and accepted M3 local-submission contracts without mistaking them for a connected system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
@@ -9,6 +9,10 @@ adds a bounded serialized owner, recorded fixture playback, transactional market
 Ready-only strategy dispatch. The reference slice remains deliberately narrow: one Deribit
 testnet account alias, one BTC inverse perpetual, one active subscribed bot, and no exchange
 connectivity.
+
+M3's canonical order, fixed startup risk, outbound OMS, and conservative fake-initiation contracts
+are accepted in ADR-0008 and ADR-0009. Their implementation and exit evidence are in progress; the
+accepted design adds only deterministic in-memory fakes and does not add exchange connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
@@ -125,6 +129,8 @@ or production endpoint. The first market and account assumptions are described i
 - [Immutable configuration provenance](docs/decisions/0005-immutable-configuration-provenance.md)
 - [Bounded deterministic runtime](docs/decisions/0006-bounded-deterministic-runtime.md)
 - [Market-state validity](docs/decisions/0007-market-state-validity.md)
+- [Canonical bot-bound submission and fixed risk](docs/decisions/0008-canonical-submission-and-fixed-risk.md)
+- [Outbound OMS and conservative fake initiation](docs/decisions/0009-outbound-oms-and-fake-initiation.md)
 - [Deribit BTC perpetual reference scenario](docs/reference-scenario.md)
 - [Correctness and performance budgets](docs/quality-budgets.md)
 - [Deribit public-protocol spike](docs/protocol-spikes/deribit-btc-perpetual.md)

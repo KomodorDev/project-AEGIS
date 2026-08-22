@@ -108,7 +108,9 @@ fresh 128-bit namespace from the operating system's cryptographically secure ran
 startup and combines it with a checked 64-bit counter beginning at one. Startup fails if the
 namespace cannot be obtained, and exhaustion fails rather than wrapping. This makes domain
 `OrderId`s collision-resistant across restart without depending on wall time, host names, or process
-IDs. M3 owns any constrained venue client-order-ID encoding and its correlation rules.
+IDs. M3 carries the complete 24-byte local identity through its exact offline fake schema. M4 owns
+exchange-event correlation semantics, while any constrained venue-native client-order-ID encoding
+is deferred to M8.
 
 ## Consequences
 

@@ -1,16 +1,19 @@
 # Runtime Flows
 
-> **Purpose:** Show how accepted serialized ownership, M2 market validity, and later order/risk
+> **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 local submission
 > boundaries sequence complete work without implying hidden thread hops or partial state.
 
-**Status: Implemented M2 market flow with illustrative later participants.** M2 implements the
+**Status: Implemented M2 market flow and accepted M3 local-submission flow.** M2 implements the
 recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic, and replay
-branches; order, risk, private-session, and recovery details remain proposed or open.
+branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and deterministic fake
+boundaries; private sessions, exchange events, dynamic risk, and recovery remain later work.
 
 Return to the [architecture overview](../architecture.md) or read
 [ADR-0001](../decisions/0001-serialized-data-plane-execution.md),
 [ADR-0006](../decisions/0006-bounded-deterministic-runtime.md), and
-[ADR-0007](../decisions/0007-market-state-validity.md).
+[ADR-0007](../decisions/0007-market-state-validity.md),
+[ADR-0008](../decisions/0008-canonical-submission-and-fixed-risk.md), and
+[ADR-0009](../decisions/0009-outbound-oms-and-fake-initiation.md).
 
 - Solid arrows (`->>`) represent interactions completed in the current execution context. Within the data plane, they run on the single serialized executor without an intervening general-purpose queue or thread hop.
 - Dashed arrows (`-->>`) represent asynchronous transport, a later executor turn or off-path control-plane delivery.
@@ -75,9 +78,10 @@ sequenceDiagram
     end
 ```
 
-State transitions use a separate `on_market_state` callback and never carry a tradable book. M2's
-`BotContext` has no order capability. M3 will add the submission boundary shown in Flow 2 without
-adding an executor hop inside a callback.
+State transitions use a separate `on_market_state` callback and never carry a tradable book. The M2
+observation-only composition installs no submission authority. The M3 composition adds only the
+bot-bound fake submission boundary shown in Flow 2, without adding an executor hop inside a
+callback.
 
 `MarketRuntime` composes this flow without a producer-side mutation path. Both the manual and
 dedicated drivers invoke the same turn processor; the M2 reference scenario proves that their copied
@@ -94,56 +98,75 @@ sequenceDiagram
     participant A as Route authorization
     participant G as Inline pre-trade risk guard
     participant O as OMS
-    participant V as Venue / account session
-    participant X as Exchange
+    participant C as Exact fake encoder
+    participant F as In-memory fake initiator
 
-    Note over B,V: One data-plane executor turn with no pre-risk queue or thread hop
-    B->>S: submit OrderRequest
-    S->>A: Resolve and authorize a configured execution route
+    Note over B,F: One data-plane owner turn; no queue, coroutine, remote call or thread hop
+    B->>S: submit limit/GTC OrderRequest with RouteId
+    S->>S: Validate active callback and preflight AEGISSTS evidence
+    S->>A: Resolve owner-local route for context BotId
 
     alt No permitted route
-        A->>S: Route rejection
-        S->>B: Local rejected SubmitResult
+        A->>S: Stable route rejection, no OrderId or reservation
+        S->>B: LocallyRejected
     else Authorized route context
         A->>S: Venue, account and instrument context
-        S->>G: check_and_reserve(bot, request, route)
-        G->>G: Check installed budgets and modes, then reserve exposure atomically
+        S->>S: Validate exact vocabulary, price, quantity and inverse economics
+        S->>S: Generate collision-safe local OrderId
+        S->>G: check_and_reserve attribution, request, route and policy
+        G->>G: Check seven scopes in scratch, then commit atomically
 
         alt Risk check rejects
-            G->>S: Risk rejection
-            S->>B: Local rejected SubmitResult
+            G->>S: Stable risk rejection, no reservation
+            S->>B: LocallyRejected
         else Risk check approves
-            G->>S: Approval with reservation context
+            G->>S: Approval with held ReservationId
             S->>O: Admit request with route and reservation
 
             alt OMS cannot admit locally
                 O->>S: Non-admission result
-                Note over G,O: Reserved capacity must not leak, exact transition ownership remains open
-                S->>B: Local rejected SubmitResult
+                S->>G: Release reservation exactly once
+                S->>B: LocallyRejected
             else OMS admits request
-                O->>V: Submit admitted order
-                V->>V: Encode exchange-native message
-                V->>V: Request non-blocking socket-write initiation
+                S->>C: Encode only the OMS-admitted order
 
-                alt Encoding or local initiation fails immediately
-                    V->>O: Local submission failure
-                    Note over G,O: Reserved capacity must not leak, exact transition ownership remains open
-                    O->>S: Local failure result
-                    S->>B: Local failed SubmitResult
-                else Write initiation is requested locally
-                    V->>O: Local initiation outcome
-                    O->>S: Local submission outcome
-                    S->>B: Local SubmitResult
-                    V-->>X: Native order bytes through asynchronous transport
+                alt Encoding fails
+                    C->>S: Scripted EncodingFailed outcome
+                    S->>O: Mark LocallyFailed
+                    S->>G: Release reservation exactly once
+                    S->>B: LocallyRejected
+                else Exact AEGISFOE bytes
+                    C->>S: Exact AEGISFOE bytes
+                    S->>O: Mark PendingInitiation
+                    S->>F: Initiate deterministic in-memory write analogue
+
+                    alt Failure before accepted-slot copy
+                        F->>S: Definite pre-acceptance outcome
+                        S->>O: Mark LocallyFailed
+                        S->>G: Release reservation exactly once
+                        S->>B: LocallyRejected
+                    else Bytes copied and initiation succeeds
+                        F->>S: Accepted-and-initiated outcome
+                        S->>O: Mark WriteInitiated
+                        Note over G,O: Reservation remains held; this is not an acknowledgement
+                        S->>B: WriteInitiated
+                    else Bytes copied and local outcome is lost
+                        F->>S: Accepted-then-outcome-lost
+                        S->>O: Mark SubmissionUnknown
+                        Note over G,O: Retain exposure; reconciliation required; never auto-retry
+                        S->>B: SubmissionUnknown
+                    end
                 end
             end
         end
     end
 ```
 
-The exact successful `SubmitResult` states and timing remain open; no local result is an exchange acknowledgement. A bounded session-local write sequencer may eventually be required after OMS admission, but its admission, capacity and overload semantics remain open. It must not become a pre-risk service queue.
-
-Route authorization is mandatory, but whether an `OrderRequest` names a route or another configuration-owned mechanism resolves its account remains open. The precise reservation transitions on OMS non-admission and local transport failure also remain open; the invariant is that reserved capacity cannot be silently leaked.
+`WriteInitiated` ends at successful local fake initiation and is never an exchange acknowledgement.
+The accepted-slot copy is the only M3 boundary after which acceptance may have occurred. M3 contains
+no socket, endpoint, credential, private session, or exchange participant. A bounded real
+session-local write sequencer and its overload policy remain M8 work and cannot become a pre-risk
+service queue.
 
 ## 3. Acknowledgements, Rejections and Fills
 
@@ -229,12 +252,14 @@ sequenceDiagram
         S->>B: Local rejected SubmitResult
     else Risk approves and reserves
         G->>S: Approval with reservation context
-        Note over B,S: Continue through OMS and venue write initiation as shown in Flow 2
+        Note over B,S: M3 continues through OMS and fake initiation; native venue initiation is M8
     end
     Note over S,G: No synchronous call to the coordinator or UI occurs
 ```
 
-Snapshots are complete so a callback never observes a partially updated budget or mode hierarchy. Monotonic revisions prevent delayed control-plane delivery from reinstalling older authority.
+M3 installs one complete immutable startup snapshot and does not execute this dynamic publication
+flow. M5 must preserve the complete-snapshot and monotonic-adoption rules shown here so a callback
+never observes a partial or older authority.
 
 ## Cross-Flow Invariants
 
@@ -244,17 +269,19 @@ Snapshots are complete so a callback never observes a partially updated budget o
   input creates an ordered discontinuity fence before later source work.
 - Market updates commit completely before canonical subscription dispatch; only `Ready` callbacks
   receive a book view.
-- Strategy submission, route authorization, risk check and reservation, OMS admission, native encoding and the write-initiation request remain one direct executor-local path.
+- Strategy submission, route authorization, risk check and reservation, OMS admission, exact fake
+  encoding, and fake write initiation remain one direct executor-local path in M3. Native encoding
+  and real initiation remain M8.
 - The OMS cannot be bypassed by outbound orders or inbound private-order events.
 - Fill-driven position and exposure changes are visible before a bot receives the fill event or can make another risk decision.
 - Control-plane aggregation, monitoring and UI work never blocks the latency-sensitive path.
 - Exchange acknowledgements, rejections, fills and socket completions occur on later executor turns.
 
-## Open Items
+## Later-Milestone Open Items
 
-- Execution-route identity and account-selection interface.
-- Detailed OMS states, identifiers, correlation rules and event-order handling.
-- Reservation transitions for every acknowledgement, rejection, partial fill, cancellation, timeout and local failure.
+- Detailed private-event OMS states, exchange identifiers, correlation rules and event ordering.
+- Reservation transitions for acknowledgements, exchange rejections, partial fills, cancellations,
+  timeouts, reconciliation, and recovery.
 - Exact hierarchical semantics of `ReduceOnly` and `Halted`, including existing-order cancellation and budget reductions below current exposure.
 - Session write sequencing, outbound overload policy and cross-plane reporting backpressure.
 - Reconnect, recovery, exchange reconciliation and persistence behavior.
