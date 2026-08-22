@@ -102,6 +102,30 @@ AEGIS_ORDINAL_TAG(TurnOrdinalTag, "turn_ordinal", ExecutorCounterExhausted);
 AEGIS_ORDINAL_TAG(CallbackOrdinalTag, "callback_ordinal", CallbackCounterExhausted);
 
 // ########################################################################
+// Submission attempts receive a distinct bounded position before canonical evidence preflight.
+AEGIS_ORDINAL_TAG(SubmissionAttemptIdTag, "submission_attempt_id", CounterExhausted);
+
+// ########################################################################
+// Owner-local route projections receive a stable canonical startup position.
+AEGIS_ORDINAL_TAG(RouteOrdinalTag, "route_ordinal", CounterExhausted);
+
+// ########################################################################
+// Held risk reservations reuse the creating attempt value behind a distinct nominal type.
+AEGIS_ORDINAL_TAG(ReservationIdTag, "reservation_id", CounterExhausted);
+
+// ########################################################################
+// Encoder calls advance only when exact fake encoding is reached.
+AEGIS_ORDINAL_TAG(EncoderInvocationOrdinalTag, "encoder_invocation_ordinal", CounterExhausted);
+
+// ########################################################################
+// Initiator calls advance independently from outer attempts and encoder calls.
+AEGIS_ORDINAL_TAG(InitiatorInvocationOrdinalTag, "initiator_invocation_ordinal", CounterExhausted);
+
+// ########################################################################
+// Only accepted-slot copies receive a fake-write identity.
+AEGIS_ORDINAL_TAG(FakeWriteOrdinalTag, "fake_write_ordinal", CounterExhausted);
+
+// ########################################################################
 // Every accepted full snapshot starts a one-based book generation.
 AEGIS_ORDINAL_TAG(BookGenerationTag, "book_generation", MarketCounterExhausted);
 
@@ -259,6 +283,10 @@ AEGIS_REVISION_TAG(SubscriptionRevisionTag, "subscription_revision");
 AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 
 // ########################################################################
+// Immutable M3 risk snapshots receive a distinct nonzero policy revision.
+AEGIS_REVISION_TAG(RiskPolicyRevisionTag, "risk_policy_revision");
+
+// ########################################################################
 #undef AEGIS_REVISION_TAG
 
 // ########################################################################
@@ -387,6 +415,12 @@ using AdmissionOrdinal = detail::OneBasedOrdinal<detail::AdmissionOrdinalTag>;
 using ReceiveSequence = detail::OneBasedOrdinal<detail::ReceiveSequenceTag>;
 using TurnOrdinal = detail::OneBasedOrdinal<detail::TurnOrdinalTag>;
 using CallbackOrdinal = detail::OneBasedOrdinal<detail::CallbackOrdinalTag>;
+using SubmissionAttemptId = detail::OneBasedOrdinal<detail::SubmissionAttemptIdTag>;
+using RouteOrdinal = detail::OneBasedOrdinal<detail::RouteOrdinalTag>;
+using ReservationId = detail::OneBasedOrdinal<detail::ReservationIdTag>;
+using EncoderInvocationOrdinal = detail::OneBasedOrdinal<detail::EncoderInvocationOrdinalTag>;
+using InitiatorInvocationOrdinal = detail::OneBasedOrdinal<detail::InitiatorInvocationOrdinalTag>;
+using FakeWriteOrdinal = detail::OneBasedOrdinal<detail::FakeWriteOrdinalTag>;
 using BookGeneration = detail::OneBasedOrdinal<detail::BookGenerationTag>;
 using BookRevision = detail::OneBasedOrdinal<detail::BookRevisionTag>;
 
@@ -399,6 +433,7 @@ using InstrumentMetadataRevision = detail::Revision<detail::InstrumentMetadataRe
 using StrategyConfigurationRevision = detail::Revision<detail::StrategyConfigurationRevisionTag>;
 using SubscriptionRevision = detail::Revision<detail::SubscriptionRevisionTag>;
 using RouteRevision = detail::Revision<detail::RouteRevisionTag>;
+using RiskPolicyRevision = detail::Revision<detail::RiskPolicyRevisionTag>;
 
 // ########################################################################
 // Interesting syntax: the non-virtual public API wraps a private raw-counter hook, ensuring every

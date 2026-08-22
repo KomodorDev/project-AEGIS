@@ -38,8 +38,11 @@ add_library(
   # with an accepted immutable snapshot.
   src/aegis/configuration/configuration_provenance.cpp
   src/aegis/configuration/startup_configuration.cpp
-  # Data subscriptions and execution routes remain separate compiled permission boundaries.
+  # Execution owns explicit grants plus canonical local request validation and route authorization.
   src/aegis/execution/execution_route.cpp
+  src/aegis/execution/order_validation.cpp
+  src/aegis/execution/submission_route.cpp
+  # Market-data subscriptions remain observation permissions and never grant execution authority.
   src/aegis/market_data/subscription.cpp
   # Normalized market events own venue-neutral input identity and post-commit callback contracts.
   src/aegis/market_data/market_event.cpp
