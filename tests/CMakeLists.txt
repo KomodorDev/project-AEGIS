@@ -41,6 +41,7 @@ add_executable(
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
   # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.
+  unit/risk/reservation_ledger_test.cpp
   unit/risk/risk_policy_test.cpp
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
