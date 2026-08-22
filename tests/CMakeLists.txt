@@ -51,8 +51,9 @@ add_executable(
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
   unit/runtime/runtime_policy_test.cpp
-  # Diagnostics and bot tests pin accepted-prefix detail and canonical strategy dispatch.
+  # Runtime diagnostics tests pin the bounded noncanonical submission prefix.
   unit/runtime/runtime_diagnostics_test.cpp
+  unit/runtime/submission_diagnostics_test.cpp
   unit/runtime/bot_runtime_test.cpp
   # Coordinator tests prove recorded ingress reaches books and strategies within one owner turn.
   unit/runtime/market_runtime_test.cpp
