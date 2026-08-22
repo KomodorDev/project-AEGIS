@@ -3,115 +3,20 @@
 
 #include "aegis/runtime/market_runtime.hpp"
 #include "reference_configuration.hpp"
+#include "support/allocation_tracking.hpp"
+#include "support/distribution_metrics.hpp"
 
-#include <algorithm>
 #include <benchmark/benchmark.h>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <limits>
 #include <memory>
-#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
-
-namespace aegis_benchmark_allocations {
-
-// Allocation tracking is thread-local and disabled by default, so fixture construction and Google
-// Benchmark bookkeeping remain outside every workload's reported allocation interval.
-thread_local bool tracking_enabled = false;
-thread_local std::uint64_t successful_allocations = 0U;
-
-// --------------------------------------------------------
-// Count one successful C++ heap allocation without allocating inside the observation path.
-void record_successful_allocation() noexcept {
-  if (tracking_enabled && successful_allocations != std::numeric_limits<std::uint64_t>::max()) {
-    ++successful_allocations;
-  }
-}
-
-// --------------------------------------------------------
-// Begin a non-nested measurement interval on the calling benchmark thread.
-void begin() noexcept {
-  successful_allocations = 0U;
-  tracking_enabled = true;
-}
-
-// --------------------------------------------------------
-// End the calling thread's interval and return its exact successful allocation count.
-[[nodiscard]] std::uint64_t finish() noexcept {
-  tracking_enabled = false;
-  return successful_allocations;
-}
-
-// --------------------------------------------------------
-// Allocate one ordinary block before publishing its successful allocation observation.
-[[nodiscard]] void* allocate(std::size_t size) {
-  void* const pointer = std::malloc(size == 0U ? 1U : size);
-  if (pointer == nullptr) {
-    throw std::bad_alloc{};
-  }
-  record_successful_allocation();
-  return pointer;
-}
-
-// --------------------------------------------------------
-// Honor C++ over-alignment through the platform allocator and count only successful blocks.
-[[nodiscard]] void* allocate_aligned(std::size_t size, std::align_val_t alignment) {
-  void* pointer = nullptr;
-  const auto byte_alignment = static_cast<std::size_t>(alignment);
-  if (posix_memalign(&pointer, byte_alignment, size == 0U ? 1U : size) != 0) {
-    throw std::bad_alloc{};
-  }
-  record_successful_allocation();
-  return pointer;
-}
-
-// --------------------------------------------------------
-
-} // namespace aegis_benchmark_allocations
-
-// --------------------------------------------------------
-// Interesting syntax: replaceable global allocation overloads let the scoped counter observe
-// library containers as well as allocations issued directly by this benchmark translation unit.
-void* operator new(std::size_t size) { return aegis_benchmark_allocations::allocate(size); }
-
-void* operator new[](std::size_t size) { return aegis_benchmark_allocations::allocate(size); }
-
-void* operator new(std::size_t size, std::align_val_t alignment) {
-  return aegis_benchmark_allocations::allocate_aligned(size, alignment);
-}
-
-void* operator new[](std::size_t size, std::align_val_t alignment) {
-  return aegis_benchmark_allocations::allocate_aligned(size, alignment);
-}
-
-// --------------------------------------------------------
-// Pair every replaceable delete form with the malloc-family implementation above.
-void operator delete(void* pointer) noexcept { std::free(pointer); }
-
-void operator delete[](void* pointer) noexcept { std::free(pointer); }
-
-void operator delete(void* pointer, std::size_t) noexcept { std::free(pointer); }
-
-void operator delete[](void* pointer, std::size_t) noexcept { std::free(pointer); }
-
-void operator delete(void* pointer, std::align_val_t) noexcept { std::free(pointer); }
-
-void operator delete[](void* pointer, std::align_val_t) noexcept { std::free(pointer); }
-
-void operator delete(void* pointer, std::size_t, std::align_val_t) noexcept { std::free(pointer); }
-
-void operator delete[](void* pointer, std::size_t, std::align_val_t) noexcept {
-  std::free(pointer);
-}
-
-// --------------------------------------------------------
 
 namespace {
 
@@ -122,16 +27,6 @@ using namespace aegis;
 constexpr std::int64_t distribution_iterations = 10'000;
 constexpr std::uint32_t distribution_trace_capacity = 20'016U;
 constexpr std::size_t retained_levels_per_side = 20U;
-
-// ########################################################################
-// One summary reports nearest-rank latency percentiles in the required microsecond unit.
-struct LatencySummary {
-  double p50_microseconds;
-  double p99_microseconds;
-  double p99_9_microseconds;
-};
-
-// ########################################################################
 
 // ########################################################################
 // The probe transfers copied callback observations to the outer benchmark loop without retaining
@@ -185,27 +80,12 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 }
 
 // --------------------------------------------------------
-// Convert one monotonic clock interval into its unsigned nanosecond duration.
-[[nodiscard]] std::uint64_t elapsed_nanoseconds(std::chrono::steady_clock::time_point started,
-                                                std::chrono::steady_clock::time_point finished) {
-  const auto elapsed =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(finished - started).count();
-  return static_cast<std::uint64_t>(elapsed);
-}
-
-// --------------------------------------------------------
 // Encode the sealed M1 and M2 identities in the exact grammar consumed by evidence tooling.
 [[nodiscard]] std::string
 benchmark_evidence_label(const configuration::StartupConfiguration& configuration,
                          const runtime::RuntimePolicy& policy) {
   return "configuration_fingerprint_sha256=" + configuration.fingerprint().to_hex() +
          ";runtime_policy_fingerprint_sha256=" + policy.fingerprint().to_hex();
-}
-
-// --------------------------------------------------------
-// Convert integer nanoseconds to the seconds required by Google Benchmark manual timing.
-[[nodiscard]] double seconds(std::uint64_t nanoseconds) noexcept {
-  return static_cast<double>(nanoseconds) / 1'000'000'000.0;
 }
 
 // ########################################################################
@@ -250,7 +130,7 @@ private:
   // unarmed observations still provide the monotonic clock required by ordinary runtime setup.
   [[nodiscard]] std::uint64_t monotonic_nanoseconds() noexcept override {
     if (armed_ && !active_) {
-      aegis_benchmark_allocations::begin();
+      aegis_benchmark_support::allocation_tracking::begin();
       started_ = std::chrono::steady_clock::now();
       active_ = true;
       return since_origin(started_);
@@ -258,8 +138,8 @@ private:
 
     const auto observed = std::chrono::steady_clock::now();
     if (armed_ && active_) {
-      duration_nanoseconds_ = elapsed_nanoseconds(started_, observed);
-      allocation_count_ = aegis_benchmark_allocations::finish();
+      duration_nanoseconds_ = aegis_benchmark_support::elapsed_nanoseconds(started_, observed);
+      allocation_count_ = aegis_benchmark_support::allocation_tracking::finish();
       completed_ = true;
       armed_ = false;
       active_ = false;
@@ -287,47 +167,6 @@ private:
 };
 
 // ########################################################################
-
-// --------------------------------------------------------
-// Select one deterministic nearest-rank percentile from an already sorted sample vector.
-[[nodiscard]] std::uint64_t nearest_rank(const std::vector<std::uint64_t>& sorted_samples,
-                                         std::size_t numerator, std::size_t denominator) {
-  const auto rank = (sorted_samples.size() * numerator + denominator - 1U) / denominator;
-  return sorted_samples.at(rank - 1U);
-}
-
-// --------------------------------------------------------
-// Sort one owned distribution after timing and convert its required percentiles to microseconds.
-[[nodiscard]] LatencySummary summarize(std::vector<std::uint64_t>& samples) {
-  std::sort(samples.begin(), samples.end());
-  constexpr double nanoseconds_per_microsecond = 1'000.0;
-  return LatencySummary{
-      static_cast<double>(nearest_rank(samples, 50U, 100U)) / nanoseconds_per_microsecond,
-      static_cast<double>(nearest_rank(samples, 99U, 100U)) / nanoseconds_per_microsecond,
-      static_cast<double>(nearest_rank(samples, 999U, 1'000U)) / nanoseconds_per_microsecond,
-  };
-}
-
-// --------------------------------------------------------
-// Publish the common distribution, throughput, sample, and scoped-allocation counters.
-void publish_distribution(benchmark::State& state, std::vector<std::uint64_t>& samples,
-                          std::uint64_t allocation_count, std::string_view throughput_name,
-                          std::string_view allocation_name) {
-  if (samples.empty()) {
-    return;
-  }
-  const auto summary = summarize(samples);
-  const auto sample_count = static_cast<double>(samples.size());
-  state.counters["p50_us"] = summary.p50_microseconds;
-  state.counters["p99_us"] = summary.p99_microseconds;
-  state.counters["p99_9_us"] = summary.p99_9_microseconds;
-  state.counters[std::string{throughput_name}] =
-      benchmark::Counter{sample_count, benchmark::Counter::kIsRate};
-  state.counters[std::string{allocation_name}] =
-      static_cast<double>(allocation_count) / sample_count;
-  state.counters["sample_count"] = sample_count;
-  state.SetItemsProcessed(static_cast<std::int64_t>(samples.size()));
-}
 
 // --------------------------------------------------------
 // Mix one exact unsigned observation into the benchmark-local deterministic strategy checksum.
@@ -620,14 +459,14 @@ void benchmark_executor_turn(benchmark::State& state) {
       state.SkipWithError("BENCH-M2-EXEC-001 admission did not succeed");
       break;
     }
-    aegis_benchmark_allocations::begin();
+    aegis_benchmark_support::allocation_tracking::begin();
     const auto started = std::chrono::steady_clock::now();
     auto completed = executor.run_one();
     const auto finished = std::chrono::steady_clock::now();
-    allocation_count += aegis_benchmark_allocations::finish();
-    const auto duration = elapsed_nanoseconds(started, finished);
+    allocation_count += aegis_benchmark_support::allocation_tracking::finish();
+    const auto duration = aegis_benchmark_support::elapsed_nanoseconds(started, finished);
     total_nanoseconds += duration;
-    state.SetIterationTime(seconds(duration));
+    state.SetIterationTime(aegis_benchmark_support::seconds(duration));
     if (!completed || !completed.value()) {
       state.SkipWithError("BENCH-M2-EXEC-001 turn did not complete");
       break;
@@ -692,15 +531,15 @@ void benchmark_reference_callback(benchmark::State& state) {
     const auto duration = harness.callback_measurement_clock().duration_nanoseconds();
     samples.push_back(duration);
     allocation_count += harness.callback_measurement_clock().allocation_count();
-    state.SetIterationTime(seconds(duration));
+    state.SetIterationTime(aegis_benchmark_support::seconds(duration));
     benchmark::DoNotOptimize(harness.probe().checksum);
     ++sequence;
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the required callback percentiles, rate, and callback-local allocation mean.
-  publish_distribution(state, samples, allocation_count, "callbacks_per_second",
-                       "allocations_per_callback");
+  aegis_benchmark_support::publish_distribution(state, samples, allocation_count,
+                                                "callbacks_per_second", "allocations_per_callback");
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -725,12 +564,12 @@ void benchmark_market_data_turn(benchmark::State& state) {
     harness.admit_delta(sequence);
     const auto callback_count_before = harness.probe().callback_count;
     const auto state_callback_count_before = harness.probe().state_callback_count;
-    aegis_benchmark_allocations::begin();
+    aegis_benchmark_support::allocation_tracking::begin();
     const auto started = std::chrono::steady_clock::now();
     auto completed = harness.run_one();
     const auto finished = std::chrono::steady_clock::now();
-    allocation_count += aegis_benchmark_allocations::finish();
-    const auto duration = elapsed_nanoseconds(started, finished);
+    allocation_count += aegis_benchmark_support::allocation_tracking::finish();
+    const auto duration = aegis_benchmark_support::elapsed_nanoseconds(started, finished);
     if (!completed || !completed.value() ||
         harness.probe().callback_count != callback_count_before + 1U ||
         harness.probe().state_callback_count != state_callback_count_before ||
@@ -741,15 +580,15 @@ void benchmark_market_data_turn(benchmark::State& state) {
       break;
     }
     samples.push_back(duration);
-    state.SetIterationTime(seconds(duration));
+    state.SetIterationTime(aegis_benchmark_support::seconds(duration));
     benchmark::DoNotOptimize(harness.probe().checksum);
     ++sequence;
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the required full-turn percentiles, rate, and owner-interval allocation mean.
-  publish_distribution(state, samples, allocation_count, "events_per_second",
-                       "allocations_per_event");
+  aegis_benchmark_support::publish_distribution(state, samples, allocation_count,
+                                                "events_per_second", "allocations_per_event");
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

@@ -1,7 +1,17 @@
-# Purpose: build the named M0 calibration and M2 runtime benchmarks as one owned executable.
+# Purpose: build the named M0 calibration, M2 runtime, and M3 submission benchmarks as one owned
+# executable with shared benchmark-only measurement support.
 
-# Compile every named workload into one runner; the M0 harness remains the sole BENCHMARK_MAIN.
-add_executable(aegis_benchmarks harness_benchmark.cpp m2_runtime_benchmark.cpp)
+# Compile every named workload and one allocation-operator implementation into one runner; the M0
+# harness remains the sole BENCHMARK_MAIN.
+add_executable(
+  aegis_benchmarks
+  harness_benchmark.cpp
+  m2_runtime_benchmark.cpp
+  support/allocation_tracking.cpp
+  support/distribution_metrics.cpp)
+
+# Benchmark-only headers are intentionally private and can never enter the product include graph.
+target_include_directories(aegis_benchmarks PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Reuse the accepted reference fixture when tests are enabled. Standalone benchmark configurations
 # build the same source under a benchmark-local target so BUILD_TESTING may remain disabled.
