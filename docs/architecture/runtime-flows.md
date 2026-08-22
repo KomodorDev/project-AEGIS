@@ -6,8 +6,9 @@
 **Status: Implemented M2 market flow and locally implemented M3 local-submission flow.** M2
 implements the recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic,
 and replay branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and
-deterministic fake boundaries, and the unpublished M3 feature branch implements Flow 2. Private
-sessions, exchange events, dynamic risk, and recovery remain later work.
+deterministic fake boundaries, and the M3 feature branch published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements Flow 2. Private sessions,
+exchange events, dynamic risk, and recovery remain later work.
 
 Return to the [architecture overview](../architecture.md) or read
 [ADR-0001](../decisions/0001-serialized-data-plane-execution.md),
@@ -91,10 +92,11 @@ exactly.
 
 ## 2. Order Submission — Locally Implemented M3
 
-The unpublished M3 feature branch implements this complete direct flow. The [M3 exit-evidence
-record](../milestones/m3-exit-evidence.md) pins the ordinary result matrix, exact traces, retained
-state, and same-turn proof. No M3 submission component or repository fixture in this flow has live
-communication capability.
+The M3 feature branch published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements this complete direct flow.
+The [M3 exit-evidence record](../milestones/m3-exit-evidence.md) pins the ordinary result matrix,
+exact traces, retained state, and same-turn proof. No M3 submission component or repository fixture
+in this flow has live communication capability.
 
 ```mermaid
 sequenceDiagram

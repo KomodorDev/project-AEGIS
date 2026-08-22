@@ -415,10 +415,11 @@ order event. Detailed private-event transitions remain **Open** for M4.
 
 **Local implementation status (2026-08-22):** The complete route → canonical validation → identity
 → fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented
-and verified on the unpublished M3 feature branch. Its [M3 exit-evidence
+and verified on the M3 feature branch published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`. Its [M3 exit-evidence
 record](milestones/m3-exit-evidence.md) binds deterministic replay and smoke timing to clean producer
-`27087d4da423546041295de43e7fa2fb31425b63`. This is local evidence only; M3 is not merged into
-`dev`, and the diagram's live venue/session portion remains unimplemented.
+`27087d4da423546041295de43e7fa2fb31425b63`. M3 is not merged, and the diagram's live venue/session
+portion remains unimplemented.
 
 ## Hierarchical Risk Budgets
 

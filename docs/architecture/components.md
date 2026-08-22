@@ -18,9 +18,10 @@ This document expands the [architecture overview](../architecture.md). It descri
 
 **Status:** The plane boundary, serialized ownership, and M2 ingress/market/dispatch/bot boundaries
 are **Accepted and implemented**. M3 route, fixed-risk, outbound OMS, and fake-initiation contracts
-are **Accepted and locally implemented** on the unpublished feature branch; the integrated `dev`
-baseline remains M2. The diagram is **Illustrative** and does not imply queues, processes, or thread
-hops.
+are **Accepted and locally implemented** on the feature branch published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10); the integrated `dev` capability
+baseline remains M2 until merge. The diagram is **Illustrative** and does not imply queues,
+processes, or thread hops.
 
 ```mermaid
 flowchart LR

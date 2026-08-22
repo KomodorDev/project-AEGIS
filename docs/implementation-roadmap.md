@@ -174,8 +174,11 @@ accepted in [ADR-0008](decisions/0008-canonical-submission-and-fixed-risk.md) an
 `2e339a5d97bdc9b6bd4522e754c6052783cb01b4`, from M2 merge baseline
 `d7733bb16a52d5ec954338f861d798d8c6620dad`. The [M3 exit-evidence
 record](milestones/m3-exit-evidence.md) maps every gate and records local verification plus
-uncontrolled smoke timing. The branch is unpublished, has no pull request or remote CI evidence,
-and is not merged into `dev`; the integrated baseline remains M2.
+uncontrolled smoke timing. The branch is published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`, after reconciling the
+current comment-only CI tip `94598c38a750d40f5e10030ebf33706f459bff17`. It is not merged; the
+integrated capability baseline remains M2, and remote CI status stays separate from the local
+revision-specific evidence.
 
 ### Outcome
 

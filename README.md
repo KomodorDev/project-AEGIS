@@ -14,9 +14,11 @@ active subscribed bot, and no exchange connectivity.
 M3's canonical order, fixed startup risk, outbound OMS, and conservative fake-initiation contracts
 are accepted in ADR-0008 and ADR-0009 and locally implemented on
 `codex/m3-canonical-submission`. Its [M3 exit-evidence record](docs/milestones/m3-exit-evidence.md)
-anchors the verified implementation and smoke benchmark producer. The branch is unpublished, has
-no pull request or remote CI evidence, and is not merged into `dev`; the integrated baseline remains
-M2. M3 adds only deterministic in-memory fakes and no exchange connectivity.
+anchors the verified implementation and smoke benchmark producer. The branch is published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`, but is not merged;
+the integrated capability baseline remains M2. Remote CI status belongs to the pull request and is
+not substituted for the revision-specific local evidence. M3 adds only deterministic in-memory
+fakes and no exchange connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).

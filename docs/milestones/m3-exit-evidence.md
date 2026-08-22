@@ -1,20 +1,22 @@
 # M3 Exit Evidence
 
 > **Purpose:** Record the locally complete canonical-submission implementation, deterministic exit
-> proof, named workload smoke evidence, forbidden-capability audit, and unpublished integration state.
+> proof, named workload smoke evidence, forbidden-capability audit, and published-but-unmerged state.
 
 **Status:** M3 is locally complete on `codex/m3-canonical-submission` at clean implementation and
 benchmark producer `27087d4da423546041295de43e7fa2fb31425b63`, with tree
 `2e339a5d97bdc9b6bd4522e754c6052783cb01b4`. The branch starts from the integrated M2 baseline
-`d7733bb16a52d5ec954338f861d798d8c6620dad`. Normal, formatting, ASan+UBSan, TSan, Release,
-deterministic replay, forbidden-capability, and M0/M2/M3 benchmark-evidence checks passed locally as
-recorded below.
+`d7733bb16a52d5ec954338f861d798d8c6620dad` and reconciles the later comment-only CI `dev` tip
+`94598c38a750d40f5e10030ebf33706f459bff17` before publication. Normal, formatting, ASan+UBSan,
+TSan, Release, deterministic replay, forbidden-capability, and M0/M2/M3 benchmark-evidence checks
+passed locally as recorded below.
 
-This record does not claim publication or integration. The feature branch has not been pushed, no
-M3 pull request has been opened, no remote CI result exists for it, and M3 is not merged into
-`dev`. The integrated `dev` baseline therefore remains M2. The recorded M3 performance bundle is
-valid smoke evidence from uncontrolled host conditions; it makes no `REF-MAC-01` qualification or
-provisional-threshold claim.
+Publication is distinct from integration: the feature branch is pushed and
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) is open against `dev`, but M3 is not
+merged. The integrated capability baseline therefore remains M2. Remote CI status is tracked by the
+pull request and is not used to replace the revision-specific local record below. The recorded M3
+performance bundle is valid smoke evidence from uncontrolled host conditions; it makes no
+`REF-MAC-01` qualification or provisional-threshold claim.
 
 ## Dependency and revision record
 
@@ -22,14 +24,16 @@ provisional-threshold claim.
 |---|---|
 | M2 integration baseline | `d7733bb16a52d5ec954338f861d798d8c6620dad` |
 | M2 pull request | [PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8), targeting `dev` |
+| `dev` tip reconciled before M3 publication | `94598c38a750d40f5e10030ebf33706f459bff17` from comment-only CI [PR #9](https://github.com/KomodorDev/project-AEGIS/pull/9) |
 | M3 branch | `codex/m3-canonical-submission` |
+| M3 pull request | [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev` |
 | M3 implementation range | `d7733bb16a52d5ec954338f861d798d8c6620dad..27087d4da423546041295de43e7fa2fb31425b63` |
 | Clean implementation and benchmark producer | `27087d4da423546041295de43e7fa2fb31425b63` |
 | Producer tree | `2e339a5d97bdc9b6bd4522e754c6052783cb01b4` |
 | Clean worktree fingerprint | `64d17613312d21071e25a1816ad9abe920d87ef98ba1596dad8d2c469b7ed886` |
 | Evidence captured | 2026-08-22 |
-| Publication state | Unpublished; no push and no pull request |
-| Integration state | Not merged; `dev` remains at the M2 integration baseline above |
+| Publication state | Branch pushed; PR #10 open against `dev` |
+| Integration state | Not merged; `dev` remains at the M2 capability baseline |
 
 The evidence is revision-specific. A later documentation-only commit may describe this producer but
 does not move its source, test, executable, or benchmark identity.
@@ -254,7 +258,7 @@ private session, or real order transmission is present in M3.
 - The old `codex/m2-deterministic-runtime` branch and its commits were not modified.
 - The M3 branch contains multiple coherent, independently understandable commits, with the clean
   implementation and benchmark producer recorded above.
-- No M3 commit has been pushed and no pull request has been opened.
-- Any future M3 pull request must target `dev`, never `main`, and requires explicit publication
-  authorization.
-- Until that publication and merge occur, the repository's integrated baseline remains M2.
+- Publication was explicitly authorized on 2026-08-22; the branch is pushed and PR #10 targets
+  `dev`, never `main`.
+- Remote CI and review status are tracked on PR #10 and do not rewrite the local producer evidence.
+- Until PR #10 merges, the repository's integrated capability baseline remains M2.
