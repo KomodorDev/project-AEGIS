@@ -105,8 +105,9 @@ byte payload so the fake slot can retain test provenance; that identity is not a
 ### Fake asynchronous initiation and acceptance boundary
 
 `DeterministicFakeWriteInitiator` is also a concrete `final` in-memory type with no communication
-primitive or generic live-transport interface. It owns a fixed array of accepted-write slots and a
-canonical scripted outcome per attempt. One call has exactly three outcomes:
+primitive or generic live-transport interface. It owns preallocated fixed-capacity accepted-write
+slot storage and a canonical scripted outcome for each reached initiator invocation. One call has
+exactly three outcomes:
 
 | `FakeInitiationOutcome` | Value | Acceptance meaning | Submission result | Reservation |
 |---|---:|---|---|---|

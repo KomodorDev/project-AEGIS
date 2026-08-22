@@ -38,10 +38,14 @@ add_library(
   # with an accepted immutable snapshot.
   src/aegis/configuration/configuration_provenance.cpp
   src/aegis/configuration/startup_configuration.cpp
-  # Execution owns explicit grants plus canonical local request validation and route authorization.
+  # Execution owns explicit grants, canonical validation, a dedicated measurement clock, immutable
+  # fake-only policy, and exact offline encoding/initiation leaf contracts.
   src/aegis/execution/execution_route.cpp
   src/aegis/execution/fake_order_encoder.cpp
+  src/aegis/execution/fake_transport_initiator.cpp
   src/aegis/execution/order_validation.cpp
+  src/aegis/execution/submission_measurement_clock.cpp
+  src/aegis/execution/submission_policy.cpp
   src/aegis/execution/submission_route.cpp
   # Market-data subscriptions remain observation permissions and never grant execution authority.
   src/aegis/market_data/subscription.cpp
