@@ -157,6 +157,14 @@ if(AEGIS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
+# Reject forbidden live/remote/blocking/handoff capabilities through one deterministic tracked
+# scanner; compile-time API probes and owner-turn tests remain independent structural layers.
+add_custom_target(
+  forbidden-capability-check
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_forbidden_capabilities.py"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  VERBATIM)
+
 # Discover every owned C++ and Python source at configure time and pass both lists to the format
 # targets. Keeping headers and tooling tests automatic prevents new owned files from escaping CI.
 # Interesting syntax: CONFIGURE_DEPENDS asks CMake to reconfigure when matching files appear/disappear.

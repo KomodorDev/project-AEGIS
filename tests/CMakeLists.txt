@@ -79,6 +79,19 @@ aegis_configure_owned_target(aegis_unit_tests)
 include(Catch)
 catch_discover_tests(aegis_unit_tests PROPERTIES LABELS unit)
 
+# Run the deterministic forbidden-capability scanner and its signature self-test in every normal
+# and sanitizer workflow; neither check mutates the worktree.
+add_test(NAME aegis_forbidden_capability_check
+         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tools/check_forbidden_capabilities.py")
+set_tests_properties(aegis_forbidden_capability_check PROPERTIES LABELS forbidden_capability
+                                                                 WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+add_test(NAME aegis_forbidden_capability_scanner_test
+         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tooling/forbidden_capabilities_test.py")
+set_tests_properties(aegis_forbidden_capability_scanner_test PROPERTIES LABELS tooling)
+add_test(NAME aegis_m3_benchmark_evidence_tooling_test
+         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tooling/m3_benchmark_evidence_test.py")
+set_tests_properties(aegis_m3_benchmark_evidence_tooling_test PROPERTIES LABELS tooling)
+
 # Keep deterministic replay and accepted-prefix capacity evidence visible as a milestone gate rather
 # than hiding the full reference scenario among isolated unit cases.
 add_executable(aegis_m1_reference_scenario_tests
