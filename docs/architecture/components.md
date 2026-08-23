@@ -18,10 +18,9 @@ This document expands the [architecture overview](../architecture.md). It descri
 
 **Status:** The plane boundary, serialized ownership, and M2 ingress/market/dispatch/bot boundaries
 are **Accepted and implemented**. M3 route, fixed-risk, outbound OMS, and fake-initiation contracts
-are **Accepted and locally implemented** on the feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10); the integrated `dev` capability
-baseline remains M2 until merge. The diagram is **Illustrative** and does not imply queues,
-processes, or thread hops.
+are **Accepted and integrated** through [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
+at `dev` merge commit `962eb8602c13c1930a74c59232f96920482edb2b`. The diagram is
+**Illustrative** and does not imply queues, processes, or thread hops.
 
 ```mermaid
 flowchart LR
@@ -96,7 +95,7 @@ flowchart LR
 Arrows show logical flow or dependency, not elapsed time. The distinction between synchronous calls and asynchronous events is defined in [Runtime Flows](runtime-flows.md).
 
 M2 implements the credential-free path from recorded fixture ingress through the bot runtime and
-strategy. The locally implemented M3 slice adds only owner-local route authorization, fixed risk,
+strategy. The integrated M3 slice adds only owner-local route authorization, fixed risk,
 outbound OMS admission, exact fake encoding, and in-memory initiation. Venue/account sessions,
 native adapters, sockets, inventory, private reconciliation, and real transmission remain later
 milestones. The revision-specific proof is in the [M3 exit-evidence

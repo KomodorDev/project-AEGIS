@@ -1,13 +1,13 @@
 # Runtime Flows
 
-> **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 local submission
+> **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 submission
 > boundaries sequence complete work without implying hidden thread hops or partial state.
 
-**Status: Implemented M2 market flow and locally implemented M3 local-submission flow.** M2
+**Status: Implemented and integrated M2 market flow and M3 local-submission flow.** M2
 implements the recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic,
 and replay branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and
-deterministic fake boundaries, and the M3 feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements Flow 2. Private sessions,
+deterministic fake boundaries. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
+integrated Flow 2 into `dev` as merge commit `962eb8602c13c1930a74c59232f96920482edb2b`. Private sessions,
 exchange events, dynamic risk, and recovery remain later work.
 
 Return to the [architecture overview](../architecture.md) or read
@@ -81,7 +81,7 @@ sequenceDiagram
 ```
 
 State transitions use a separate `on_market_state` callback and never carry a tradable book. The M2
-observation-only composition installs no submission authority. The locally implemented M3
+observation-only composition installs no submission authority. The integrated M3
 composition adds only the bot-bound fake submission boundary shown in Flow 2, without adding an
 executor hop inside a callback.
 
@@ -90,10 +90,11 @@ dedicated drivers invoke the same turn processor; the M2 reference scenario prov
 callback vectors, structured diagnostics, `AEGISRTS` records, canonical bytes, and digest agree
 exactly.
 
-## 2. Order Submission — Locally Implemented M3
+## 2. Order Submission — Integrated M3
 
 The M3 feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements this complete direct flow.
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements this complete direct flow
+and was merged unchanged into `dev` as `962eb8602c13c1930a74c59232f96920482edb2b`.
 The [M3 exit-evidence record](../milestones/m3-exit-evidence.md) pins the ordinary result matrix,
 exact traces, retained state, and same-turn proof. No M3 submission component or repository fixture
 in this flow has live communication capability.

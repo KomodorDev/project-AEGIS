@@ -165,20 +165,19 @@ Teach the robot to listen to market messages one at a time and build an order-bo
 
 ## M3 — Canonical Submission, Inline Risk and OMS Contract
 
-**Local implementation status (2026-08-22):** The complete M3 order, route, fixed-risk,
+**Integrated status (2026-08-23):** The complete M3 order, route, fixed-risk,
 reservation, outbound OMS, deterministic fake-initiation, result, and evidence contracts are
 accepted in [ADR-0008](decisions/0008-canonical-submission-and-fixed-risk.md) and
-[ADR-0009](decisions/0009-outbound-oms-and-fake-initiation.md). They are locally implemented on
-`codex/m3-canonical-submission` at clean producer
+[ADR-0009](decisions/0009-outbound-oms-and-fake-initiation.md). They were verified at clean producer
 `27087d4da423546041295de43e7fa2fb31425b63`, with tree
 `2e339a5d97bdc9b6bd4522e754c6052783cb01b4`, from M2 merge baseline
 `d7733bb16a52d5ec954338f861d798d8c6620dad`. The [M3 exit-evidence
 record](milestones/m3-exit-evidence.md) maps every gate and records local verification plus
-uncontrolled smoke timing. The branch is published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`, after reconciling the
-current comment-only CI tip `94598c38a750d40f5e10030ebf33706f459bff17`. It is not merged; the
-integrated capability baseline remains M2, and remote CI status stays separate from the local
-revision-specific evidence.
+uncontrolled smoke timing. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) merged
+final feature head `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01`, tree
+`f58410737c473bc3992d7cfd7c934d41db1d11cf`, unchanged into `dev` as merge commit
+`962eb8602c13c1930a74c59232f96920482edb2b`. Integration status remains separate from the
+revision-specific producer evidence and uncontrolled smoke results.
 
 ### Outcome
 

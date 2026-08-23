@@ -37,14 +37,14 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [Proposed implementation roadmap](implementation-roadmap.md)
 - [M1 exit evidence](milestones/m1-exit-evidence.md)
 - [M2 exit evidence](milestones/m2-exit-evidence.md)
-- [M3 local exit evidence](milestones/m3-exit-evidence.md)
+- [M3 exit evidence](milestones/m3-exit-evidence.md)
 
 ## System Architecture
 
 The diagram groups components by latency responsibility. Solid arrows show the immediate data and
 order path; dotted arrows show asynchronous observations or complete snapshot publication.
-It shows the accepted end-state relationships, not the capability currently enabled by the local
-M3 build. The locally implemented slice stops after OMS admission, exact fake encoding, and an
+It shows the accepted end-state relationships, not only the capability enabled by the integrated
+M3 build. The implemented slice stops after OMS admission, exact fake encoding, and an
 in-memory fake accepted-slot copy; venue sessions, native encoding, exchange events, and real
 transmission remain later milestones.
 
@@ -413,12 +413,13 @@ and are processed asynchronously on later turns of the same executor. They recon
 before reservations and immediate inventory are updated and before the originating bot receives its
 order event. Detailed private-event transitions remain **Open** for M4.
 
-**Local implementation status (2026-08-22):** The complete route → canonical validation → identity
-→ fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented
-and verified on the M3 feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`. Its [M3 exit-evidence
-record](milestones/m3-exit-evidence.md) binds deterministic replay and smoke timing to clean producer
-`27087d4da423546041295de43e7fa2fb31425b63`. M3 is not merged, and the diagram's live venue/session
+**Integrated M3 status (2026-08-23):** The complete route → canonical validation → identity →
+fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented.
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) merged final feature head
+`2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` unchanged into `dev` as
+`962eb8602c13c1930a74c59232f96920482edb2b`. The [M3 exit-evidence
+record](milestones/m3-exit-evidence.md) continues to bind deterministic replay and smoke timing to
+clean producer `27087d4da423546041295de43e7fa2fb31425b63`. The diagram's live venue/session
 portion remains unimplemented.
 
 ## Hierarchical Risk Budgets

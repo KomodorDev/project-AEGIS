@@ -4,12 +4,13 @@
 > direction, and dependency rules that expose current coupling and prevent empty scaffolding or
 > hidden new cycles.
 
-**Status:** The directories used through M3 are implemented locally. The intended dependency
+**Status:** The directories used through M3 are implemented and integrated. The intended dependency
 direction has documented M2 and M3 same-library coupling described below; the folder graph is not
 claimed to be acyclic. Strategy and bot contracts live with their serialized owner under `runtime`;
-there is no separate empty `strategy` area. The M3 feature branch is published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`, but is not merged;
-areas named for later milestones remain **Proposed**. Runtime ownership
+there is no separate empty `strategy` area. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
+merged the final M3 feature tree unchanged into `dev` as
+`962eb8602c13c1930a74c59232f96920482edb2b`; areas named for later milestones remain
+**Proposed**. Runtime ownership
 follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md); M1 value and provenance
 boundaries follow [ADR-0004](../decisions/0004-domain-value-contracts.md) and
 [ADR-0005](../decisions/0005-immutable-configuration-provenance.md); M2 runtime and market ownership

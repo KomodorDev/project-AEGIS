@@ -1,29 +1,28 @@
 # AEGIS
 
-> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1/M2
-> baseline and locally complete M3 fake-submission slice without mistaking it for a connected system.
+> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1-M3
+> fake-backed capability baseline without mistaking it for a connected system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
 adds a bounded serialized owner, recorded fixture playback, transactional market books, and
-Ready-only strategy dispatch. M3 locally adds route authorization, exact fixed risk, outbound OMS
+Ready-only strategy dispatch. M3 adds route authorization, exact fixed risk, outbound OMS
 admission, exact fake encoding, and an in-memory fake write-initiation boundary. The reference slice
 remains deliberately narrow: one Deribit testnet account alias, one BTC inverse perpetual, one
 active subscribed bot, and no exchange connectivity.
 
 M3's canonical order, fixed startup risk, outbound OMS, and conservative fake-initiation contracts
-are accepted in ADR-0008 and ADR-0009 and locally implemented on
-`codex/m3-canonical-submission`. Its [M3 exit-evidence record](docs/milestones/m3-exit-evidence.md)
-anchors the verified implementation and smoke benchmark producer. The branch is published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`, but is not merged;
-the integrated capability baseline remains M2. Remote CI status belongs to the pull request and is
-not substituted for the revision-specific local evidence. M3 adds only deterministic in-memory
-fakes and no exchange connectivity.
+are accepted in ADR-0008 and ADR-0009. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
+merged the final feature head `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` unchanged into `dev` as
+merge commit `962eb8602c13c1930a74c59232f96920482edb2b` on 2026-08-23. Its
+[M3 exit-evidence record](docs/milestones/m3-exit-evidence.md) preserves the clean implementation
+and smoke-benchmark producer separately from that later integration fact. M3 adds only
+deterministic in-memory fakes and no exchange connectivity.
 
 The accepted system design is in [the architecture overview](docs/architecture.md). Delivery is
 organized by capability gates in [the implementation roadmap](docs/implementation-roadmap.md).
 Current milestone evidence is mapped in the [M1 exit-evidence record](docs/milestones/m1-exit-evidence.md),
-the integrated [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md), and the local-only
+the [M2 exit-evidence record](docs/milestones/m2-exit-evidence.md), and the integrated
 [M3 exit-evidence record](docs/milestones/m3-exit-evidence.md). After M1 merged,
 the recorded M2-only commits were deliberately rebased onto its `dev` merge commit. M2 then ended at
 feature head `4b5d89e834b45fef30fca87689937770d2c2ab35`, which
@@ -69,7 +68,7 @@ credential, order, risk, OMS, or transmission boundary.
 - Canonical `AEGISRTS` replay evidence. The complete M2 scenario reproduces all 28 callbacks and 71
   trace records byte-for-byte under two manual runs and the dedicated driver.
 
-## What M3 provides locally
+## What M3 provides
 
 These are credential-free in-process submission capabilities. They stop at a structurally offline
 fake accepted-slot boundary; they do not encode or transmit a venue-native order.
