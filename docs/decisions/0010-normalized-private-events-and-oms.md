@@ -57,11 +57,13 @@ M4 appends these stable `DomainErrorCode` values without changing earlier assign
 | 906 | `PrivateCounterExhausted` |
 
 One-event classification uses this failure precedence: owner/capability/re-entry gate; normalized
-shape and assigned values; provenance/account/venue consistency; exact event duplicate/conflict;
-exact trade duplicate/conflict; correlation; OMS transition; checked reservation/inventory plan;
-domain and evidence capacity; commit. Exact duplicate disposition precedes ordinary OMS capacity,
-just as M3 duplicate order identity precedes OMS capacity. A safety conflict follows its accepted
-quarantine plan rather than returning an economic partial failure.
+ingress shape and assigned values; independently provable provenance/account/venue consistency;
+exact event duplicate/conflict over the correlation-independent ingress semantic value; correlation;
+exact trade duplicate/conflict over the first-admission resolved order/economics value; OMS
+transition; checked reservation/inventory plan; domain and evidence capacity; commit. Exact
+duplicate disposition precedes ordinary OMS capacity, just as M3 duplicate order identity precedes
+OMS capacity. A safety conflict follows its accepted quarantine plan rather than returning an
+economic partial failure.
 
 ### Bounded private identities
 
@@ -147,13 +149,29 @@ origin envelope is:
 | `Venue` | venue event key | local event and reconciliation row keys | order scope, source time, and receive time |
 | `Reconciliation` | `ReconciliationEpochId`, `AuthoritativeCutId`, and one-based canonical row ordinal | local and venue event keys | row-declared order/account scope, authoritative cut time, and receive time |
 
+`PrivateEventResolutionKind : u8` assigns `Known = 1`, `Unknown = 2`, `Conflict = 3`, and
+`NotOrderScoped = 4`. The immutable first-admission resolution is a closed tagged value: `Known`
+carries the exact local `OrderId` and complete retained-order subject; `Unknown` carries no extra
+subject because the source event already owns the maximal independently proved subject; and
+`Conflict` carries the stable `AccountSafetyReason::CorrelationConflict`. `NotOrderScoped` carries
+no extra subject and is required only for an account-scoped timeout or private-source disconnect,
+whose deterministic account-wide projection is not one-order correlation. A conflict stops before
+trade lookup and economic mutation. Zero and unassigned resolution values reject.
+
 Every origin carries logical account, venue, and the complete applicable `M4Provenance` fixed by
-ADR-0013. A known-order event requires local order, firm, desk, bot, strategy, route, instrument,
-and metadata provenance copied from the retained OMS row. An account/source observation requires
-the configured firm/account/venue but forbids desk, bot, strategy, route, and instrument. An
-unknown authoritative subject retains firm only when sealed configuration independently proves the
-account's firm; it retains instrument and metadata only when independently supported; local order,
-bot, desk, strategy, and route remain absent. Reconciliation does not manufacture a missing field.
+ADR-0013. Provenance in the normalized ingress value is correlation-independent and origin-based.
+A local known-order event copies the complete retained OMS subject because AEGIS minted that event
+from the row. A local account/source observation carries configured firm/account/venue and forbids
+desk, bot, strategy, route, and instrument. A venue or reconciliation input retains only the maximal
+provenance independently proved from its raw account/venue and sealed configuration: configured
+firm when proved and supported instrument/metadata when proved. It never gains desk, bot, strategy,
+route, or local ownership from a supplied local locator or the current exchange mapping.
+
+After duplicate classification, correlation produces a separate resolved subject projection for
+the transition plan, OMS/reservation/inventory effects, audit record, and callback. A known local
+order resolution copies every subject field from the retained OMS row. An unknown authoritative
+resolution remains limited to the normalized source subject. Correlation never rewrites the stored
+normalized event or either duplicate registry. Reconciliation does not manufacture a missing field.
 
 The closed kind-specific payload shapes are:
 
@@ -161,10 +179,10 @@ The closed kind-specific payload shapes are:
 |---|---|---|
 | `ExchangeAcknowledged` | venue or reconciliation origin; `ExchangeOrderId`; optional syntactically valid local `OrderId` locator | trade, fill, cancel-attempt, local-failure and observation payloads |
 | `ExchangeRejected` | venue or reconciliation origin; at least one syntactically valid local or exchange locator; assigned rejection category and zero-through-256 opaque detail bytes | trade, fill, cancel-attempt, cancellation and observation payloads |
-| `Execution` | venue or reconciliation origin; known or unknown order locator; `TradeId`; incremental/cumulative quantity; execution price; side present only for an unknown locator | cancel-attempt, local-failure and observation payloads |
+| `Execution` | venue or reconciliation origin; at least one raw local/exchange locator; `TradeId`; raw instrument and claimed metadata revision; incremental/cumulative quantity; execution price; source side optional for venue ingress and required for reconciliation ingress | cancel-attempt, local-failure and observation payloads |
 | `CancelRequested` | local origin; known local `OrderId`; `CancelAttemptId` | exchange event, trade, fill, result and observation payloads |
 | `CancelWriteOutcome` | local origin; known local `OrderId`; matching `CancelAttemptId`; assigned outcome | trade, fill, venue terminal and observation payloads |
-| `CancellationResult` | venue or reconciliation origin; known or unknown order locator; assigned result; terminal cumulative quantity when result is `Cancelled` | trade execution, local-failure and observation payloads |
+| `CancellationResult` | venue or reconciliation origin; at least one raw local/exchange locator; assigned result; terminal cumulative quantity when result is `Cancelled` | trade execution, local-failure and observation payloads |
 | `LocalFailure` | local origin; local `OrderId`, submission attempt and assigned certainty | trade, fill, cancel and observation payloads |
 | `TimeoutObserved` | local origin; order or account scope and its exact locator | exchange result, trade, fill and cancel payloads |
 | `DisconnectObserved` | local origin; private-source scope; account and affected source epoch | order economics, exchange result, trade, fill and cancel payloads |
@@ -180,17 +198,43 @@ authority. Bounded reason detail is retained as opaque evidence and never used t
 `VenueRiskRejected = 6`. Zero and unassigned categories reject. Rejection detail is zero through
 256 opaque bytes; a larger value rejects before admission.
 
-For a known execution, side is forbidden and is derived only from retained local OMS ownership. For
-an unknown execution, authoritative side is optional: Buy or Sell makes the provisional unknown
-trade quantifiable, while absence deterministically creates `Unquantifiable`. A supplied unknown
-side is evidence only and never proves local ownership. M7 must prove any native side normalization.
+Source-side presence is fixed before correlation: it is optional on venue ingress and required on a
+reconciliation execution row. After correlation, a known execution derives its economic side only
+from retained local OMS ownership. Any supplied source side must equal that retained side and is
+then omitted from the resolved transition projection; a mismatch is a safety conflict. An unknown
+execution retains a supplied authoritative Buy or Sell as evidence, making provisional unknown
+trade economics quantifiable, while absent venue side deterministically creates `Unquantifiable`.
+A supplied side never proves local ownership. M7 must prove any native side normalization.
 
-The semantic digest covers every origin-specific identity, subject, source time, provenance field,
-locator, result, reason, and economic value. Its only excluded observation fields are receive time,
-admission ordinal, audit ordinal, journal sequence, and diagnostic linkage. A difference in any
-other field is a conflict rather than an exact duplicate. Field-by-field equality of the complete
-bounded typed value is normative. ADR-0014 must define the digest's exact canonical-byte preimage
-before digest storage or encoding exists; earlier semantic implementation compares the full value.
+The immutable ingress semantic value covers every origin-specific identity, independently proved
+subject field, source time, root provenance field, raw locator, result, reason, and economic value.
+Its only excluded observation fields are receive time, admission ordinal, audit ordinal, journal
+sequence, and diagnostic linkage. The event-identity registry stores this complete typed ingress
+value together with its complete immutable tagged first-admission resolution before any later
+exchange mapping can affect attribution. The same event key with a field-for-field equal ingress
+semantic value is an exact duplicate; the same key with any other semantic field changed is a
+conflict. A replay found in
+this registry reuses the retained original ingress and resolution for comparison, emits a new
+`ExactEventDuplicate` disposition, and never re-runs correlation, adopts ownership, applies
+economics, or rewrites the resolved subject merely because a mapping now exists.
+
+For a first-seen event key, correlation derives the separate resolved order and subject used by the
+trade registry, OMS, transition plan, callback, and audit projection. An execution's trade semantic
+value is one closed tuple containing instrument and claimed metadata revision, incremental and
+cumulative quantity, execution price, canonical economic side, and one resolution tag. The tag is
+either `Known(OrderId)` or `Unknown(raw local locator presence/value, raw exchange locator
+presence/value)`. Known canonical side comes from the retained OMS row after any supplied source
+side has been checked for equality; unknown canonical side is the supplied side or typed absence. A
+known source-side mismatch is safety-contained before trade lookup. Account, venue, and trade ID
+belong to the `TradeKey`, not the value. Ordinary event identity, source time, root/source
+provenance, receive time, evidence ordinals, and known source-side presence are excluded.
+
+The same trade key and equal complete tuple is an exact trade duplicate; any included field or
+resolution difference is a trade conflict. A formerly unknown trade that appears under a distinct
+event identity after a mapping change therefore conflicts rather than being silently adopted or
+economically reapplied. ADR-0014 must define exact digest preimages before digest storage or
+encoding exists; earlier semantic implementation compares the complete bounded typed values field
+by field.
 
 ### Exact correlation
 
@@ -213,15 +257,16 @@ handled through the account-safety contract in ADR-0011.
 
 ### Event and trade idempotency
 
-The reconciler checks the event key before the OMS transition:
+The reconciler checks the event key before correlation and the OMS transition:
 
-- the same key and semantic digest is an exact event duplicate;
-- the same key with a different digest is an event-identity conflict.
+- the same key and correlation-independent ingress semantic value is an exact event duplicate;
+- the same key with a different ingress semantic value is an event-identity conflict.
 
-It checks an execution's trade key independently:
+Only a first-seen event reaches correlation and an execution's independent trade check:
 
-- the same trade key and identical order/economics digest is an exact trade duplicate;
-- the same trade key with different correlation or economics is a trade-identity conflict.
+- the same trade key and identical closed execution/resolution tuple is an exact trade duplicate;
+- the same trade key with any different included economic or resolution field is a trade-identity
+  conflict.
 
 An exact duplicate records one explicit duplicate disposition but causes no OMS, reservation,
 inventory, exposure, or callback change. A conflicting duplicate performs one fully preflighted
@@ -237,6 +282,8 @@ applied. Reclaiming active order capacity never permits a late duplicate to appl
 A normalized `Execution` always requires:
 
 - one `TradeId`;
+- one raw `InstrumentId` and claimed `InstrumentMetadataRevision`, retained independently from any
+  configured/proved source-subject metadata;
 - positive exact incremental quantity;
 - positive exact cumulative quantity after this trade;
 - positive exact execution price;
@@ -441,12 +488,15 @@ authoritative proof releases it. Both reservations therefore coexist while both 
 
 ### Joint classify, plan, and commit
 
-The private-event owner first validates, correlates, deduplicates, and builds an immutable bounded
-transition plan. It then performs all checked arithmetic and preflights OMS, mapping, pending-fill,
-reservation, inventory, audit, journal, diagnostic, and callback capacity. The complete prepared
-`PrivateEventInput` journal record and its sequence are part of that plan. Only after every fallible
-step succeeds may one no-fail owner-local commit publish that prepared input, then update OMS,
-reservation, exposure, inventory, account safety, and audit.
+The private-event owner first validates the ingress value and resolves exact event duplicates or
+conflicts. Only a first-seen event is correlated, after which its resolved trade value is checked
+for a duplicate or conflict before the owner builds an immutable bounded transition plan. It
+performs all checked arithmetic and preflights OMS,
+mapping, pending-fill, reservation, inventory, audit, journal, diagnostic, and callback capacity.
+The complete prepared `PrivateEventInput` journal record retains the unchanged source-normalized
+event and its complete immutable tagged first-admission resolution. The record and its sequence are
+part of the plan. Only after every fallible step succeeds may one no-fail owner-local commit publish
+that prepared input, then update OMS, reservation, exposure, inventory, account safety, and audit.
 
 Within the commit, the OMS transition is applied before its reservation and inventory effects. No
 other owner turn can observe the intermediate writes. A failure before commit changes no business
