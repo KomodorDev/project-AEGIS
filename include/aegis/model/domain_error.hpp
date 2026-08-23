@@ -66,6 +66,14 @@ enum class DomainErrorCode : std::uint16_t {
   DispatchCapacityExceeded = 601,
   DispatchReentryDetected = 602,
   CallbackCounterExhausted = 603,
+
+  InvalidRiskPolicy = 700,
+  InvalidRiskReservationState = 701,
+
+  InvalidSubmissionPolicy = 800,
+  SubmissionEvidenceExhausted = 801,
+  InvalidOmsState = 802,
+  InvalidFakeState = 803,
 };
 
 // ########################################################################

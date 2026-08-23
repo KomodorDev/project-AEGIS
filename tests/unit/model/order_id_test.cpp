@@ -11,6 +11,8 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace aegis::model::detail {
 
@@ -58,6 +60,32 @@ using namespace aegis::model;
 // Byte widths are part of the persisted ID contract, not implementation-dependent object sizes.
 static_assert(OrderNamespace::byte_size == 16U);
 static_assert(OrderId::byte_size == 24U);
+
+// ########################################################################
+// The fake-submission identity source is a closed value sum: neither alternative has a virtual
+// dispatch seam, and an arbitrary next()-shaped type cannot become a source alternative.
+struct ArbitraryOrderIdProviderShape {
+
+  // --------------------------------------------------------
+  // Match the concrete providers' method shape without inheriting any trusted implementation.
+  [[nodiscard]] Result<OrderId> next();
+
+  // --------------------------------------------------------
+};
+
+static_assert(std::variant_size_v<DeterministicOrderIdSource> == 2U);
+static_assert(std::same_as<std::variant_alternative_t<0U, DeterministicOrderIdSource>,
+                           DeterministicOrderIdProvider>);
+static_assert(std::same_as<std::variant_alternative_t<1U, DeterministicOrderIdSource>,
+                           ScriptedOrderIdProvider>);
+static_assert(!std::is_polymorphic_v<DeterministicOrderIdProvider>);
+static_assert(!std::is_polymorphic_v<ScriptedOrderIdProvider>);
+static_assert(!std::is_polymorphic_v<ProductionOrderIdProvider>);
+static_assert(!std::is_constructible_v<DeterministicOrderIdSource, ArbitraryOrderIdProviderShape>);
+static_assert(!std::is_copy_constructible_v<DeterministicOrderIdSource>);
+static_assert(std::is_move_constructible_v<DeterministicOrderIdSource>);
+
+// ########################################################################
 
 // ########################################################################
 // Interesting syntax: a requires-expression proves bool and plain character input cannot select the
@@ -191,6 +219,43 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == DomainErrorCode::CounterExhausted);
   CHECK(exhausted.error().context.field == "order_counter");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// A finite closed script may deliberately repeat an already trusted identity so upper layers can
+// prove exact duplicate handling without accepting a caller-defined provider implementation.
+TEST_CASE("scripted order identities preserve repeats and exhaust deterministically",
+          "[model][order-id][scripted]") {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Mint two trusted canonical identities before building the allocation-free emission sequence.
+  auto created = DeterministicOrderIdProvider::create(sequential_namespace(), 7U);
+  REQUIRE(created);
+  auto minter = std::move(created).value();
+  const auto first = minter.next();
+  const auto second = minter.next();
+  REQUIRE(first);
+  REQUIRE(second);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The scripted source emits the repeated value exactly, then uses stable counter exhaustion.
+  ScriptedOrderIdProvider provider{
+      std::vector<OrderId>{first.value(), first.value(), second.value()}};
+  const auto emitted_first = provider.next();
+  const auto emitted_repeat = provider.next();
+  const auto emitted_second = provider.next();
+  const auto exhausted = provider.next();
+  REQUIRE(emitted_first);
+  REQUIRE(emitted_repeat);
+  REQUIRE(emitted_second);
+  CHECK(emitted_first.value() == first.value());
+  CHECK(emitted_repeat.value() == first.value());
+  CHECK(emitted_second.value() == second.value());
+  REQUIRE_FALSE(exhausted);
+  CHECK(exhausted.error() ==
+        DomainError::at_field(DomainErrorCode::CounterExhausted, "order_counter"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

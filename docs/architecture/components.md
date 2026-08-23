@@ -16,9 +16,12 @@ This document expands the [architecture overview](../architecture.md). It descri
 
 ## Logical Component View
 
-**Status:** The plane boundary, serialized ownership, and M2 ingress/market/dispatch/bot boundaries are
-**Accepted and implemented**. The later order path is **Accepted** while its component APIs remain
-**Proposed**. The diagram is **Illustrative** and does not imply queues, processes, or thread hops.
+**Status:** The plane boundary, serialized ownership, and M2 ingress/market/dispatch/bot boundaries
+are **Accepted and implemented**. M3 route, fixed-risk, outbound OMS, and fake-initiation contracts
+are **Accepted and locally implemented** on the feature branch published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10); the integrated `dev` capability
+baseline remains M2 until merge. The diagram is **Illustrative** and does not imply queues,
+processes, or thread hops.
 
 ```mermaid
 flowchart LR
@@ -34,9 +37,11 @@ flowchart LR
         DISPATCH["Subscription dispatcher"]
         BOT["Bot runtime and strategy"]
         ROUTES["Execution-route authorization"]
+        CANONICAL["Canonical economics and local identity"]
         SNAPSHOT["Owner-installed risk snapshot"]
         GUARD["Inline pre-trade risk guard<br/>installed snapshot and reservations"]
-        OMS["Order management system<br/>lifecycle and reconciliation"]
+        OMS["Order management system<br/>M3 outbound admission; later reconciliation"]
+        FAKE["Deterministic fake encoder and initiator<br/>structurally offline"]
         INVENTORY["Immediate inventory and exposure"]
 
         SESSION -->|"Native messages"| INGRESS
@@ -45,14 +50,17 @@ flowchart LR
         MARKET --> DISPATCH
         DISPATCH -->|"Synchronous callback"| BOT
 
-        BOT -->|"submit fixed-size OrderRequest"| ROUTES
-        ROUTES -->|"Authorized request"| GUARD
+        BOT -->|"submit bounded-field OrderRequest by const reference"| ROUTES
+        ROUTES -->|"Authorized route projection"| CANONICAL
         ROUTES -->|"Local rejection"| BOT
+        CANONICAL -->|"Validated request and generated identity"| GUARD
+        CANONICAL -->|"Local rejection"| BOT
         SNAPSHOT -->|"Coherent installed policy"| GUARD
         GUARD -->|"Approved request and reservation"| OMS
         GUARD -->|"Local risk rejection"| BOT
 
-        OMS -->|"Order to encode"| ADAPTER
+        OMS -->|"M3 admitted order"| FAKE
+        OMS -->|"Later native order"| ADAPTER
         ADAPTER -->|"Exchange-native order"| SESSION
 
         ADAPTER -->|"Normalized acknowledgement, rejection or fill"| OMS
@@ -88,16 +96,20 @@ flowchart LR
 Arrows show logical flow or dependency, not elapsed time. The distinction between synchronous calls and asynchronous events is defined in [Runtime Flows](runtime-flows.md).
 
 M2 implements the credential-free path from recorded fixture ingress through the bot runtime and
-strategy. Venue/account sessions, native adapters, sockets, order submission, risk, OMS, inventory,
-and transmission remain later milestones; their presence in the diagram does not place those
-capabilities in the M2 build.
+strategy. The locally implemented M3 slice adds only owner-local route authorization, fixed risk,
+outbound OMS admission, exact fake encoding, and in-memory initiation. Venue/account sessions,
+native adapters, sockets, inventory, private reconciliation, and real transmission remain later
+milestones. The revision-specific proof is in the [M3 exit-evidence
+record](../milestones/m3-exit-evidence.md).
 
 The view preserves these invariants:
 
 - One serialized executor on one dedicated thread owns all mutable v1 data-plane state.
 - Bounded ingress coordinates immutable work and exposes loss; its synchronization state cannot
   expose or mutate books, bots, strategies, diagnostics or traces from a producer.
-- There is no general-purpose queue, serialization boundary, remote call or executor hop between strategy submission and the inline risk decision.
+- There is no general-purpose queue, serialization boundary, remote call, or executor hop anywhere
+  in the M3 capability/evidence → route → canonical validation → identity → risk/reservation → OMS
+  → exact encoding → fake-initiation path.
 - A request cannot reach a venue session without route authorization, risk admission and OMS admission.
 - Exchange acknowledgements, rejections and fills pass through OMS reconciliation before inventory or bot-facing order events are updated.
 - Reservation transitions and immediate inventory changes complete on the data-plane owner before a later callback can make another risk decision.
@@ -179,12 +191,12 @@ value whose explicit reconciliation mapping begins in M7.
 | Venue connection, protocol and parser state | Data-plane executor | Updated only by serialized venue handlers; telemetry is reported asynchronously. |
 | Normalized market state and subscription dispatch | Data-plane executor | A complete scratch candidate commits before `Ready` dispatch; non-ready transitions expose no book view. |
 | Bot and mutable strategy runtime state | Data-plane executor | Mutated only during serialized bot callbacks. |
-| Active subscription and route-authorization view | Data-plane executor | The installed runtime view is read inline; the configuration source and adoption protocol remain **Open**. |
-| OMS order lifecycle and reconciliation state | Data-plane executor | All submissions and exchange order events pass through the OMS on the same owner. |
-| Reservations and open-order exposure | Data-plane executor | Check-and-reserve and later transitions are serialized with OMS and inventory changes. |
+| Active subscription and route-authorization view | Data-plane executor | Implemented M3 behavior installs the sealed startup routes once in canonical order and reads them inline. Dynamic route adoption is deferred. |
+| OMS order lifecycle and reconciliation state | Data-plane executor | Implemented M3 behavior admits outbound local identities and records local initiation or uncertainty. M4 adds exchange-event reconciliation. |
+| Reservations and open-order exposure | Data-plane executor | Implemented M3 check-and-reserve is atomic; definite local failures release exactly once, while initiation or uncertainty retains exposure. Later private-event transitions begin in M4. |
 | Immediate bot positions, inventory and exposure used by risk | Data-plane executor | Exchange events update this state before any later callback or risk decision runs. P&L calculation placement remains **Open**. |
 | Authoritative firm, desk and bot budgets and modes | Control-plane risk coordinator | Derived from aggregate observations and published as complete immutable snapshots. |
-| Installed risk budget/mode snapshot | Data-plane executor through the inline guard | A newer monotonic revision replaces the previous snapshot between callbacks; partial installation is forbidden. |
+| Installed risk budget/mode snapshot | Data-plane executor through the inline guard | Implemented M3 behavior installs one complete immutable startup policy. M5 may replace it only between callbacks with a newer complete revision; partial installation is forbidden. |
 | Aggregate reporting projections and UI view models | Control plane | Built from asynchronous observations and never consulted synchronously to approve an order. |
 | Durable audit, recovery and persistence state | **Open** | Ownership and reconciliation rules require a later decision. |
 

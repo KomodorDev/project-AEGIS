@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Reject incomplete or internally inconsistent M0 or M2 benchmark-evidence bundles."""
+"""Reject incomplete or internally inconsistent M0, M2, or M3 benchmark-evidence bundles."""
 
 # Interesting syntax: postponed annotations let the script use modern type hints on every supported
 # Python version without evaluating those hints while the module is imported.
@@ -30,6 +30,12 @@ from run_benchmarks import (
     M2_RUN_NAMES,
     M2_SAMPLE_COUNT,
     M2_WORKLOAD_IDS,
+    M3_BENCHMARK_FILTER,
+    M3_PROVENANCE_KEYS,
+    M3_PROVENANCE_LABEL_PATTERN,
+    M3_RUN_NAMES,
+    M3_SAMPLE_COUNT,
+    M3_WORKLOAD_IDS,
     worktree_fingerprint,
 )
 
@@ -70,6 +76,19 @@ VALID_M2_FINGERPRINT_LABEL = re.compile(
     r"configuration_fingerprint_sha256=([0-9a-f]{64});"
     r"runtime_policy_fingerprint_sha256=([0-9a-f]{64})"
 )
+
+# Each M3 workload reports one common distribution contract and its exact workload-specific rate
+# and allocation names. Both use the internal submit-path duration in microseconds.
+M3_RECORD_CONTRACTS = {
+    M3_RUN_NAMES[0]: {
+        "rate_counter": "orders_per_second",
+        "allocation_counter": "allocations_per_order",
+    },
+    M3_RUN_NAMES[1]: {
+        "rate_counter": "rejections_per_second",
+        "allocation_counter": "allocations_per_request",
+    },
+}
 
 
 # --------------------------------------------------------
@@ -177,6 +196,30 @@ def m2_fingerprint_pair(record: dict[str, Any], *, location: str) -> tuple[str, 
 
 
 # --------------------------------------------------------
+# Parses one exact M3 provenance label into the same typed object stored in the manifest.
+def m3_provenance(record: dict[str, Any], *, location: str) -> dict[str, object]:
+    """Return every canonical M3 benchmark-provenance field from one anchored label."""
+
+    label = record.get("label")
+    require(isinstance(label, str), f"{location} label must be a string")
+    assert isinstance(label, str)
+    match = M3_PROVENANCE_LABEL_PATTERN.fullmatch(label)
+    require(match is not None, f"{location} label has invalid M3 provenance grammar")
+    assert match is not None
+    numeric_keys = {
+        "configuration_revision",
+        "organization_revision",
+        "risk_policy_revision",
+        "route_revision",
+        "metadata_revision",
+    }
+    parsed: dict[str, object] = {}
+    for key, value in zip(M3_PROVENANCE_KEYS, match.groups(), strict=True):
+        parsed[key] = int(value) if key in numeric_keys else value
+    return parsed
+
+
+# --------------------------------------------------------
 # Independently verifies every published REF-MAC-01 qualification condition.
 def require_ref_mac_01_context(manifest: dict[str, Any]) -> None:
     """Reject a qualification label unless all hardware, toolchain, and control facts are exact."""
@@ -220,7 +263,7 @@ def require_ref_mac_01_context(manifest: dict[str, Any]) -> None:
 
 
 # --------------------------------------------------------
-# Defines the suite selector and repository-relative result default.
+# Defines the M0/M2/M3 suite selector and repository-relative result default.
 def parse_arguments() -> argparse.Namespace:
     """Select M0 by default or one explicit suite and repository-relative evidence directory."""
 
@@ -228,7 +271,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--suite",
-        choices=("m0", "m2"),
+        choices=("m0", "m2", "m3"),
         default="m0",
         help="benchmark evidence suite to validate (default: m0)",
     )
@@ -526,6 +569,173 @@ def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
 
 
 # --------------------------------------------------------
+# Validates exact M3 identities, metrics, provenance, and two-claim qualification policy.
+def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]) -> str:
+    """Validate both fixed M3 submit workloads and return their evidence classification."""
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Require the exact suite identity, workload order, sample count, and anchored binary filter.
+    require(manifest.get("benchmark_suite") == "m3", "benchmark_suite must equal m3")
+    require(manifest.get("workload_ids") == list(M3_WORKLOAD_IDS), "unexpected M3 workload_ids")
+    require(
+        manifest.get("sample_count") == M3_SAMPLE_COUNT,
+        f"sample_count must equal {M3_SAMPLE_COUNT}",
+    )
+    filters = [
+        argument for argument in benchmark_command if argument.startswith("--benchmark_filter=")
+    ]
+    require(
+        filters == [f"--benchmark_filter={M3_BENCHMARK_FILTER}"],
+        "M3 benchmark_command must carry the exact anchored suite filter",
+    )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Index exactly two nonaggregate records and parse each workload's immutable fixture identity.
+    benchmarks = raw.get("benchmarks")
+    require(
+        isinstance(benchmarks, list) and len(benchmarks) == len(M3_RUN_NAMES),
+        "raw M3 benchmarks must contain exactly two records",
+    )
+    assert isinstance(benchmarks, list)
+    records: dict[str, dict[str, Any]] = {}
+    provenance_by_run: dict[str, dict[str, object]] = {}
+    for index, record in enumerate(benchmarks):
+        location = f"benchmark record {index}"
+        require(isinstance(record, dict), f"{location} must be an object")
+        assert isinstance(record, dict)
+        run_name = record.get("run_name")
+        require(run_name in M3_RECORD_CONTRACTS, f"{location} has an unexpected run_name")
+        assert isinstance(run_name, str)
+        require(run_name not in records, f"{location} duplicates {run_name}")
+        require(record.get("name") == run_name, f"{location} name must equal run_name")
+        require(record.get("run_type") == "iteration", f"{location} must be an iteration record")
+        require(record.get("repetitions") == 1, f"{location} repetitions must equal 1")
+        # Google Benchmark can attach failure or skip status to otherwise complete-looking metrics.
+        for status_key in ("error_occurred", "skipped"):
+            if status_key in record:
+                require(
+                    record.get(status_key) is False,
+                    f"{location} {status_key} must be false when present",
+                )
+        for message_key in ("error_message", "skip_message"):
+            if message_key in record:
+                require(
+                    record.get(message_key) == "",
+                    f"{location} {message_key} must be empty when present",
+                )
+        records[run_name] = record
+        provenance_by_run[run_name] = m3_provenance(record, location=location)
+    require(set(records) == set(M3_RUN_NAMES), "raw M3 records have wrong identities")
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # The manifest repeats the ordered raw labels exactly, preventing attribution substitution.
+    ordered_provenance = [provenance_by_run[run_name] for run_name in M3_RUN_NAMES]
+    require(
+        manifest.get("workload_provenance") == ordered_provenance,
+        "workload_provenance does not match ordered raw M3 labels",
+    )
+    for index, expected_workload in enumerate(M3_WORKLOAD_IDS):
+        require(
+            ordered_provenance[index].get("workload_id") == expected_workload,
+            f"M3 provenance row {index} names another workload",
+        )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Both workloads use the value-identical request/runtime fixture; only risk and consequently
+    # submission fingerprints differ so the rejection branch cannot borrow success provenance.
+    left, right = ordered_provenance
+    differing_keys = {
+        "workload_id",
+        "risk_policy_fingerprint_sha256",
+        "submission_policy_fingerprint_sha256",
+    }
+    for key in M3_PROVENANCE_KEYS:
+        if key not in differing_keys:
+            require(left.get(key) == right.get(key), f"M3 shared provenance differs at {key}")
+    require(
+        left.get("risk_policy_fingerprint_sha256") != right.get("risk_policy_fingerprint_sha256"),
+        "M3 workload risk-policy fingerprints must differ",
+    )
+    require(
+        left.get("submission_policy_fingerprint_sha256")
+        != right.get("submission_policy_fingerprint_sha256"),
+        "M3 workload submission-policy fingerprints must differ",
+    )
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Enforce one thread, one repetition, fixed samples, monotonic tails, and exact rate/allocation
+    # names for both internally timed submission paths.
+    p99_by_workload: dict[str, float] = {}
+    for run_name, workload_id in zip(M3_RUN_NAMES, M3_WORKLOAD_IDS, strict=True):
+        record = records[run_name]
+        contract = M3_RECORD_CONTRACTS[run_name]
+        require(
+            record.get("iterations") == M3_SAMPLE_COUNT,
+            f"{run_name} iterations must equal {M3_SAMPLE_COUNT}",
+        )
+        require(record.get("threads") == 1, f"{run_name} threads must equal 1")
+        require(record.get("time_unit") == "us", f"{run_name} time_unit must equal us")
+        require_nonnegative_number(record, "real_time", location=run_name)
+        require_nonnegative_number(record, "cpu_time", location=run_name)
+        sample_count = require_nonnegative_number(record, "sample_count", location=run_name)
+        require(sample_count == M3_SAMPLE_COUNT, f"{run_name} sample_count must equal 10000")
+        p50 = require_nonnegative_number(record, "p50_us", location=run_name)
+        p99 = require_nonnegative_number(record, "p99_us", location=run_name)
+        p99_9 = require_nonnegative_number(record, "p99_9_us", location=run_name)
+        require(p50 <= p99 <= p99_9, f"{run_name} percentile counters are not monotonic")
+        rate_counter = contract["rate_counter"]
+        allocation_counter = contract["allocation_counter"]
+        assert isinstance(rate_counter, str) and isinstance(allocation_counter, str)
+        require_nonnegative_number(record, rate_counter, location=run_name)
+        require_nonnegative_number(record, allocation_counter, location=run_name)
+        p99_by_workload[workload_id] = p99
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Smoke runs make no threshold statement. Qualification requires exactly the two ordered,
+    # raw-bound REF-MAC-01 claims and both provisional p99 limits must pass.
+    classification = manifest.get("evidence_classification")
+    require(classification in ("smoke", "qualification"), "invalid evidence_classification")
+    if classification == "smoke":
+        require(
+            "qualification_reference" not in manifest and "threshold_claims" not in manifest,
+            "smoke evidence must not contain threshold claims",
+        )
+        return "smoke"
+
+    require_ref_mac_01_context(manifest)
+    require(
+        manifest.get("qualification_reference") == "REF-MAC-01",
+        "qualification_reference must equal REF-MAC-01",
+    )
+    claims = manifest.get("threshold_claims")
+    require(
+        isinstance(claims, list) and len(claims) == 2,
+        "M3 qualification needs exactly two threshold claims",
+    )
+    assert isinstance(claims, list)
+    limits = (50.0, 25.0)
+    for index, (workload_id, limit) in enumerate(zip(M3_WORKLOAD_IDS, limits, strict=True)):
+        claim = claims[index]
+        require(isinstance(claim, dict), f"M3 threshold claim {index} must be an object")
+        assert isinstance(claim, dict)
+        observed = p99_by_workload[workload_id]
+        require(
+            claim.get("workload_id") == workload_id
+            and claim.get("metric") == "p99_us"
+            and claim.get("operator") == "<="
+            and claim.get("limit") == limit
+            and claim.get("observed") == observed
+            and type(claim.get("passed")) is bool
+            and claim.get("passed") == (observed <= limit),
+            f"M3 threshold claim {index} does not match its raw p99 observation",
+        )
+        require(observed <= limit, f"{workload_id} p99 exceeds {limit} microseconds")
+    return "qualification"
+
+    # ++++++++++++++++++++++++++++++++++++++++
+
+
+# --------------------------------------------------------
 # Proves that a manifest still describes the exact checkout being validated.
 def validate_repository_provenance(manifest: dict[str, Any], repository: Path) -> None:
     """Cross-check Git revision, tree, dirty state, and byte-exact worktree fingerprint."""
@@ -562,11 +772,12 @@ def main() -> int:
     suite = arguments.suite
     repository = Path(__file__).resolve().parents[1]
     results_dir = arguments.results_dir.resolve()
-    raw_name, manifest_name = (
-        ("m0-harness.json", "m0-context.json")
-        if suite == "m0"
-        else ("m2-runtime.json", "m2-context.json")
-    )
+    if suite == "m0":
+        raw_name, manifest_name = "m0-harness.json", "m0-context.json"
+    elif suite == "m2":
+        raw_name, manifest_name = "m2-runtime.json", "m2-context.json"
+    else:
+        raw_name, manifest_name = "m3-submission.json", "m3-context.json"
     raw_path = results_dir / raw_name
     manifest_path = results_dir / manifest_name
     raw = read_json_object(raw_path)
@@ -578,9 +789,12 @@ def main() -> int:
     if suite == "m0":
         validate_m0(raw, manifest, benchmark_command)
         summary = M0_WORKLOAD_ID
-    else:
+    elif suite == "m2":
         classification = validate_m2(raw, manifest, benchmark_command)
         summary = f"M2 runtime {classification}"
+    else:
+        classification = validate_m3(raw, manifest, benchmark_command)
+        summary = f"M3 submission {classification}"
     validate_repository_provenance(manifest, repository)
 
     # ++++++++++++++++++++++++++++++++++++++++

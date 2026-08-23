@@ -1,10 +1,16 @@
-// Purpose: construct accepted single-firm and subsidiary-aware M1 startup fixtures.
+// Purpose: construct frozen M1/M2 startup fixtures plus separately enabled M3 configuration and
+// complete fixed-risk authoring values without changing earlier golden bytes.
 
 #include "reference_configuration.hpp"
 
+#include <algorithm>
+#include <array>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace aegis::test_support {
 namespace {
@@ -50,6 +56,53 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
       decimal<model::Quantity>("1"),
       decimal<model::Quantity>("1"),
       decimal<model::Notional>("10"),
+  };
+}
+
+// --------------------------------------------------------
+// Spell one heterogeneous scope subject from the same sealed startup authority used by risk.
+[[nodiscard]] std::string risk_subject(const execution::ExecutionRoute& route,
+                                       const organization::BotAttribution& attribution,
+                                       const model::InstrumentMetadata& metadata,
+                                       risk::RiskScopeKind scope) {
+  switch (scope) {
+  case risk::RiskScopeKind::Bot:
+    return std::string{attribution.bot_id.value()};
+  case risk::RiskScopeKind::Desk:
+    return std::string{attribution.desk_id.value()};
+  case risk::RiskScopeKind::Firm:
+    return std::string{attribution.firm_id.value()};
+  case risk::RiskScopeKind::Account:
+    return std::string{route.logical_account_id.value()};
+  case risk::RiskScopeKind::Route:
+    return std::string{route.id.value()};
+  case risk::RiskScopeKind::Instrument:
+    return std::string{metadata.instrument_id().value()};
+  case risk::RiskScopeKind::Venue:
+    return std::string{metadata.venue_id().value()};
+  default:
+    throw std::logic_error{"invalid M3 reference risk scope"};
+  }
+}
+
+// --------------------------------------------------------
+// Author one positive complete row whose aggregate headroom safely retains 10,000 open orders.
+[[nodiscard]] risk::RiskLimitSetParams
+risk_limit_row(const execution::ExecutionRoute& route,
+               const organization::BotAttribution& attribution,
+               const model::InstrumentMetadata& metadata, risk::RiskScopeKind scope) {
+  return risk::RiskLimitSetParams{
+      attribution.firm_id,
+      scope,
+      risk_subject(route, attribution, metadata, scope),
+      metadata.instrument_id(),
+      std::string{metadata.quote_currency()},
+      decimal<model::Quantity>("1000000"),
+      decimal<model::Notional>("10000000"),
+      20'000U,
+      decimal<model::Notional>("100000000"),
+      decimal<model::Quantity>("1000000"),
+      decimal<model::Notional>("100000000"),
   };
 }
 
@@ -131,6 +184,109 @@ configuration::StartupConfigurationParams two_firm_configuration_params() {
   return params;
 
   // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Derive the separately fingerprinted M3 fixture while preserving every accepted M1/M2 byte.
+configuration::StartupConfigurationParams m3_enabled_two_firm_configuration_params() {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Enable only already explicit owner-validated routes; subscriptions remain observation-only.
+  auto params = two_firm_configuration_params();
+  for (auto& route : params.routes) {
+    route.state = execution::ExecutionRouteState::Enabled;
+  }
+  return params;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Derive complete seven-scope rows and metadata provenance from every enabled sealed route.
+risk::RiskPolicyParams
+m3_reference_risk_policy_params(const configuration::StartupConfiguration& configuration) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Gather route-derived authority only; missing projections are fixture-authoring failures.
+  constexpr std::array scopes{
+      risk::RiskScopeKind::Bot,     risk::RiskScopeKind::Desk,  risk::RiskScopeKind::Firm,
+      risk::RiskScopeKind::Account, risk::RiskScopeKind::Route, risk::RiskScopeKind::Instrument,
+      risk::RiskScopeKind::Venue,
+  };
+  std::vector<configuration::InstrumentMetadataRevisionEntry> metadata_revisions;
+  std::vector<risk::RiskLimitSetParams> limits;
+  for (const auto& route : configuration.routes().routes()) {
+    if (!route.is_enabled()) {
+      continue;
+    }
+    const auto* const attribution = configuration.organization().find_bot(route.bot_id);
+    const auto* const metadata =
+        configuration.find_instrument_metadata(route.venue_id, route.instrument_id);
+    if (attribution == nullptr || metadata == nullptr) {
+      throw std::logic_error{"incomplete M3 reference risk authority"};
+    }
+    metadata_revisions.push_back(configuration::InstrumentMetadataRevisionEntry{
+        metadata->venue_id(), metadata->instrument_id(), metadata->revision()});
+    for (const auto scope : scopes) {
+      limits.push_back(risk_limit_row(route, *attribution, *metadata, scope));
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Canonicalize shared metadata and shared scope keys before policy validation rejects duplicates.
+  std::sort(metadata_revisions.begin(), metadata_revisions.end(),
+            [](const auto& left, const auto& right) {
+              return std::tie(left.venue_id, left.instrument_id) <
+                     std::tie(right.venue_id, right.instrument_id);
+            });
+  metadata_revisions.erase(std::unique(metadata_revisions.begin(), metadata_revisions.end()),
+                           metadata_revisions.end());
+  const auto limit_key = [](const auto& row) {
+    return std::tuple{row.firm_id.value(), static_cast<std::uint8_t>(row.scope),
+                      std::string_view{row.scope_subject}, row.instrument_id.value(),
+                      std::string_view{row.quote_currency}};
+  };
+  std::sort(limits.begin(), limits.end(), [&](const auto& left, const auto& right) {
+    return limit_key(left) < limit_key(right);
+  });
+  limits.erase(std::unique(limits.begin(), limits.end(),
+                           [&](const auto& left, const auto& right) {
+                             return limit_key(left) == limit_key(right);
+                           }),
+               limits.end());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Bind exact startup revisions and conservative away-from-zero quote-notional rounding.
+  return risk::RiskPolicyParams{
+      model::RiskPolicyRevision::initial(),
+      configuration.fingerprint(),
+      configuration.revision(),
+      configuration.organization().revision(),
+      configuration.routes().revision(),
+      2U,
+      model::RoundingMode::AwayFromZero,
+      std::move(metadata_revisions),
+      std::move(limits),
+  };
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Tighten only the baseline bot's first canonical quantity limit for the paired reject workload.
+risk::RiskPolicyParams
+m3_rejecting_risk_policy_params(const configuration::StartupConfiguration& configuration) {
+  auto params = m3_reference_risk_policy_params(configuration);
+  const auto baseline_bot = id<model::BotId>("bot.deribit-btc-perpetual-reference");
+  const auto found =
+      std::find_if(params.limit_sets.begin(), params.limit_sets.end(), [&](const auto& row) {
+        return row.scope == risk::RiskScopeKind::Bot && row.scope_subject == baseline_bot.value();
+      });
+  if (found == params.limit_sets.end()) {
+    throw std::logic_error{"missing baseline bot risk limit"};
+  }
+  found->maximum_single_order_quantity = decimal<model::Quantity>("1");
+  return params;
 }
 
 // --------------------------------------------------------

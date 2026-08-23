@@ -30,14 +30,23 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [ADR-0005: Immutable configuration provenance](decisions/0005-immutable-configuration-provenance.md)
 - [ADR-0006: Bounded deterministic runtime](decisions/0006-bounded-deterministic-runtime.md)
 - [ADR-0007: Market-state validity](decisions/0007-market-state-validity.md)
+- [ADR-0008: Canonical bot-bound submission and fixed risk](decisions/0008-canonical-submission-and-fixed-risk.md)
+- [ADR-0009: Outbound OMS and conservative fake initiation](decisions/0009-outbound-oms-and-fake-initiation.md)
 - [M0 reference scenario](reference-scenario.md)
 - [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
+- [M1 exit evidence](milestones/m1-exit-evidence.md)
+- [M2 exit evidence](milestones/m2-exit-evidence.md)
+- [M3 local exit evidence](milestones/m3-exit-evidence.md)
 
 ## System Architecture
 
 The diagram groups components by latency responsibility. Solid arrows show the immediate data and
 order path; dotted arrows show asynchronous observations or complete snapshot publication.
+It shows the accepted end-state relationships, not the capability currently enabled by the local
+M3 build. The locally implemented slice stops after OMS admission, exact fake encoding, and an
+in-memory fake accepted-slot copy; venue sessions, native encoding, exchange events, and real
+transmission remain later milestones.
 
 ```mermaid
 flowchart TD
@@ -45,7 +54,9 @@ flowchart TD
         A["Shared venue adapters"] --> M["Normalized market-data core"]
         M --> B["Bot subscriptions and strategy callbacks"]
         B -->|"submit OrderRequest (inline)"| Q["Execution-route authorization"]
-        Q --> G["Inline pre-trade risk guard"]
+        Q --> CV["Canonical economic validation"]
+        CV --> CID["Local identity generation"]
+        CID --> G["Inline pre-trade risk guard"]
         S["Owner-installed risk snapshot"] --> G
         G -->|"Approved reservation"| O["Order management system"]
         O -->|"Normalized order"| A
@@ -229,9 +240,12 @@ An execution route grants a bot permission to trade a specific instrument throug
 
 ```cpp
 struct ExecutionRoute {
-    Venue venue;
-    LogicalAccountId account;
-    InstrumentId instrument;
+    RouteId id;
+    BotId bot_id;
+    VenueId venue_id;
+    LogicalAccountId logical_account_id;
+    InstrumentId instrument_id;
+    ExecutionRouteState state;
 };
 ```
 
@@ -274,7 +288,7 @@ The data plane handles:
 - Order-state reconciliation
 - Immediate position and inventory updates
 - Order encoding
-- Exchange transmission
+- Exchange transmission (beginning only at M8)
 
 For the first implementation, one dedicated thread and serialized executor owns all mutable data-plane state and runs every data-plane handler to completion. This is an accepted v1 ownership decision, not a claim that the engine will always remain single-threaded. See [ADR-0001](decisions/0001-serialized-data-plane-execution.md).
 
@@ -312,7 +326,9 @@ and control-plane snapshots re-enter the serialized data-plane owner.
 ```mermaid
 flowchart LR
     B["Strategy callback"] -->|"submit OrderRequest"| A["Route authorization"]
-    A --> G["Inline check and reserve"]
+    A --> CV["Canonical economic validation"]
+    CV --> ID["Local identity generation"]
+    ID --> G["Inline check and reserve"]
     G --> O["Order management system"]
     O --> V["Venue adapter and account session<br/>encode and initiate async write"]
     V --> E["Exchange"]
@@ -331,10 +347,12 @@ The critical order path is:
 Strategy callback
 → submit OrderRequest
 → authorize the configured execution route
+→ validate exact canonical economics
+→ generate the collision-safe local identity
 → check and reserve local risk capacity inline
 → register the order with the order management system
-→ encode exchange-native order
-→ initiate asynchronous socket write
+→ encode an exact deterministic fake order
+→ initiate the in-memory asynchronous-write analogue
 ```
 
 It must not require:
@@ -347,56 +365,61 @@ It must not require:
 - A network call to a separate risk service
 - A thread hop merely to approve the order
 
-An asynchronous stream may eventually require a bounded, session-local write sequencer when another write is already in progress. That mechanism would sit after OMS admission, would not be a general-purpose event bus, and would not move the risk decision to another execution context. Its capacity and admission-failure policy remain **Open**.
+The implemented M3 slice stops at a fixed-capacity in-memory fake initiator. A real asynchronous
+stream may eventually require a bounded, session-local write sequencer when another write is
+already in progress. That M8
+mechanism would sit after OMS admission, would not be a general-purpose event bus, and would not move
+the risk decision to another execution context.
 
-The bot submits a small, fixed-size `OrderRequest`:
+The bot submits a small, bounded-field `OrderRequest` by const reference:
 
 ```cpp
 struct OrderRequest {
-    InstrumentId instrument;
-    Venue venue;
-    Side side;
+    RouteId route_id;
+    InstrumentId instrument_id;
+    OrderSide side;
     OrderType type;
-    PriceTicks price;
-    QuantityLots quantity;
+    TimeInForce time_in_force;
+    Price price;
+    Quantity quantity;
 };
 ```
 
-Submission performs route authorization followed by an immediate risk check. The route context and function names below are illustrative; the final route-selection API remains open:
+Submission performs explicit route authorization, canonical economic validation, local identity
+generation, and the immediate fixed M3 risk check in that order. The function names below remain
+illustrative, while the
+`RouteId`, limit-only, GTC, fixed-risk, and conservative result semantics are accepted in ADR-0008
+and ADR-0009:
 
 ```cpp
-SubmitResult Engine::submit_order(
-    BotId bot_id,
-    const OrderRequest& request
-) {
-    auto route = execution_routes_.authorize(bot_id, request);
-
-    if (!route) {
-        return SubmitResult::rejected(route.error());
-    }
-
-    auto approval = pre_trade_risk_.check_and_reserve(
-        bot_id,
-        request,
-        route.value()
-    );
-
-    if (!approval) {
-        return SubmitResult::rejected(approval.error());
-    }
-
-    return order_manager_.submit(
-        bot_id,
-        request,
-        route.value(),
-        approval.reservation()
-    );
+SubmitResult BotContext::submit(const OrderRequest& request) noexcept {
+    return submission_->submit(callback_token_, request);
 }
 ```
 
+`submission_` and `callback_token_` are private runtime-minted capabilities in this illustration.
+Strategy code can call the single normalized operation but cannot obtain or forge either value. The
+coordinator owns the complete validation, identity, risk, OMS, encoding, initiation, and rollback
+sequence shown in Runtime Flow 2. The two identifiers own fixed-capacity inline bytes, so constructing
+and copying this request performs no heap allocation. Submission borrows the already constructed
+request by const reference.
+
 The risk check and exposure reservation form one atomic operation. The v1 data-plane executor runs this operation to completion, so another submission cannot interleave and consume the same available capacity.
 
-Order acknowledgements, rejections and fills are processed asynchronously on later turns of the same executor. They reconcile OMS state before reservations and immediate inventory are updated and before the originating bot receives its order event. The detailed OMS states and reservation transitions remain **Open**.
+M3 distinguishes `WriteInitiated` from `SubmissionUnknown`; neither is an exchange acknowledgement.
+A definite pre-acceptance failure releases its reservation exactly once, while both initiation and
+uncertainty retain conservative exposure. Order acknowledgements, rejections and fills begin in M4
+and are processed asynchronously on later turns of the same executor. They reconcile OMS state
+before reservations and immediate inventory are updated and before the originating bot receives its
+order event. Detailed private-event transitions remain **Open** for M4.
+
+**Local implementation status (2026-08-22):** The complete route → canonical validation → identity
+→ fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented
+and verified on the M3 feature branch published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`. Its [M3 exit-evidence
+record](milestones/m3-exit-evidence.md) binds deterministic replay and smoke timing to clean producer
+`27087d4da423546041295de43e7fa2fb31425b63`. M3 is not merged, and the diagram's live venue/session
+portion remains unimplemented.
 
 ## Hierarchical Risk Budgets
 

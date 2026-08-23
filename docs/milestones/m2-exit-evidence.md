@@ -1,19 +1,21 @@
 # M2 Exit Evidence
 
 > **Purpose:** Record the original pinned stack, deliberate post-M1 rebase, implemented M2 scope,
-> exit-gate proof, named workload evidence, and conditions that prevent premature integration claims.
+> exit-gate proof, named workload evidence, and later integration without moving evidence anchors.
 
-**Status:** Local M2 implementation and exit-gate proof are complete on
-`codex/m2-deterministic-runtime` through the exact replay anchor
-`a3c090819f219681bfe3b903565c87490028ccbf` plus the post-audit source-sequence hardening in the
-current branch range. Normal, formatting, ASan+UBSan, TSan, release, deterministic replay, and
-M0/M2 benchmark-evidence checks passed locally. The M2 timing bundle is smoke evidence and makes no
-`REF-MAC-01` threshold claim.
+**Status:** M2 implementation is integrated. The feature branch ended at
+`4b5d89e834b45fef30fca87689937770d2c2ab35` after the exact replay anchor
+`a3c090819f219681bfe3b903565c87490028ccbf`, post-audit source-sequence hardening, and a final GCC
+portability test fix. Normal, formatting, ASan+UBSan, TSan, release, deterministic replay, and M0/M2
+benchmark-evidence checks passed locally as recorded below. The M2 timing bundle remains smoke
+evidence and makes no `REF-MAC-01` threshold claim.
 
 M1 merged with its reviewed head unchanged. On 2026-08-20, the eleven original M2 delivery commits
-were deliberately rebased onto M1's `dev` merge commit. At local evidence capture, no M2 pull
-request had been opened. Live publication state is external to this pinned record; remote CI,
-review, and integration remain pending. M2 is locally complete but is not integrated or closed.
+were deliberately rebased onto M1's `dev` merge commit. The local evidence was captured before M2
+publication. On 2026-08-21, [PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) later merged
+the exact feature head into `dev` as `d7733bb16a52d5ec954338f861d798d8c6620dad`. That merge records
+integration; it does not move the revision-specific verification or timing evidence to a new
+producer revision, and it creates no new controlled-host performance-qualification claim.
 
 ## Dependency and rebase record
 
@@ -29,15 +31,22 @@ review, and integration remain pending. M2 is locally complete but is not integr
 | M2 branch | `codex/m2-deterministic-runtime` |
 | Original M2-only range | `796321825d701f3add83af104b7924eb2826fd07..cc641110a2ec39f10fb89eb43f963711b9d2276d` |
 | Exact replayed M2 range | `6287e01be33300e0e7ea24c76dd64a869c67612b..a3c090819f219681bfe3b903565c87490028ccbf` |
-| Current M2 branch range | `6287e01be33300e0e7ea24c76dd64a869c67612b..HEAD` |
+| Final M2 feature range | `6287e01be33300e0e7ea24c76dd64a869c67612b..4b5d89e834b45fef30fca87689937770d2c2ab35` |
+| M2 feature head | `4b5d89e834b45fef30fca87689937770d2c2ab35` |
+| M2 pull request | [PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) |
+| M2 pull-request base | `dev` |
+| M2 merge commit and M3 starting baseline | `d7733bb16a52d5ec954338f861d798d8c6620dad` |
+| M2 integrated | 2026-08-21, with the feature-head and merge-commit trees identical |
 | Stack created | 2026-08-19, after local, remote-tracking, and live PR heads matched the pin |
 | Deliberate rebase | 2026-08-20, after fetching and verifying the exact M1 merge ancestry |
 
 The M1 review head remained at the pin through merge. `git range-diff` showed all eleven original M2
 delivery commits patch-identical and in the same order; the original and rebased benchmark commits
 have the same tree `c27d2f781f745db55e66333ab56d33018dded522`. No M2 commit was written to the M1
-branch. Any further `dev` movement must likewise be reported and reconciled deliberately rather than
-absorbed silently.
+branch. PR #8 later merged the final M2 feature head unchanged: both the feature head and merge
+commit have tree `2c95f9d19644c68842c21769a41faa73044ad2ff`. The merge commit is the integration
+anchor, while the revision-specific verification and benchmark records below remain attached to
+their original feature-branch producers.
 
 ## Accepted M2 contracts
 
@@ -101,11 +110,11 @@ The clean pre-rebase implementation/benchmark revision
 - strict warning-as-error builds and repository formatting/diff checks; and
 - M0 calibration plus M2 workload generation and independent evidence validation.
 
-The post-audit branch additionally rejects zero source and predecessor sequence sentinels before
-book state, proves fixture/domain separation, and contains a zero-sequence frame at the composed
-runtime boundary. That current branch passed 173/173 tests, comprising 170 unit cases and three
-deterministic scenarios, under normal, ASan+UBSan, and TSan profiles; formatting and diff checks also
-passed.
+The completed feature branch through `4b5d89e834b45fef30fca87689937770d2c2ab35` additionally rejects
+zero source and predecessor sequence sentinels before book state, proves fixture/domain separation,
+contains a zero-sequence frame at the composed runtime boundary, and makes the replay context
+GCC-safe. That feature branch passed 173/173 tests, comprising 170 unit cases and three deterministic
+scenarios, under normal, ASan+UBSan, and TSan profiles; formatting and diff checks also passed.
 
 The M2 scenario alone executes 471 assertions under each normal/sanitized profile. The reproducible
 benchmark commands are:
@@ -148,7 +157,12 @@ sessions; M8 owns transmission.
   exactly `796321825d701f3add83af104b7924eb2826fd07`.
 - The eleven original M2 delivery commits were deliberately replayed onto that merge commit with an
   exact `git range-diff`; M1's branch was not modified.
-- At local evidence capture, M2 had no pull request; live publication state belongs to GitHub.
-- Local implementation and exit checks are complete; remote CI, final review, integration, and
-  merge evidence remain pending.
-- Any M2 pull request must target `dev`; further base movement must be reconciled explicitly first.
+- At local evidence capture, M2 had no pull request. That remains a historical fact about when the
+  revision-specific evidence above was produced.
+- [PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) subsequently targeted `dev` from exact
+  feature head `4b5d89e834b45fef30fca87689937770d2c2ab35` and merged as
+  `d7733bb16a52d5ec954338f861d798d8c6620dad` on 2026-08-21.
+- The feature head and merge commit share tree `2c95f9d19644c68842c21769a41faa73044ad2ff`,
+  so integration introduced no additional source change.
+- M2 is integrated. Its local verification and smoke benchmark remain attributed to their recorded
+  feature-branch revisions; the merge does not relabel smoke timing as qualification.

@@ -20,7 +20,7 @@ option(AEGIS_WARNINGS_AS_ERRORS "Treat warnings in AEGIS-owned targets as errors
 option(AEGIS_ENABLE_ADDRESS_SANITIZER "Enable AddressSanitizer" OFF)
 option(AEGIS_ENABLE_UNDEFINED_SANITIZER "Enable UndefinedBehaviorSanitizer" OFF)
 option(AEGIS_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
-option(AEGIS_BUILD_BENCHMARKS "Build the named M0 and M2 benchmark workloads" ON)
+option(AEGIS_BUILD_BENCHMARKS "Build the named M0, M2, and M3 benchmark workloads" ON)
 
 # Load reusable project policies from cmake/ProjectOptions.cmake and create their interface targets.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -31,6 +31,9 @@ aegis_create_project_options()
 # Resolve the standard thread runtime used by the dedicated serialized-owner driver.
 find_package(Threads REQUIRED)
 
+# Require one Python interpreter for formatting, scanners, tooling tests, and evidence scripts.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 # Build the AEGIS library and provide the namespaced alias consumers should link against.
 add_library(
   aegis
@@ -38,8 +41,16 @@ add_library(
   # with an accepted immutable snapshot.
   src/aegis/configuration/configuration_provenance.cpp
   src/aegis/configuration/startup_configuration.cpp
-  # Data subscriptions and execution routes remain separate compiled permission boundaries.
+  # Execution owns explicit grants, canonical validation, a dedicated measurement clock, immutable
+  # fake-only policy, and exact offline encoding/initiation leaf contracts.
   src/aegis/execution/execution_route.cpp
+  src/aegis/execution/fake_order_encoder.cpp
+  src/aegis/execution/fake_transport_initiator.cpp
+  src/aegis/execution/order_validation.cpp
+  src/aegis/execution/submission_measurement_clock.cpp
+  src/aegis/execution/submission_policy.cpp
+  src/aegis/execution/submission_route.cpp
+  # Market-data subscriptions remain observation permissions and never grant execution authority.
   src/aegis/market_data/subscription.cpp
   # Normalized market events own venue-neutral input identity and post-commit callback contracts.
   src/aegis/market_data/market_event.cpp
@@ -60,14 +71,23 @@ add_library(
   src/aegis/model/sha256.cpp
   # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp
+  # Outbound OMS retains local admission/state/provenance but owns no risk release or communication.
+  src/aegis/oms/outbound_oms.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
+  # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
+  src/aegis/risk/exposure.cpp
+  src/aegis/risk/reservation_ledger.cpp
+  src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
   # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
   src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
   src/aegis/runtime/runtime_diagnostics.cpp
+  # Runtime owns direct submission composition and its bounded noncanonical diagnostic prefix.
+  src/aegis/runtime/submission_coordinator.cpp
+  src/aegis/runtime/submission_diagnostics.cpp
   # Bot dispatch owns one strategy per bot and invokes canonical state-before-market callbacks.
   src/aegis/runtime/bot_runtime.cpp
   # Both runtime drivers share one bounded attempt-ordered serialized turn processor.
@@ -77,6 +97,8 @@ add_library(
   src/aegis/trace/trace.cpp
   # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
   src/aegis/trace/runtime_trace.cpp
+  # Submission trace owns separate bounded AEGISSTS evidence so M2 callback preflight is unchanged.
+  src/aegis/trace/submission_trace.cpp
   # Version reporting exposes the configured project identity without adding runtime dependencies.
   src/aegis/version.cpp)
 add_library(aegis::aegis ALIAS aegis)
@@ -135,20 +157,35 @@ if(AEGIS_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
 
+# Reject forbidden live/remote/blocking/handoff capabilities through one deterministic tracked
+# scanner; compile-time API probes and owner-turn tests remain independent structural layers.
+add_custom_target(
+  forbidden-capability-check
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_forbidden_capabilities.py"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+  VERBATIM)
+
 # Discover every owned C++ and Python source at configure time and pass both lists to the format
-# targets. Keeping the Python list automatic prevents a newly added tool from escaping CI linting.
+# targets. Keeping headers and tooling tests automatic prevents new owned files from escaping CI.
 # Interesting syntax: CONFIGURE_DEPENDS asks CMake to reconfigure when matching files appear/disappear.
 file(
   GLOB_RECURSE AEGIS_CXX_FORMAT_FILES
   CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/*.cpp")
 file(
   GLOB_RECURSE AEGIS_PYTHON_FORMAT_FILES
   CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.py")
+  "${CMAKE_CURRENT_SOURCE_DIR}/tools/*.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.py")
 aegis_add_format_targets(CXX_FILES ${AEGIS_CXX_FORMAT_FILES} PYTHON_FILES
                          ${AEGIS_PYTHON_FORMAT_FILES})

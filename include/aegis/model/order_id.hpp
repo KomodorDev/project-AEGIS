@@ -14,6 +14,8 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace aegis::model {
 
@@ -122,37 +124,9 @@ private:
 };
 
 // ########################################################################
-// Interesting syntax: providers are deliberately move-only so one counter stream cannot be copied
-// into two owners that could emit the same identity.
-class OrderIdProvider {
-public:
-
-  // --------------------------------------------------------
-  // Prevent copying while permitting one counter stream to transfer between owners.
-  OrderIdProvider(const OrderIdProvider&) = delete;
-  OrderIdProvider& operator=(const OrderIdProvider&) = delete;
-  OrderIdProvider(OrderIdProvider&&) = default;
-  OrderIdProvider& operator=(OrderIdProvider&&) = default;
-  virtual ~OrderIdProvider() = default;
-
-  // --------------------------------------------------------
-  // Generate the next identity or report stable counter exhaustion.
-  [[nodiscard]] virtual Result<OrderId> next() = 0;
-
-  // --------------------------------------------------------
-protected:
-
-  // --------------------------------------------------------
-  // Allow construction only as the base subobject of a concrete provider.
-  OrderIdProvider() = default;
-
-  // --------------------------------------------------------
-};
-
-// ########################################################################
 // Deterministic construction exposes namespace and initial counter for replay tests, then emits the
 // final uint64 counter exactly once before entering a permanent exhausted state.
-class DeterministicOrderIdProvider final : public OrderIdProvider {
+class DeterministicOrderIdProvider final {
 public:
 
   // --------------------------------------------------------
@@ -193,7 +167,7 @@ public:
 
   // --------------------------------------------------------
   // Emit the current counter exactly once and advance, or preserve permanent exhaustion.
-  [[nodiscard]] Result<OrderId> next() override;
+  [[nodiscard]] Result<OrderId> next();
 
   // --------------------------------------------------------
 private:
@@ -222,9 +196,49 @@ private:
 };
 
 // ########################################################################
+
+// ########################################################################
+// A scripted replay provider owns only already minted canonical identities. Repeated values are
+// deliberately permitted so OMS duplicate handling can be proved without an open callback seam.
+class ScriptedOrderIdProvider final {
+public:
+
+  // --------------------------------------------------------
+  // Transfer one complete deterministic sequence; an empty sequence is immediately exhausted.
+  explicit ScriptedOrderIdProvider(std::vector<OrderId> identities) noexcept
+      : identities_{std::move(identities)} {}
+
+  // --------------------------------------------------------
+  // Keep scripted replay ownership singular while allowing composition-time transfer.
+  ScriptedOrderIdProvider(const ScriptedOrderIdProvider&) = delete;
+  ScriptedOrderIdProvider& operator=(const ScriptedOrderIdProvider&) = delete;
+  ScriptedOrderIdProvider(ScriptedOrderIdProvider&&) noexcept = default;
+  ScriptedOrderIdProvider& operator=(ScriptedOrderIdProvider&&) noexcept = default;
+
+  // --------------------------------------------------------
+  // Emit the next trusted identity without allocation, then report stable exhaustion.
+  [[nodiscard]] Result<OrderId> next();
+
+  // --------------------------------------------------------
+private:
+  std::vector<OrderId> identities_;
+  std::size_t next_index_{0U};
+};
+
+// ########################################################################
+
+// ########################################################################
+// Interesting syntax: this closed variant admits only the two final deterministic implementations;
+// callers cannot inject a user-defined virtual provider into the synchronous submission path.
+using DeterministicOrderIdSource =
+    std::variant<DeterministicOrderIdProvider, ScriptedOrderIdProvider>;
+
+// ########################################################################
+
+// ########################################################################
 // Production construction supplies a fresh operating-system namespace and delegates counter
 // encoding and exhaustion behavior to the same deterministic core.
-class ProductionOrderIdProvider final : public OrderIdProvider {
+class ProductionOrderIdProvider final {
 public:
 
   // --------------------------------------------------------
@@ -240,7 +254,7 @@ public:
 
   // --------------------------------------------------------
   // Delegate generation and exhaustion behavior to the shared deterministic core.
-  [[nodiscard]] Result<OrderId> next() override { return provider_.next(); }
+  [[nodiscard]] Result<OrderId> next() { return provider_.next(); }
 
   // --------------------------------------------------------
 private:

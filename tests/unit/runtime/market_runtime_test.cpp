@@ -1,9 +1,11 @@
-// Purpose: prove the M2 coordinator composes bounded admission, transactional books, canonical
-// subscription callbacks, containment, and quiescent replay evidence through its public API.
+// Purpose: prove MarketRuntime composes bounded M2 market dispatch and optional direct M3 fake
+// submission with deterministic quiescent evidence through its public API.
 
+#include "aegis/runtime/fake_submission_runtime.hpp"
 #include "aegis/runtime/market_runtime.hpp"
 #include "reference_configuration.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -16,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -325,6 +328,170 @@ private:
 
 // ########################################################################
 
+// ########################################################################
+// Compile-time probes prove a caller-authored order has no organization, account, venue, or local
+// identity fields with which a strategy could forge runtime-bound submission attribution.
+template <typename Request>
+concept HasCallerFirm = requires(Request request) { request.firm_id; };
+
+template <typename Request>
+concept HasCallerBot = requires(Request request) { request.bot_id; };
+
+template <typename Request>
+concept HasCallerAccount = requires(Request request) { request.logical_account_id; };
+
+template <typename Request>
+concept HasCallerVenue = requires(Request request) { request.venue_id; };
+
+template <typename Request>
+concept HasCallerOrderId = requires(Request request) { request.order_id; };
+
+static_assert(!HasCallerFirm<execution::OrderRequest>);
+static_assert(!HasCallerBot<execution::OrderRequest>);
+static_assert(!HasCallerAccount<execution::OrderRequest>);
+static_assert(!HasCallerVenue<execution::OrderRequest>);
+static_assert(!HasCallerOrderId<execution::OrderRequest>);
+
+// ########################################################################
+
+// ########################################################################
+// SubmissionCapture retains only immutable callback attribution and the synchronous local result
+// projection, so manual and dedicated owners can be compared after release.
+struct SubmissionCapture {
+  std::uint32_t callbacks{0U};
+  bool submit_returned{false};
+  std::string firm_id;
+  std::string desk_id;
+  std::string bot_id;
+  std::string strategy_id;
+  std::optional<model::CallbackOrdinal> callback_ordinal;
+  std::optional<execution::SubmitDisposition> disposition;
+  std::optional<execution::SubmissionStage> stage;
+  std::optional<execution::SubmissionReason> reason;
+  std::optional<model::SubmissionAttemptId> attempt_id;
+  std::optional<model::OrderId> order_id;
+
+  // --------------------------------------------------------
+  // Ignore noncanonical wall duration while comparing every deterministic callback/result field.
+  friend bool operator==(const SubmissionCapture&, const SubmissionCapture&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// SubmittingStrategy exercises exactly one synchronous bot-bound submission from the bootstrap
+// state callback and records whether the result returned before that callback completed.
+class SubmittingStrategy final : public runtime::Strategy {
+public:
+
+  // --------------------------------------------------------
+  // Borrow stable test-owned request and result storage for the strategy's complete lifetime.
+  SubmittingStrategy(execution::OrderRequest request, SubmissionCapture& capture) noexcept
+      : request_{std::move(request)}, capture_{&capture} {}
+
+  // --------------------------------------------------------
+  // A Ready callback is an equivalent submission boundary if it is the first delivered callback.
+  void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
+                      runtime::BotContext& context) noexcept override {
+    submit_once(context);
+  }
+
+  // --------------------------------------------------------
+  // Bootstrap is the deterministic first callback used by the composition tests.
+  void on_market_state(const market_data::MarketStateEvent&,
+                       runtime::BotContext& context) noexcept override {
+    submit_once(context);
+  }
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Copy authoritative context identity, call submit directly, and retain the result before return.
+  void submit_once(runtime::BotContext& context) noexcept {
+    if (capture_->callbacks != 0U) {
+      return;
+    }
+    ++capture_->callbacks;
+    capture_->firm_id = std::string{context.firm_id().value()};
+    capture_->desk_id = std::string{context.desk_id().value()};
+    capture_->bot_id = std::string{context.bot_id().value()};
+    capture_->strategy_id = std::string{context.strategy_id().value()};
+    capture_->callback_ordinal = context.callback_ordinal();
+    const auto result = context.submit(request_);
+    capture_->disposition = result.disposition();
+    capture_->stage = result.stage();
+    capture_->reason = result.reason();
+    capture_->attempt_id = result.attempt_id();
+    capture_->order_id = result.order_id();
+    capture_->submit_returned = true;
+  }
+
+  // --------------------------------------------------------
+  execution::OrderRequest request_;
+  SubmissionCapture* capture_;
+};
+
+// ########################################################################
+
+// ########################################################################
+// SubmissionGateControl safely publishes a live submission-capable context to the test thread while
+// the dedicated owner callback remains active, then retains that same context after deactivation.
+struct SubmissionGateControl {
+  std::atomic<runtime::BotContext*> context{nullptr};
+  std::atomic_bool callback_active{false};
+  std::atomic_bool release_callback{false};
+};
+
+// ########################################################################
+
+// ########################################################################
+// SubmissionGateStrategy holds its first callback open without submitting so wrong-thread and
+// retained-context gates can be proved without consuming any attempt or owner-local evidence.
+class SubmissionGateStrategy final : public runtime::Strategy {
+public:
+
+  // --------------------------------------------------------
+  explicit SubmissionGateStrategy(SubmissionGateControl& control) noexcept : control_{&control} {}
+
+  // --------------------------------------------------------
+  void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
+                      runtime::BotContext& context) noexcept override {
+    hold_once(context);
+  }
+
+  // --------------------------------------------------------
+  void on_market_state(const market_data::MarketStateEvent&,
+                       runtime::BotContext& context) noexcept override {
+    hold_once(context);
+  }
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Publish the persistent context while active, then wait until the test has exercised WrongOwner.
+  void hold_once(runtime::BotContext& context) noexcept {
+    if (entered_) {
+      return;
+    }
+    entered_ = true;
+    control_->context.store(&context, std::memory_order_release);
+    control_->callback_active.store(true, std::memory_order_release);
+    while (!control_->release_callback.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  }
+
+  // --------------------------------------------------------
+  SubmissionGateControl* control_;
+  bool entered_{false};
+};
+
+// ########################################################################
+
 // --------------------------------------------------------
 // Invalid identifier literals are fixture-authoring defects rather than coordinator behavior.
 template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
@@ -353,6 +520,157 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
     throw std::logic_error{"invalid quantity in market-runtime test fixture"};
   }
   return std::move(parsed).value();
+}
+
+// --------------------------------------------------------
+// Parse exact quote notionals without binary floating-point fixture drift.
+[[nodiscard]] model::Notional notional(std::string_view text) {
+  auto parsed = model::Notional::parse_ascii(text);
+  if (!parsed) {
+    throw std::logic_error{"invalid notional in market-runtime test fixture"};
+  }
+  return std::move(parsed).value();
+}
+
+// --------------------------------------------------------
+// Derive the one-bot M3 authority without changing the accepted observation-only reference fixture.
+[[nodiscard]] configuration::StartupConfiguration m3_configuration() {
+  auto params = test_support::reference_configuration_params();
+  params.routes.front().state = execution::ExecutionRouteState::Enabled;
+  auto created = configuration::StartupConfiguration::create(std::move(params));
+  if (!created) {
+    throw std::logic_error{"invalid M3 market-runtime configuration"};
+  }
+  return std::move(created).value();
+}
+
+// --------------------------------------------------------
+// Resolve one heterogeneous scope subject from the same sealed route and attribution authority.
+[[nodiscard]] std::string m3_scope_subject(const execution::ExecutionRoute& route,
+                                           const organization::BotAttribution& attribution,
+                                           const model::InstrumentMetadata& metadata,
+                                           risk::RiskScopeKind scope) {
+  switch (scope) {
+  case risk::RiskScopeKind::Bot:
+    return std::string{attribution.bot_id.value()};
+  case risk::RiskScopeKind::Desk:
+    return std::string{attribution.desk_id.value()};
+  case risk::RiskScopeKind::Firm:
+    return std::string{attribution.firm_id.value()};
+  case risk::RiskScopeKind::Account:
+    return std::string{route.logical_account_id.value()};
+  case risk::RiskScopeKind::Route:
+    return std::string{route.id.value()};
+  case risk::RiskScopeKind::Instrument:
+    return std::string{metadata.instrument_id().value()};
+  case risk::RiskScopeKind::Venue:
+    return std::string{metadata.venue_id().value()};
+  default:
+    throw std::logic_error{"invalid M3 market-runtime risk scope"};
+  }
+}
+
+// --------------------------------------------------------
+// Author one complete immutable seven-scope policy with generous exact limits for one fake order.
+[[nodiscard]] risk::RiskPolicyParams
+m3_risk_policy(const configuration::StartupConfiguration& configuration) {
+  std::vector<configuration::InstrumentMetadataRevisionEntry> metadata_revisions;
+  std::vector<risk::RiskLimitSetParams> limits;
+  for (const auto& route : configuration.routes().routes()) {
+    if (!route.is_enabled()) {
+      continue;
+    }
+    const auto* const attribution = configuration.organization().find_bot(route.bot_id);
+    const auto* const metadata =
+        configuration.find_instrument_metadata(route.venue_id, route.instrument_id);
+    if (attribution == nullptr || metadata == nullptr) {
+      throw std::logic_error{"incomplete M3 market-runtime route"};
+    }
+    metadata_revisions.push_back(configuration::InstrumentMetadataRevisionEntry{
+        metadata->venue_id(), metadata->instrument_id(), metadata->revision()});
+    for (std::uint8_t value = static_cast<std::uint8_t>(risk::RiskScopeKind::Bot);
+         value <= static_cast<std::uint8_t>(risk::RiskScopeKind::Venue); ++value) {
+      const auto scope = static_cast<risk::RiskScopeKind>(value);
+      limits.push_back(risk::RiskLimitSetParams{
+          attribution->firm_id,
+          scope,
+          m3_scope_subject(route, *attribution, *metadata, scope),
+          metadata->instrument_id(),
+          std::string{metadata->quote_currency()},
+          quantity("1000"),
+          notional("100000"),
+          8U,
+          notional("1000000"),
+          quantity("10000"),
+          notional("1000000"),
+      });
+    }
+  }
+  std::sort(metadata_revisions.begin(), metadata_revisions.end(),
+            [](const auto& left, const auto& right) {
+              return std::tie(left.venue_id, left.instrument_id) <
+                     std::tie(right.venue_id, right.instrument_id);
+            });
+  metadata_revisions.erase(std::unique(metadata_revisions.begin(), metadata_revisions.end()),
+                           metadata_revisions.end());
+  return risk::RiskPolicyParams{
+      model::RiskPolicyRevision::initial(),
+      configuration.fingerprint(),
+      configuration.revision(),
+      configuration.organization().revision(),
+      configuration.routes().revision(),
+      2U,
+      model::RoundingMode::AwayFromZero,
+      std::move(metadata_revisions),
+      std::move(limits),
+  };
+}
+
+// --------------------------------------------------------
+// Build one deterministic fake-only stack with enough preallocated state for four submissions.
+[[nodiscard]] runtime::FakeSubmissionRuntimeParams m3_submission_params(
+    const configuration::StartupConfiguration& configuration,
+    execution::FakeInitiationOutcome outcome =
+        execution::FakeInitiationOutcome::AcceptedAndInitiated,
+    std::unique_ptr<execution::SubmissionMeasurementClock> measurement_clock = nullptr) {
+  constexpr std::uint64_t maximum_attempts = 4U;
+  auto encoder_script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode,
+                                                             maximum_attempts, {});
+  auto initiator_script = execution::FakeInitiatorScript::create(outcome, maximum_attempts, {});
+  model::OrderNamespace::Bytes namespace_bytes{};
+  for (std::size_t index = 0U; index < namespace_bytes.size(); ++index) {
+    namespace_bytes[index] = static_cast<std::uint8_t>(0x40U + index);
+  }
+  auto order_ids =
+      model::DeterministicOrderIdProvider::create(model::OrderNamespace{namespace_bytes});
+  if (!encoder_script || !initiator_script || !order_ids) {
+    throw std::logic_error{"invalid M3 market-runtime fake script"};
+  }
+  if (!measurement_clock) {
+    measurement_clock = std::make_unique<execution::SteadySubmissionMeasurementClock>();
+  }
+  return runtime::FakeSubmissionRuntimeParams{
+      m3_risk_policy(configuration),
+      execution::SubmissionPolicyCapacities{maximum_attempts, 4U, 4U, 1'024U, 4U, 44U, 16U},
+      std::move(encoder_script).value(),
+      std::move(initiator_script).value(),
+      std::move(measurement_clock),
+      std::move(order_ids).value(),
+  };
+}
+
+// --------------------------------------------------------
+// Use the sole enabled route and exact limit/GTC values accepted by reference metadata.
+[[nodiscard]] execution::OrderRequest m3_order_request() {
+  return execution::OrderRequest{
+      id<model::RouteId>("route.deribit-testnet-btc-perpetual"),
+      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      execution::OrderSide::Buy,
+      execution::OrderType::Limit,
+      execution::TimeInForce::GoodTilCancelled,
+      price("30000.5"),
+      quantity("2"),
+  };
 }
 
 // --------------------------------------------------------
@@ -391,6 +709,31 @@ reference_policy(const configuration::StartupConfiguration& configuration,
                      });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in market-runtime test fixture"};
+  }
+  return std::move(created).value();
+}
+
+// --------------------------------------------------------
+// Compose one stable runtime whose sole configured strategy submits through the named M3 factory.
+[[nodiscard]] std::unique_ptr<runtime::MarketRuntime>
+m3_runtime(model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
+           SubmissionCapture& capture,
+           execution::FakeInitiationOutcome outcome =
+               execution::FakeInitiationOutcome::AcceptedAndInitiated) {
+  auto configuration = m3_configuration();
+  auto policy = reference_policy(configuration, 4U);
+  auto submission_params = m3_submission_params(configuration, outcome);
+  std::vector<runtime::BotStrategyRegistration> strategies;
+  strategies.push_back(runtime::BotStrategyRegistration{
+      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmittingStrategy>(m3_order_request(), capture),
+  });
+  auto created = runtime::MarketRuntime::create_with_fake_submission(
+      std::move(configuration), std::move(policy), executor_clock, callback_measurement_clock,
+      std::move(strategies), std::move(submission_params));
+  if (!created) {
+    throw std::logic_error{"invalid fake-submission market runtime: " +
+                           created.error().context.field};
   }
   return std::move(created).value();
 }
@@ -1354,6 +1697,279 @@ TEST_CASE("market runtime manual replay is exactly deterministic at quiescence",
   CHECK(first_evidence.sources == second_evidence.sources);
   CHECK(first_evidence.executor == second_evidence.executor);
   CHECK(first_evidence.last_completed_turn == second_evidence.last_completed_turn);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// The named fake-only composition must return synchronously in the bootstrap owner turn and expose
+// complete provenance-rich cold evidence without any extra executor command.
+TEST_CASE("market runtime composes direct fake submission and complete quiescent evidence",
+          "[runtime][market_runtime][submission][m3]") {
+  model::DeterministicClockProvider executor_clock{100U};
+  model::DeterministicClockProvider callback_clock{1'000U};
+  SubmissionCapture capture;
+  auto runtime = m3_runtime(executor_clock, callback_clock, capture);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // One genuine bootstrap turn enters the callback, completes submission, and returns the result
+  // without publishing another executor command or handoff.
+  REQUIRE(runtime->bind_to_current_thread());
+  const auto bootstrap = runtime->run_one();
+  REQUIRE(bootstrap);
+  REQUIRE(bootstrap.value().has_value());
+  CHECK(bootstrap.value()->turn_ordinal == model::TurnOrdinal::initial());
+  CHECK(capture.callbacks == 1U);
+  CHECK(capture.submit_returned);
+  CHECK(capture.disposition == execution::SubmitDisposition::WriteInitiated);
+  CHECK(capture.stage == execution::SubmissionStage::Initiation);
+  CHECK(capture.reason == execution::SubmissionReason::None);
+  REQUIRE(capture.attempt_id.has_value());
+  REQUIRE(capture.order_id.has_value());
+  const auto after_submit = runtime->status();
+  CHECK(after_submit.executor.completed_turns == 1U);
+  CHECK(after_submit.executor.pending_commands == 0U);
+  CHECK(after_submit.executor.pending_fences == 0U);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Closure copies both canonical streams and every retained fake-submission subsystem state.
+  const auto evidence = close_and_collect(*runtime);
+  REQUIRE(evidence.submission.has_value());
+  const auto& submission = *evidence.submission;
+  CHECK_FALSE(submission.runtime_faulted);
+  CHECK_FALSE(submission.terminal_error.has_value());
+  CHECK(submission.encoder_invocations_consumed == 1U);
+  CHECK(submission.initiator_invocations_consumed == 1U);
+  CHECK(submission.oms_order_count == 1U);
+  REQUIRE(submission.oms_orders.size() == 1U);
+  CHECK(submission.oms_orders.front().state == oms::OutboundOrderState::WriteInitiated);
+  CHECK(submission.oms_orders.front().admission.attempt_id == *capture.attempt_id);
+  CHECK(submission.oms_orders.front().admission.order_id == *capture.order_id);
+  CHECK(submission.held_reservation_count == 1U);
+  REQUIRE(submission.held_reservations.size() == 1U);
+  CHECK(submission.held_reservations.front().state == risk::ReservationState::Held);
+  CHECK(submission.held_reservations.front().reservation_id.value() == capture.attempt_id->value());
+  REQUIRE(submission.scope_exposures.size() == 7U);
+  for (const auto& scope : submission.scope_exposures) {
+    CHECK(scope.exposure.open_order_count == 1U);
+    CHECK(scope.exposure.gross_reserved_quote_notional == notional("20"));
+  }
+  REQUIRE(submission.accepted_writes.size() == 1U);
+  CHECK(submission.accepted_writes.front().attempt_id == *capture.attempt_id);
+  CHECK_FALSE(submission.accepted_writes.front().bytes.empty());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The OMS projection proves all attribution came from BotContext, not the caller-authored order.
+  const auto& provenance = submission.oms_orders.front().admission.provenance;
+  CHECK(provenance.firm_id.value() == capture.firm_id);
+  CHECK(provenance.desk_id.value() == capture.desk_id);
+  CHECK(provenance.bot_id.value() == capture.bot_id);
+  CHECK(provenance.strategy_id.value() == capture.strategy_id);
+  CHECK(provenance.risk_policy_fingerprint == submission.risk_policy_fingerprint.bytes());
+  CHECK(provenance.risk_policy_revision == submission.risk_policy_revision);
+  CHECK(provenance.submission_policy_fingerprint ==
+        submission.submission_policy_fingerprint.bytes());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The exact success sequence names local WriteInitiated and never invents acknowledgement state.
+  constexpr std::array expected_events{
+      trace::SubmissionTraceEventKind::Attempt,
+      trace::SubmissionTraceEventKind::RouteAuthorized,
+      trace::SubmissionTraceEventKind::CanonicalValidated,
+      trace::SubmissionTraceEventKind::IdentityGenerated,
+      trace::SubmissionTraceEventKind::RiskReserved,
+      trace::SubmissionTraceEventKind::OmsAdmitted,
+      trace::SubmissionTraceEventKind::Encoded,
+      trace::SubmissionTraceEventKind::WriteInitiated,
+      trace::SubmissionTraceEventKind::SubmissionCompleted,
+  };
+  REQUIRE(submission.trace_records.size() == expected_events.size());
+  for (std::size_t index = 0U; index < expected_events.size(); ++index) {
+    CHECK(submission.trace_records[index].kind() == expected_events[index]);
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Observation-only construction remains valid and rejects submit before consuming any M3 identity
+// or creating an optional submission evidence bundle.
+TEST_CASE("market runtime observation-only factory installs no submission authority",
+          "[runtime][market_runtime][submission][observation][m3]") {
+  model::DeterministicClockProvider executor_clock{100U};
+  model::DeterministicClockProvider callback_clock{1'000U};
+  SubmissionCapture capture;
+  auto configuration = reference_configuration();
+  auto policy = reference_policy(configuration, 4U);
+  std::vector<runtime::BotStrategyRegistration> strategies;
+  strategies.push_back(runtime::BotStrategyRegistration{
+      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmittingStrategy>(m3_order_request(), capture),
+  });
+  auto created =
+      runtime::MarketRuntime::create(std::move(configuration), std::move(policy), executor_clock,
+                                     callback_clock, std::move(strategies));
+  REQUIRE(created);
+  auto runtime = std::move(created).value();
+
+  REQUIRE(runtime->bind_to_current_thread());
+  REQUIRE(runtime->run_one());
+  CHECK(capture.submit_returned);
+  CHECK(capture.disposition == execution::SubmitDisposition::LocallyRejected);
+  CHECK(capture.stage == execution::SubmissionStage::Context);
+  CHECK(capture.reason == execution::SubmissionReason::SubmissionCapabilityUnavailable);
+  CHECK_FALSE(capture.attempt_id.has_value());
+  CHECK_FALSE(capture.order_id.has_value());
+  const auto evidence = close_and_collect(*runtime);
+  CHECK_FALSE(evidence.submission.has_value());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// A submission-capable context reads only the dedicated thread-safe clock before rejecting inactive
+// or non-owner callers; neither gate can consume an attempt or touch owner-local evidence.
+TEST_CASE("submission-capable BotContext gates retained and wrong-thread callers before mutation",
+          "[runtime][market_runtime][bot_context][submission][owner][m3]") {
+  model::DeterministicClockProvider executor_clock{100U};
+  model::DeterministicClockProvider callback_clock{1'000U};
+  SubmissionGateControl control;
+  auto configuration = m3_configuration();
+  auto policy = reference_policy(configuration, 4U);
+  auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
+      std::vector<std::optional<std::uint64_t>>{10U, 20U});
+  auto* const measurement_access = measurement.get();
+  auto submission_params =
+      m3_submission_params(configuration, execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                           std::move(measurement));
+  std::vector<runtime::BotStrategyRegistration> strategies;
+  strategies.push_back(runtime::BotStrategyRegistration{
+      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmissionGateStrategy>(control),
+  });
+  auto created = runtime::MarketRuntime::create_with_fake_submission(
+      std::move(configuration), std::move(policy), executor_clock, callback_clock,
+      std::move(strategies), std::move(submission_params));
+  REQUIRE(created);
+  auto runtime = std::move(created).value();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Dedicated bootstrap publishes an active context while retaining all owner-local submission
+  // counters and evidence at their initial values.
+  REQUIRE(runtime->start_dedicated());
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+  while (!control.callback_active.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  const auto callback_active = control.callback_active.load(std::memory_order_acquire);
+  if (!callback_active) {
+    control.release_callback.store(true, std::memory_order_release);
+  }
+  REQUIRE(callback_active);
+  auto* const context = control.context.load(std::memory_order_acquire);
+  if (context == nullptr) {
+    control.release_callback.store(true, std::memory_order_release);
+  }
+  REQUIRE(context != nullptr);
+
+  const auto wrong_owner = context->submit(m3_order_request());
+  control.release_callback.store(true, std::memory_order_release);
+  runtime->close_and_wait();
+  const auto inactive = context->submit(m3_order_request());
+
+  CHECK(wrong_owner.disposition() == execution::SubmitDisposition::LocallyRejected);
+  CHECK(wrong_owner.stage() == execution::SubmissionStage::Context);
+  CHECK(wrong_owner.reason() == execution::SubmissionReason::WrongOwner);
+  CHECK_FALSE(wrong_owner.attempt_id());
+  CHECK_FALSE(wrong_owner.order_id());
+  CHECK_FALSE(wrong_owner.local_path_nanoseconds());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // After callback release and dedicated-owner shutdown, the same persistent object has no active
+  // callback authority and must reject before all submission state exactly as before.
+  CHECK(inactive.disposition() == execution::SubmitDisposition::LocallyRejected);
+  CHECK(inactive.stage() == execution::SubmissionStage::Context);
+  CHECK(inactive.reason() == execution::SubmissionReason::ContextInactive);
+  CHECK_FALSE(inactive.attempt_id());
+  CHECK_FALSE(inactive.order_id());
+  CHECK_FALSE(inactive.local_path_nanoseconds());
+  CHECK(measurement_access->readings_consumed() == 2U);
+
+  auto evidence = runtime->quiescent_evidence();
+  REQUIRE(evidence);
+  REQUIRE(evidence.value().submission);
+  const auto& submission = *evidence.value().submission;
+  CHECK(submission.trace_records.empty());
+  CHECK(submission.diagnostics.empty());
+  CHECK(submission.oms_order_count == 0U);
+  CHECK(submission.held_reservation_count == 0U);
+  CHECK(submission.accepted_writes.empty());
+  CHECK(submission.encoder_invocations_consumed == 0U);
+  CHECK(submission.initiator_invocations_consumed == 0U);
+  CHECK_FALSE(submission.runtime_faulted);
+  CHECK_FALSE(submission.terminal_error);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Manual and dedicated owners must produce identical callback results and complete M2/M3 evidence
+// from the same configuration, order namespace, fake script, clocks, and bootstrap input.
+TEST_CASE("market runtime fake submission is identical across manual and dedicated owners",
+          "[runtime][market_runtime][submission][dedicated][replay][m3]") {
+  model::DeterministicClockProvider manual_executor_clock{100U};
+  model::DeterministicClockProvider manual_callback_clock{1'000U};
+  SubmissionCapture manual_capture;
+  auto manual = m3_runtime(manual_executor_clock, manual_callback_clock, manual_capture);
+  REQUIRE(manual->bind_to_current_thread());
+  REQUIRE(manual->run_one());
+  const auto manual_evidence = close_and_collect(*manual);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  model::DeterministicClockProvider dedicated_executor_clock{100U};
+  model::DeterministicClockProvider dedicated_callback_clock{1'000U};
+  SubmissionCapture dedicated_capture;
+  auto dedicated =
+      m3_runtime(dedicated_executor_clock, dedicated_callback_clock, dedicated_capture);
+  REQUIRE(dedicated->start_dedicated());
+  REQUIRE(wait_until_running(*dedicated));
+  dedicated->close_and_wait();
+  auto dedicated_result = dedicated->quiescent_evidence();
+  REQUIRE(dedicated_result);
+  const auto dedicated_evidence = std::move(dedicated_result).value();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  CHECK(dedicated_capture == manual_capture);
+  CHECK(dedicated_evidence == manual_evidence);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// A named submission composition with an incomplete immutable risk snapshot must fail before any
+// runtime, callback capability, executor, reservation, or fake slot can become reachable.
+TEST_CASE("market runtime fake submission fails closed for incomplete policy",
+          "[runtime][market_runtime][submission][policy][m3]") {
+  model::DeterministicClockProvider executor_clock{100U};
+  model::DeterministicClockProvider callback_clock{1'000U};
+  SubmissionCapture capture;
+  auto configuration = m3_configuration();
+  auto policy = reference_policy(configuration, 4U);
+  auto submission_params = m3_submission_params(configuration);
+  submission_params.risk_policy.limit_sets.pop_back();
+  std::vector<runtime::BotStrategyRegistration> strategies;
+  strategies.push_back(runtime::BotStrategyRegistration{
+      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmittingStrategy>(m3_order_request(), capture),
+  });
+
+  const auto created = runtime::MarketRuntime::create_with_fake_submission(
+      std::move(configuration), std::move(policy), executor_clock, callback_clock,
+      std::move(strategies), std::move(submission_params));
+  REQUIRE_FALSE(created);
+  CHECK(created.error().code == model::DomainErrorCode::InvalidRiskPolicy);
+  CHECK_FALSE(capture.submit_returned);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

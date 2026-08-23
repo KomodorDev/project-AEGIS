@@ -58,8 +58,7 @@ template <typename IsAlphanumeric>
   // ++++++++++++++++++++++++++++++++++++++++
   // The stable prefix counts toward the limit; only the remaining slug may contain dot or dash
   // separators, with the same non-empty-segment invariant as other token grammars.
-  constexpr std::size_t maximum_size = 64;
-  if (value.size() > maximum_size || !value.starts_with(prefix)) {
+  if (value.size() > maximum_organization_identifier_size || !value.starts_with(prefix)) {
     return false;
   }
 
@@ -97,8 +96,7 @@ template <typename IsAlphanumeric>
   // ++++++++++++++++++++++++++++++++++++++++
   // Adapter identifiers preserve venue punctuation but reject controls, non-ASCII bytes, and values
   // too large for the fixed configuration contract.
-  constexpr std::size_t maximum_size = 128;
-  if (value.empty() || value.size() > maximum_size) {
+  if (value.empty() || value.size() > maximum_adapter_identifier_size) {
     return false;
   }
 
@@ -130,9 +128,11 @@ bool is_valid_identifier(std::string_view value, IdentifierGrammar grammar,
   case IdentifierGrammar::Organization:
     return is_organization_identifier(value, prefix);
   case IdentifierGrammar::Venue:
-    return value.size() <= 32 && is_segmented_token(value, '-', is_lower_alphanumeric);
+    return value.size() <= maximum_venue_identifier_size &&
+           is_segmented_token(value, '-', is_lower_alphanumeric);
   case IdentifierGrammar::Instrument:
-    return value.size() <= 64 && is_segmented_token(value, '-', is_upper_alphanumeric);
+    return value.size() <= maximum_instrument_identifier_size &&
+           is_segmented_token(value, '-', is_upper_alphanumeric);
   case IdentifierGrammar::Adapter:
     return is_adapter_identifier(value);
   }

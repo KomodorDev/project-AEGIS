@@ -1,9 +1,11 @@
-// Purpose: own one strategy instance per configured bot and dispatch coherent market/state events
-// in canonical subscription order without exposing execution capabilities.
+// Purpose: own one strategy instance and persistent bot-bound context per configured bot, then
+// dispatch coherent market/state events in canonical subscription order.
 
 #pragma once
 
 #include "aegis/configuration/startup_configuration.hpp"
+#include "aegis/execution/order_submission.hpp"
+#include "aegis/execution/submission_measurement_clock.hpp"
 #include "aegis/market_data/market_state_machine.hpp"
 #include "aegis/model/result.hpp"
 #include "aegis/model/time.hpp"
@@ -12,6 +14,7 @@
 #include "aegis/runtime/runtime_policy.hpp"
 #include "aegis/trace/runtime_trace.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -22,39 +25,53 @@
 namespace aegis::runtime {
 
 // ########################################################################
+// Keep this public header on leaf order/result contracts; concrete submission composition is needed
+// only by out-of-line runtime implementation and stable non-owning pointers.
+class SubmissionCoordinator;
+
+// ########################################################################
+
+// ########################################################################
 // Forward-declare the strategy owner so turn-scoped context and plan capabilities can restrict
 // construction without exposing its private implementation.
 class BotRuntime;
 
 // ########################################################################
-// BotContext borrows immutable startup attribution and provenance only for one synchronous
-// callback. It deliberately contains no submit, route, account, risk, OMS, socket, or transport
-// capability.
+// BotContext owns immutable startup attribution and provenance for one bot. BotRuntime activates
+// its callback-local observation fields; the normalized submission method fails closed when the
+// observation-only composition has installed no M3 authority.
 class BotContext final {
 public:
 
   // --------------------------------------------------------
+  // A bot-bound capability cannot be copied, moved, or retained as a detached authority value.
+  BotContext(const BotContext&) = delete;
+  BotContext& operator=(const BotContext&) = delete;
+  BotContext(BotContext&&) = delete;
+  BotContext& operator=(BotContext&&) = delete;
+
+  // --------------------------------------------------------
   // Borrow the configured firm attribution for this callback.
-  [[nodiscard]] const model::FirmId& firm_id() const noexcept { return attribution_->firm_id; }
+  [[nodiscard]] const model::FirmId& firm_id() const noexcept { return attribution_.firm_id; }
 
   // --------------------------------------------------------
   // Borrow the configured desk attribution for this callback.
-  [[nodiscard]] const model::DeskId& desk_id() const noexcept { return attribution_->desk_id; }
+  [[nodiscard]] const model::DeskId& desk_id() const noexcept { return attribution_.desk_id; }
 
   // --------------------------------------------------------
   // Borrow the configured bot identity that owns the strategy instance.
-  [[nodiscard]] const model::BotId& bot_id() const noexcept { return attribution_->bot_id; }
+  [[nodiscard]] const model::BotId& bot_id() const noexcept { return attribution_.bot_id; }
 
   // --------------------------------------------------------
   // Borrow the immutable strategy identity assigned to the configured bot.
   [[nodiscard]] const model::StrategyId& strategy_id() const noexcept {
-    return attribution_->strategy_id;
+    return attribution_.strategy_id;
   }
 
   // --------------------------------------------------------
   // Borrow the exact observation grant that caused this callback.
   [[nodiscard]] const model::SubscriptionId& subscription_id() const noexcept {
-    return subscription_id_;
+    return *subscription_id_;
   }
 
   // --------------------------------------------------------
@@ -67,14 +84,19 @@ public:
   // Borrow the sealed startup-configuration identity associated with this callback.
   [[nodiscard]] const configuration::ConfigurationFingerprint&
   configuration_fingerprint() const noexcept {
-    return *configuration_fingerprint_;
+    return configuration_fingerprint_;
   }
 
   // --------------------------------------------------------
   // Borrow the immutable runtime-policy identity associated with this callback.
   [[nodiscard]] const RuntimePolicyFingerprint& runtime_policy_fingerprint() const noexcept {
-    return *runtime_policy_fingerprint_;
+    return runtime_policy_fingerprint_;
   }
+
+  // --------------------------------------------------------
+  // Preserve one public submission vocabulary across runtime modes; the M2 composition has no
+  // authority and therefore returns a definite capability rejection without consuming identity.
+  [[nodiscard]] execution::SubmitResult submit(const execution::OrderRequest& request) noexcept;
 
   // --------------------------------------------------------
 private:
@@ -86,21 +108,38 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
-  // Bind one canonical grant and callback ordinal to an observation-only synchronous context.
-  BotContext(const organization::BotAttribution& attribution,
-             const model::SubscriptionId& subscription_id, model::CallbackOrdinal callback_ordinal,
-             const configuration::ConfigurationFingerprint& configuration_fingerprint,
-             const RuntimePolicyFingerprint& runtime_policy_fingerprint) noexcept
-      : attribution_{&attribution}, subscription_id_{subscription_id},
-        callback_ordinal_{callback_ordinal}, configuration_fingerprint_{&configuration_fingerprint},
-        runtime_policy_fingerprint_{&runtime_policy_fingerprint} {}
+  // Bind immutable configured identity once; callback-local values are installed only by dispatch.
+  BotContext(organization::BotAttribution attribution,
+             configuration::ConfigurationFingerprint configuration_fingerprint,
+             RuntimePolicyFingerprint runtime_policy_fingerprint,
+             SubmissionCoordinator* submission_coordinator) noexcept;
 
   // --------------------------------------------------------
-  const organization::BotAttribution* attribution_;
-  const model::SubscriptionId& subscription_id_;
-  model::CallbackOrdinal callback_ordinal_;
-  const configuration::ConfigurationFingerprint* configuration_fingerprint_;
-  const RuntimePolicyFingerprint* runtime_policy_fingerprint_;
+  // Activate one persistent context immediately before its owning synchronous strategy callback.
+  void activate(const model::SubscriptionId& subscription_id, model::TurnOrdinal owner_turn_ordinal,
+                model::CallbackOrdinal callback_ordinal,
+                model::ProcessingTimestamp processing_timestamp) noexcept;
+
+  // --------------------------------------------------------
+  // Remove callback-local observation authority before another callback can reuse the object.
+  void deactivate() noexcept;
+
+  // --------------------------------------------------------
+  // Return one process-local token whose thread-local storage address distinguishes owner threads.
+  [[nodiscard]] static std::uintptr_t current_thread_token() noexcept;
+
+  // --------------------------------------------------------
+  organization::BotAttribution attribution_;
+  const model::SubscriptionId* subscription_id_{nullptr};
+  model::TurnOrdinal owner_turn_ordinal_{model::TurnOrdinal::initial()};
+  model::CallbackOrdinal callback_ordinal_{model::CallbackOrdinal::initial()};
+  model::ProcessingTimestamp processing_timestamp_{0U};
+  configuration::ConfigurationFingerprint configuration_fingerprint_;
+  RuntimePolicyFingerprint runtime_policy_fingerprint_;
+  SubmissionCoordinator* submission_coordinator_;
+  execution::SteadySubmissionMeasurementClock capability_absent_measurement_clock_;
+  execution::SubmissionMeasurementClock* submission_measurement_clock_;
+  std::atomic<std::uintptr_t> active_owner_token_{0U};
 };
 
 // ########################################################################
@@ -278,7 +317,8 @@ public:
   create(const configuration::StartupConfiguration& configuration, const RuntimePolicy& policy,
          model::ClockProvider& measurement_clock, trace::RuntimeTraceSink& trace_sink,
          RuntimeDiagnosticSink& diagnostics, std::vector<BotStrategyRegistration> registrations,
-         BotRuntimeCounterSeed counter_seed = {});
+         BotRuntimeCounterSeed counter_seed = {},
+         SubmissionCoordinator* submission_coordinator = nullptr);
 
   // --------------------------------------------------------
   // One-time moves publish the factory result before any plan can bind to the final object address.
@@ -338,7 +378,9 @@ private:
   // Own one configured bot identifier and its sole mutable strategy instance.
   struct StrategyEntry {
     model::BotId bot_id;
+    organization::BotAttribution attribution;
     std::unique_ptr<Strategy> strategy;
+    std::unique_ptr<BotContext> context;
   };
 
   // ########################################################################
@@ -351,6 +393,7 @@ private:
     market_data::Subscription subscription;
     organization::BotAttribution attribution;
     Strategy* strategy;
+    BotContext* context;
   };
 
   // ########################################################################

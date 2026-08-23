@@ -1,9 +1,10 @@
-// Purpose: validate bot-strategy ownership and perform synchronous canonical subscription dispatch
-// with callback trace, re-entry, and duration evidence.
+// Purpose: validate bot-strategy ownership, maintain persistent bot-bound contexts, and perform
+// synchronous canonical subscription dispatch with callback trace, re-entry, and duration evidence.
 
 #include "aegis/runtime/bot_runtime.hpp"
 
 #include "aegis/model/domain_error.hpp"
+#include "submission_coordinator.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -153,13 +154,87 @@ template <typename Grant>
 } // namespace
 
 // --------------------------------------------------------
+// Bind one always-readable entry clock independently of submission authority. Fake-capable contexts
+// use the coordinator's injected clock; observation-only contexts retain a private steady fallback.
+BotContext::BotContext(organization::BotAttribution attribution,
+                       configuration::ConfigurationFingerprint configuration_fingerprint,
+                       RuntimePolicyFingerprint runtime_policy_fingerprint,
+                       SubmissionCoordinator* submission_coordinator) noexcept
+    : attribution_{std::move(attribution)},
+      configuration_fingerprint_{std::move(configuration_fingerprint)},
+      runtime_policy_fingerprint_{std::move(runtime_policy_fingerprint)},
+      submission_coordinator_{submission_coordinator}, capability_absent_measurement_clock_{},
+      submission_measurement_clock_{submission_coordinator == nullptr
+                                        ? static_cast<execution::SubmissionMeasurementClock*>(
+                                              &capability_absent_measurement_clock_)
+                                        : submission_coordinator->measurement_clock_.get()} {}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Read a monotonic timestamp before any owner-local gate, then either fail closed for observation
+// mode or enter the concrete coordinator with one private runtime-derived binding.
+execution::SubmitResult BotContext::submit(const execution::OrderRequest& request) noexcept {
+  const auto entry_started = submission_measurement_clock_->now_nanoseconds();
+  if (submission_coordinator_ == nullptr) {
+    return execution::SubmitResult::locally_rejected(
+        execution::SubmissionStage::Context,
+        execution::SubmissionReason::SubmissionCapabilityUnavailable);
+  }
+  const auto current_token = current_thread_token();
+  const auto active_token = active_owner_token_.load(std::memory_order_acquire);
+  if (active_token == 0U) {
+    return execution::SubmitResult::locally_rejected(execution::SubmissionStage::Context,
+                                                     execution::SubmissionReason::ContextInactive);
+  }
+  if (active_token != current_token) {
+    return execution::SubmitResult::locally_rejected(execution::SubmissionStage::Context,
+                                                     execution::SubmissionReason::WrongOwner);
+  }
+  return submission_coordinator_->submit(
+      SubmissionCoordinator::CallbackBinding{this, &attribution_, owner_turn_ordinal_,
+                                             callback_ordinal_, processing_timestamp_},
+      request, entry_started);
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Publish callback-local fields before a release store authorizes reads on the owner thread.
+void BotContext::activate(const model::SubscriptionId& subscription_id,
+                          model::TurnOrdinal owner_turn_ordinal,
+                          model::CallbackOrdinal callback_ordinal,
+                          model::ProcessingTimestamp processing_timestamp) noexcept {
+  subscription_id_ = &subscription_id;
+  owner_turn_ordinal_ = owner_turn_ordinal;
+  callback_ordinal_ = callback_ordinal;
+  processing_timestamp_ = processing_timestamp;
+  active_owner_token_.store(current_thread_token(), std::memory_order_release);
+}
+
+// --------------------------------------------------------
+// Close submission authority before clearing the callback-local borrowed subscription identity.
+void BotContext::deactivate() noexcept {
+  active_owner_token_.store(0U, std::memory_order_release);
+  subscription_id_ = nullptr;
+}
+
+// --------------------------------------------------------
+// A thread-local object's address is stable within one thread and distinct across live threads.
+std::uintptr_t BotContext::current_thread_token() noexcept {
+  static thread_local const std::byte token{0U};
+  return reinterpret_cast<std::uintptr_t>(&token);
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
 // Validate provenance and exact strategy coverage, then preallocate canonical grant routing.
-model::Result<BotRuntime>
-BotRuntime::create(const configuration::StartupConfiguration& configuration,
-                   const RuntimePolicy& policy, model::ClockProvider& measurement_clock,
-                   trace::RuntimeTraceSink& trace_sink, RuntimeDiagnosticSink& diagnostics,
-                   std::vector<BotStrategyRegistration> registrations,
-                   BotRuntimeCounterSeed counter_seed) {
+model::Result<BotRuntime> BotRuntime::create(
+    const configuration::StartupConfiguration& configuration, const RuntimePolicy& policy,
+    model::ClockProvider& measurement_clock, trace::RuntimeTraceSink& trace_sink,
+    RuntimeDiagnosticSink& diagnostics, std::vector<BotStrategyRegistration> registrations,
+    BotRuntimeCounterSeed counter_seed, SubmissionCoordinator* submission_coordinator) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Configuration, policy, and trace must all describe one immutable replay identity.
@@ -201,12 +276,17 @@ BotRuntime::create(const configuration::StartupConfiguration& configuration,
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Transfer one strategy object per configured bot before any grant stores a stable heap pointer.
+  // Transfer one strategy and persistent context per configured bot before any grant stores stable
+  // heap pointers. Fingerprints and attribution are copied so later BotRuntime moves cannot dangle.
   std::vector<StrategyEntry> strategies;
   strategies.reserve(registrations.size());
-  for (auto& registration : registrations) {
-    strategies.push_back(
-        StrategyEntry{std::move(registration.bot_id), std::move(registration.strategy)});
+  for (std::size_t index = 0U; index < registrations.size(); ++index) {
+    auto& registration = registrations[index];
+    auto context =
+        std::unique_ptr<BotContext>{new BotContext{attributions[index], configuration.fingerprint(),
+                                                   policy.fingerprint(), submission_coordinator}};
+    strategies.push_back(StrategyEntry{std::move(registration.bot_id), attributions[index],
+                                       std::move(registration.strategy), std::move(context)});
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -239,7 +319,7 @@ BotRuntime::create(const configuration::StartupConfiguration& configuration,
       }
       grants.push_back(Grant{source.ordinal(),
                              trace::RuntimeTraceSource::from_runtime_source(source), subscription,
-                             *attribution, strategy->strategy.get()});
+                             *attribution, strategy->strategy.get(), strategy->context.get()});
     }
     const auto matching_count = grants.size() - source_begin;
     if (matching_count != static_cast<std::size_t>(source.matching_subscription_count())) {
@@ -627,9 +707,12 @@ BotRuntime::dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnO
     active_reentry_attempts_ = 0U;
     active_reentry_diagnostic_kind_.reset();
 
-    BotContext context{prepared.grant->attribution, prepared.grant->subscription.id,
-                       prepared.callback_ordinal, configuration_fingerprint_,
-                       runtime_policy_fingerprint_};
+    auto& context = *prepared.grant->context;
+    const auto processing_timestamp = prepared.state_callback
+                                          ? outcome.state_event()->fields().processing_timestamp
+                                          : outcome.market_event()->context().processing_timestamp;
+    context.activate(prepared.grant->subscription.id, turn_ordinal.value(),
+                     prepared.callback_ordinal, processing_timestamp);
     const auto started = measurement_clock_->processing_now();
     if (prepared.state_callback) {
       prepared.grant->strategy->on_market_state(outcome.state_event().value(), context);
@@ -640,6 +723,7 @@ BotRuntime::dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnO
       ++report.market_callbacks;
     }
     const auto finished = measurement_clock_->processing_now();
+    context.deactivate();
 
     const auto reentry_attempts = active_reentry_attempts_;
     const auto reentry_diagnostic_kind = active_reentry_diagnostic_kind_;

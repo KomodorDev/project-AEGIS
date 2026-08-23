@@ -122,13 +122,15 @@ Give everything a clear name, label and measuring stick. The robot must never co
 
 ## M2 — Deterministic Runtime and Market-State Validity
 
-**Status:** Local implementation and exit-gate evidence are complete on the rebased branch recorded
-in the [M2 exit-evidence file](milestones/m2-exit-evidence.md). The executor and market-validity
-contracts are accepted in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
-[ADR-0007](decisions/0007-market-state-validity.md). M1 has merged, and the recorded M2-only commits
-were deliberately rebased onto its `dev` merge commit. At local evidence capture M2 had no pull
-request; live publication state belongs to GitHub, while remote CI, review, and integration remain
-pending.
+**Integration status (2026-08-21):** Implemented on `codex/m2-deterministic-runtime` through feature
+head `4b5d89e834b45fef30fca87689937770d2c2ab35`, then merged unchanged into `dev` by
+[PR #8](https://github.com/KomodorDev/project-AEGIS/pull/8) as
+`d7733bb16a52d5ec954338f861d798d8c6620dad`. The executor and market-validity contracts are accepted
+in [ADR-0006](decisions/0006-bounded-deterministic-runtime.md) and
+[ADR-0007](decisions/0007-market-state-validity.md). The [M2 exit-evidence
+file](milestones/m2-exit-evidence.md) preserves the revision-specific local verification and smoke
+benchmark evidence separately from the later integration commit; integration does not turn that
+smoke timing into controlled-host qualification.
 
 ### Outcome
 
@@ -163,6 +165,21 @@ Teach the robot to listen to market messages one at a time and build an order-bo
 
 ## M3 — Canonical Submission, Inline Risk and OMS Contract
 
+**Local implementation status (2026-08-22):** The complete M3 order, route, fixed-risk,
+reservation, outbound OMS, deterministic fake-initiation, result, and evidence contracts are
+accepted in [ADR-0008](decisions/0008-canonical-submission-and-fixed-risk.md) and
+[ADR-0009](decisions/0009-outbound-oms-and-fake-initiation.md). They are locally implemented on
+`codex/m3-canonical-submission` at clean producer
+`27087d4da423546041295de43e7fa2fb31425b63`, with tree
+`2e339a5d97bdc9b6bd4522e754c6052783cb01b4`, from M2 merge baseline
+`d7733bb16a52d5ec954338f861d798d8c6620dad`. The [M3 exit-evidence
+record](milestones/m3-exit-evidence.md) maps every gate and records local verification plus
+uncontrolled smoke timing. The branch is published as
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`, after reconciling the
+current comment-only CI tip `94598c38a750d40f5e10030ebf33706f459bff17`. It is not merged; the
+integrated capability baseline remains M2, and remote CI status stays separate from the local
+revision-specific evidence.
+
 ### Outcome
 
 A strategy can submit a canonical order through route authorization, a fixed v1 risk model, OMS admission and fake write initiation while definitive and uncertain transmission outcomes remain distinct.
@@ -173,11 +190,17 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ### Scope
 
-- Decide the route/account selection interface and owner-local route installation mechanism.
-- Narrow the supported v1 order types, time-in-force values and flags. Canonicalize and validate tick, lot, instrument and venue-filter constraints before risk; either defer market orders or define a deterministic worst-case price/collar.
-- Define the fixed v1 inline risk vocabulary and exposure calculation before implementing reservations: order size, worst-case position/notional, open orders and applicable bot, desk, firm, account, route, instrument and venue caps.
-- Define `OrderRequest`, collision-safe client order identity, `SubmitResult` and stable rejection reasons.
-- Record the conceptual OMS/reservation state machine and ownership ADR before dependent implementation. It must distinguish a failure proven to occur before transport acceptance from `SubmissionUnknown` after acceptance may have occurred.
+- Implement the accepted explicit `RouteId` and owner-local route projection; the route selects the
+  account, venue and instrument under bot-bound authority.
+- Implement the accepted limit-only, GTC, no-flags vocabulary. Canonically validate positive exact
+  price/quantity, metadata scale, tick, minimum quantity, lot step, instrument, and inverse-contract
+  economics before risk; market orders and price collars are deferred.
+- Implement the fixed v1 six-limit model at bot, desk, firm, account, route, instrument, and venue
+  scopes using the exact conservative exposure calculation defined by ADR-0008.
+- Implement the accepted `OrderRequest`, collision-safe client order identity, `SubmitResult`, and
+  stable rejection reasons.
+- Implement the accepted outbound OMS/reservation transition matrix. It distinguishes a failure
+  proven before fake acceptance from `SubmissionUnknown` after acceptance may have occurred.
 - Install an initial immutable risk snapshot and implement owner-local canonical validation, check-and-reserve and minimal outbound OMS states.
 - Implement a fake encoder and fake asynchronous transport initiator. Encoding must preserve exactly the economics that risk approved; it may not silently round or reinterpret them.
 - Attach configuration, instrument metadata, route/account and risk-policy provenance to each admitted order.
@@ -185,12 +208,23 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ### Exit Gate
 
-- Deterministic scenarios cover unauthorized route, invalid order, risk rejection, duplicate local identity, OMS non-admission, encoding failure, write-initiation failure and successful initiation.
+- Deterministic scenarios cover unauthorized route, invalid order, risk rejection, duplicate local
+  identity, OMS non-admission, encoding failure, definite pre-acceptance initiation failure,
+  ambiguous post-acceptance `SubmissionUnknown`, and successful local fake initiation.
 - A failure proven to occur before transport acceptance creates no reservation or releases it exactly once. An ambiguous post-initiation failure retains conservative exposure in an explicit reconciliation-required state.
 - Missing or invalid policy starts fail closed; no default-constructed snapshot can authorize an order.
 - Property tests show the fixed risk model never understates worst-case exposure for the supported order vocabulary.
 - The strategy → route → risk → OMS → write-initiation path has no blocking I/O, database call, serialization boundary, general-purpose queue, remote call or executor hop.
 - The successful local result is never represented as an exchange acknowledgement.
+- `BENCH-M3-SUBMIT-001` reports `p50_us`, `p99_us`, `p99_9_us`, `sample_count`,
+  `orders_per_second`, and `allocations_per_order`; its provisional controlled-host p99 limit is
+  50 microseconds.
+- `BENCH-M3-SUBMIT-002` reports `p50_us`, `p99_us`, `p99_9_us`, `sample_count`,
+  `rejections_per_second`, and `allocations_per_request`; its provisional controlled-host p99 limit
+  is 25 microseconds.
+- Each benchmark starts at the bot-bound submit entry and ends at its required local rejection or
+  fake initiation endpoint. Network and acknowledgement timing are excluded. Uncontrolled runs are
+  labelled smoke and never presented as qualification evidence.
 
 ---
 
@@ -212,6 +246,8 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 - Apply every private event through OMS reconciliation before changing reservations or inventory.
 - Attribute fills immediately to bot, desk and firm positions and to every non-organizational exposure scope enforced by risk, including account, route, instrument and venue where applicable.
 - Notify the bot only after owner-local OMS, reservation, exposure and inventory updates complete.
+- Add the longitudinal reference driver: one injected `SubmitReferenceIntent` causes exactly one
+  fixed M3 request on the next Ready callback and never submits it again automatically.
 - Decide recovery authority and crash consistency before networking: stable identities across restart, journal/snapshot ordering and durability guarantees, replay/live-catch-up boundary, local-versus-exchange source-of-truth rules and quarantine of unknown/external orders.
 - Define audit events now, including order, route/account, configuration, metadata and risk-policy provenance; durable storage arrives in M9.
 - Add fake journal/reconciliation adapters and inject a crash at every lifecycle transition.
@@ -222,6 +258,8 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 - Model/property tests prove total worst-case exposure is never understated through partial fills, rejection, cancellation, replacement, fill-before-ack, duplicates and ambiguous transmission outcomes.
 - Position and exposure aggregates reconcile after every event across bot, desk, firm, account, route, instrument and venue scopes used by the v1 risk model.
 - A bot callback caused by an order event observes the updated state and cannot double-apply the event.
+- The longitudinal reference scenario submits its fixed intent exactly once and does not turn an
+  ambiguous result, replay, reconnect, or later callback into an automatic retry.
 - Fake-backed restart and live-catch-up scenarios converge at every injected crash point without reusing a client identity or releasing uncertain exposure.
 - Unknown or externally created orders cannot be silently attributed; the affected account is conservatively quarantined pending reconciliation.
 
@@ -339,7 +377,7 @@ Turn on the send button only for the pretend-money exchange. Practice sending, c
 
 ### Exit Gate
 
-- Market event → strategy → canonical validation → route → risk → OMS → native submission → private event → inventory succeeds end to end in the sandbox.
+- Market event → strategy → route authorization → canonical validation → local identity → risk → OMS → native submission → private event → inventory succeeds end to end in the sandbox.
 - Submit, acknowledgement and cancel smoke flows work; a fill is demonstrated when the sandbox can reliably provide one.
 - Deterministic tests cover reject, fill-before-ack, partial/cumulative fills, client-ID collision, rate limit, write overflow, timeout, disconnect, late event and ambiguous submission.
 - Ambiguous outcomes retain conservative exposure and enter reconciliation; no retry can create a duplicate economic order silently.

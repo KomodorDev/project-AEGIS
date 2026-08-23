@@ -1,5 +1,8 @@
 # ADR-0001: Serialize the v1 Data Plane on One Dedicated Thread
 
+> **Purpose:** Fix the single-owner, run-to-completion execution model and direct submission-path
+> constraints for the first AEGIS data plane.
+
 - **Status:** Accepted
 - **Date:** 2026-08-17
 - **Scope:** First implementation of the AEGIS data plane
@@ -23,7 +26,7 @@ The critical submission path must remain:
 
 ```text
 Strategy callback
-→ submit fixed-size OrderRequest
+→ submit a small bounded-field OrderRequest by const reference
 → authorize execution route
 → inline risk check and exposure reservation
 → OMS admission
@@ -73,15 +76,25 @@ If a future implementation uses coroutines, the submission/risk/OMS transaction 
 
 ### Order-Submission Semantics
 
-When a strategy submits an order, route authorization, inline risk checking and reservation, OMS admission, native encoding and the request to initiate an asynchronous write execute as direct calls on the same data-plane thread and in the same executor turn.
+When a strategy submits an order, route authorization, inline risk checking and reservation, OMS
+admission, encoding, and write initiation execute as direct calls on the same data-plane thread and
+in the same executor turn. M3 uses only the deterministic in-memory fake; M8 must preserve this
+direct structure when it adds venue-native behavior.
 
 There is no general-purpose queue, service call, serialization boundary or executor handoff between the strategy callback and pre-trade risk enforcement. The risk check and reservation are logically atomic because no other data-plane operation can interleave with them. This does not require making each field a C++ atomic object; atomicity is obtained through single-owner serialization.
 
-A local failure after capacity has been reserved must not leave that capacity unaccounted for. The exact reservation and OMS transition state machine is deferred, but their combined behavior must preserve this invariant.
+A local failure after capacity has been reserved must not leave that capacity unaccounted for. M3
+fixes the exact local reservation and outbound OMS transitions in
+[ADR-0008](0008-canonical-submission-and-fixed-risk.md) and
+[ADR-0009](0009-outbound-oms-and-fake-initiation.md); later private-event transitions remain
+deferred.
 
 ### Exchange-Event Semantics
 
-Acknowledgements, exchange rejections, fills and asynchronous transport completions or failures arrive as later executor turns. A local encoding or write-initiation failure may instead occur during the submission turn; its exact OMS and reservation transition remains open, but it cannot leak reserved capacity.
+Acknowledgements, exchange rejections, fills and asynchronous transport completions or failures
+arrive as later executor turns. ADR-0009 fixes M3 fake encoding and local-initiation transitions;
+M4 must fix the later private-event transitions, while M8 must map native transport behavior onto the
+same definite-versus-uncertain boundary without leaking reserved capacity.
 
 For every processed order event:
 

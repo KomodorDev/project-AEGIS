@@ -38,6 +38,18 @@ M2_RUN_NAMES = tuple(
 M2_BENCHMARK_FILTER = (
     "^(" + "|".join(run_name.replace(".", r"\.") for run_name in M2_RUN_NAMES) + ")$"
 )
+M3_SAMPLE_COUNT = 10_000
+M3_BASE_RUN_NAMES = (
+    "BENCH-M3-SUBMIT-001/submission.authorized-limit-fake-initiation",
+    "BENCH-M3-SUBMIT-002/submission.inline-risk-rejection",
+)
+M3_WORKLOAD_IDS = tuple(run_name.split("/", 1)[0] for run_name in M3_BASE_RUN_NAMES)
+M3_RUN_NAMES = tuple(
+    f"{run_name}/iterations:{M3_SAMPLE_COUNT}/manual_time" for run_name in M3_BASE_RUN_NAMES
+)
+M3_BENCHMARK_FILTER = (
+    "^(" + "|".join(run_name.replace(".", r"\.") for run_name in M3_RUN_NAMES) + ")$"
+)
 
 # Only these exact operator assertions, together with exact REF-MAC-01 hardware/tool facts,
 # authorize an absolute callback-latency qualification. Free-form descriptions remain smoke.
@@ -47,6 +59,40 @@ CONTROLLED_THERMAL_STATE = "no-thermal-pressure"
 M2_FINGERPRINT_LABEL_PATTERN = re.compile(
     r"configuration_fingerprint_sha256=([0-9a-f]{64});"
     r"runtime_policy_fingerprint_sha256=([0-9a-f]{64})"
+)
+M3_PROVENANCE_LABEL_PATTERN = re.compile(
+    r"workload_id=(BENCH-M3-SUBMIT-00[12]);"
+    r"configuration_fingerprint_sha256=([0-9a-f]{64});"
+    r"configuration_revision=([1-9][0-9]*);"
+    r"organization_revision=([1-9][0-9]*);"
+    r"runtime_policy_fingerprint_sha256=([0-9a-f]{64});"
+    r"risk_policy_fingerprint_sha256=([0-9a-f]{64});"
+    r"risk_policy_revision=([1-9][0-9]*);"
+    r"submission_policy_fingerprint_sha256=([0-9a-f]{64});"
+    r"route_id=([A-Za-z0-9._:-]+);"
+    r"route_revision=([1-9][0-9]*);"
+    r"account_id=([A-Za-z0-9._:-]+);"
+    r"venue_id=([A-Za-z0-9._:-]+);"
+    r"instrument_id=([A-Za-z0-9._:-]+);"
+    r"metadata_revision=([1-9][0-9]*);"
+    r"order_namespace_hex=([0-9a-f]{32})"
+)
+M3_PROVENANCE_KEYS = (
+    "workload_id",
+    "configuration_fingerprint_sha256",
+    "configuration_revision",
+    "organization_revision",
+    "runtime_policy_fingerprint_sha256",
+    "risk_policy_fingerprint_sha256",
+    "risk_policy_revision",
+    "submission_policy_fingerprint_sha256",
+    "route_id",
+    "route_revision",
+    "account_id",
+    "venue_id",
+    "instrument_id",
+    "metadata_revision",
+    "order_namespace_hex",
 )
 
 
@@ -369,7 +415,85 @@ def m2_fingerprints(raw_result: dict[str, object]) -> tuple[str, str]:
 
 
 # --------------------------------------------------------
-# Parses the suite and output destination while retaining the no-argument M0 contract.
+# Extracts the two raw M3 p99 observations in the published workload order.
+def m3_p99_microseconds(raw_result: dict[str, object]) -> tuple[float, float]:
+    """Return the finite nonnegative p99 values used by the two controlled-host claims."""
+
+    # Each claim must bind one unique raw iteration record rather than a derived or aggregate row.
+    benchmarks = raw_result.get("benchmarks")
+    if not isinstance(benchmarks, list):
+        raise RuntimeError("M3 benchmark result has no benchmark list")
+    observations: list[float] = []
+    for run_name in M3_RUN_NAMES:
+        matches = [
+            record
+            for record in benchmarks
+            if isinstance(record, dict) and record.get("run_name") == run_name
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(f"M3 benchmark result has no unique {run_name} record")
+        value = matches[0].get("p99_us")
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise RuntimeError(f"M3 benchmark record {run_name} has no nonnegative p99_us")
+        observations.append(float(value))
+    return observations[0], observations[1]
+
+
+# --------------------------------------------------------
+# Parses the exact ordered provenance label emitted by every M3 benchmark fixture.
+def m3_workload_provenance(raw_result: dict[str, object]) -> list[dict[str, object]]:
+    """Return one exact manifest provenance object for each ordered M3 workload."""
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Index only the two complete registered iteration identities; extra or missing rows are errors.
+    benchmarks = raw_result.get("benchmarks")
+    if not isinstance(benchmarks, list):
+        raise RuntimeError("M3 benchmark result has no benchmark list")
+    records = {
+        record.get("run_name"): record
+        for record in benchmarks
+        if isinstance(record, dict) and record.get("run_name") in M3_RUN_NAMES
+    }
+    if len(records) != len(M3_RUN_NAMES):
+        raise RuntimeError("M3 benchmark result does not contain two unique workload records")
+
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Convert decimal revision captures to integers while preserving every other canonical token.
+    provenance: list[dict[str, object]] = []
+    numeric_keys = {
+        "configuration_revision",
+        "organization_revision",
+        "risk_policy_revision",
+        "route_revision",
+        "metadata_revision",
+    }
+    for expected_workload, run_name in zip(M3_WORKLOAD_IDS, M3_RUN_NAMES, strict=True):
+        record = records[run_name]
+        assert isinstance(record, dict)
+        label = record.get("label")
+        if not isinstance(label, str):
+            raise RuntimeError(f"M3 benchmark record {run_name} has no provenance label")
+        match = M3_PROVENANCE_LABEL_PATTERN.fullmatch(label)
+        if match is None:
+            raise RuntimeError(f"M3 benchmark record {run_name} has an invalid provenance label")
+        parsed: dict[str, object] = {}
+        for key, value in zip(M3_PROVENANCE_KEYS, match.groups(), strict=True):
+            parsed[key] = int(value) if key in numeric_keys else value
+        if parsed["workload_id"] != expected_workload:
+            raise RuntimeError(f"M3 benchmark label {run_name} names another workload")
+        provenance.append(parsed)
+    return provenance
+
+    # ++++++++++++++++++++++++++++++++++++++++
+
+
+# --------------------------------------------------------
+# Parses the M0/M2/M3 suite and output destination while retaining the no-argument M0 contract.
 def parse_arguments() -> argparse.Namespace:
     """Select M0 by default or one explicit suite and repository-relative evidence directory."""
 
@@ -378,7 +502,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--suite",
-        choices=("m0", "m2"),
+        choices=("m0", "m2", "m3"),
         default="m0",
         help="benchmark evidence suite to run (default: m0)",
     )
@@ -433,13 +557,16 @@ def main() -> int:
     if suite == "m0":
         benchmark_path = results_dir / "m0-harness.json"
         context_path = results_dir / "m0-context.json"
-    else:
+    elif suite == "m2":
         benchmark_path = results_dir / "m2-runtime.json"
         context_path = results_dir / "m2-context.json"
+    else:
+        benchmark_path = results_dir / "m3-submission.json"
+        context_path = results_dir / "m3-context.json"
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Give each suite an exact anchored filter. M0 retains its short repeated calibration; M2 owns
-    # fixed 10,000-iteration workloads so each tail percentile has enough observations.
+    # Give each suite an exact anchored filter. M0 retains its short repeated calibration; M2/M3
+    # own fixed 10,000-iteration workloads so each tail percentile has enough observations.
     if suite == "m0":
         benchmark_command = [
             str(binary),
@@ -450,10 +577,17 @@ def main() -> int:
             f"--benchmark_out={benchmark_path}",
             "--benchmark_out_format=json",
         ]
-    else:
+    elif suite == "m2":
         benchmark_command = [
             str(binary),
             f"--benchmark_filter={M2_BENCHMARK_FILTER}",
+            f"--benchmark_out={benchmark_path}",
+            "--benchmark_out_format=json",
+        ]
+    else:
+        benchmark_command = [
+            str(binary),
+            f"--benchmark_filter={M3_BENCHMARK_FILTER}",
             f"--benchmark_out={benchmark_path}",
             "--benchmark_out_format=json",
         ]
@@ -515,8 +649,8 @@ def main() -> int:
     }
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Preserve schema-one M0 fields exactly while adding an explicit M2 suite identity and fixed
-    # sample/warm-up contract only when that suite was requested.
+    # Preserve schema-one M0 fields exactly while adding explicit M2/M3 suite identities and their
+    # fixed sample/warm-up contracts only when those suites were requested.
     if suite == "m0":
         context.update(
             {
@@ -528,7 +662,7 @@ def main() -> int:
                 ),
             }
         )
-    else:
+    elif suite == "m2":
         configuration_fingerprint, runtime_policy_fingerprint = m2_fingerprints(raw_result)
         context.update(
             {
@@ -558,6 +692,44 @@ def main() -> int:
                     "observed": observed_p99,
                     "passed": observed_p99 <= callback_limit,
                 }
+            ]
+    else:
+        workload_provenance = m3_workload_provenance(raw_result)
+        context.update(
+            {
+                "benchmark_suite": "m3",
+                "workload_ids": list(M3_WORKLOAD_IDS),
+                "workload_provenance": workload_provenance,
+                "sample_count": M3_SAMPLE_COUNT,
+                "warm_up_policy": (
+                    "Fixed 10,000 measured submissions per workload; fixture construction, "
+                    "preallocation, runtime bootstrap, and the initial Ready callback are outside "
+                    "measured intervals"
+                ),
+                "evidence_classification": "smoke",
+            }
+        )
+        if qualifies_as_ref_mac_01(context):
+            initiated_p99, rejected_p99 = m3_p99_microseconds(raw_result)
+            context["evidence_classification"] = "qualification"
+            context["qualification_reference"] = "REF-MAC-01"
+            context["threshold_claims"] = [
+                {
+                    "workload_id": M3_WORKLOAD_IDS[0],
+                    "metric": "p99_us",
+                    "operator": "<=",
+                    "limit": 50.0,
+                    "observed": initiated_p99,
+                    "passed": initiated_p99 <= 50.0,
+                },
+                {
+                    "workload_id": M3_WORKLOAD_IDS[1],
+                    "metric": "p99_us",
+                    "operator": "<=",
+                    "limit": 25.0,
+                    "observed": rejected_p99,
+                    "passed": rejected_p99 <= 25.0,
+                },
             ]
 
     # ++++++++++++++++++++++++++++++++++++++++
