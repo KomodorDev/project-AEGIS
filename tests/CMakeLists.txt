@@ -34,6 +34,8 @@ add_executable(
   unit/model/fixed_point_test.cpp
   # Identifier tests enforce the nominal grammar and immutable validated-value boundary.
   unit/model/identifier_test.cpp
+  # M4 identity tests pin opaque bounds, fixed layouts, and epoch-qualified cancel uniqueness.
+  unit/model/m4_identity_test.cpp
   # Metadata tests prove deterministic validation order and declared-unit conversion boundaries.
   unit/model/instrument_metadata_test.cpp
   # Clock and order-ID tests share deterministic providers to pin replay and boundary behavior.

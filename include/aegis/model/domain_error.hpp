@@ -74,6 +74,34 @@ enum class DomainErrorCode : std::uint16_t {
   SubmissionEvidenceExhausted = 801,
   InvalidOmsState = 802,
   InvalidFakeState = 803,
+
+  InvalidPrivateIdentity = 900,
+  InvalidPrivateEvent = 901,
+  PrivateEventConflict = 902,
+  PrivateEventCapacityExceeded = 903,
+  PrivateCorrelationFailed = 904,
+  InvalidPrivateOmsState = 905,
+  PrivateCounterExhausted = 906,
+
+  InvalidInventoryState = 910,
+  InventoryCapacityExceeded = 911,
+  InvalidReservationConversion = 912,
+  AccountNotSynchronized = 913,
+  InvalidAccountSafetyState = 914,
+  PrivateEvidenceExhausted = 915,
+
+  InvalidRecoveryPolicy = 920,
+  InvalidJournalState = 921,
+  JournalCapacityExceeded = 922,
+  InvalidRecoverySnapshot = 923,
+  SnapshotCapacityExceeded = 924,
+  InvalidReconciliation = 925,
+  ReconciliationIncomplete = 926,
+  RecoveryGap = 927,
+  RecoveryCounterExhausted = 928,
+  RecoveryProvenanceMismatch = 929,
+
+  InvalidM4Policy = 930,
 };
 
 // ########################################################################
