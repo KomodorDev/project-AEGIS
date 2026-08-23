@@ -61,12 +61,14 @@ public:
   }
 
   // --------------------------------------------------------
+  // Append one unsigned 16-bit value in canonical big-endian byte order.
   [[nodiscard]] bool append_u16(std::uint16_t value) {
     return append_byte(static_cast<std::uint8_t>((value >> 8U) & 0xffU)) &&
            append_byte(static_cast<std::uint8_t>(value & 0xffU));
   }
 
   // --------------------------------------------------------
+  // Append one unsigned 32-bit value in canonical big-endian byte order.
   [[nodiscard]] bool append_u32(std::uint32_t value) {
     return append_byte(static_cast<std::uint8_t>((value >> 24U) & 0xffU)) &&
            append_byte(static_cast<std::uint8_t>((value >> 16U) & 0xffU)) &&
@@ -75,6 +77,7 @@ public:
   }
 
   // --------------------------------------------------------
+  // Append one unsigned 64-bit value in canonical big-endian byte order.
   [[nodiscard]] bool append_u64(std::uint64_t value) {
     // Interesting syntax: the explicit zero break prevents unsigned loop wrap after byte eight.
     for (unsigned int shift = 56U;; shift -= 8U) {
@@ -114,17 +117,20 @@ public:
   [[nodiscard]] bool append_zero_decimal() { return append_i64(0) && append_byte(0U); }
 
   // --------------------------------------------------------
+  // Transfer the complete canonical byte prefix out of the consumed writer.
   [[nodiscard]] std::vector<std::byte> take() && { return std::move(bytes_); }
 
   // --------------------------------------------------------
 private:
 
   // --------------------------------------------------------
+  // Return whether the backing vector can accept the complete additional byte count.
   [[nodiscard]] bool can_grow(std::size_t additional) const noexcept {
     return additional <= bytes_.max_size() - bytes_.size();
   }
 
   // --------------------------------------------------------
+  // Own the canonical prefix until a successful encoder consumes the writer.
   std::vector<std::byte> bytes_;
 };
 
@@ -164,8 +170,8 @@ private:
 }
 
 // --------------------------------------------------------
-// Recognize every assigned OMS state before persisting its byte.
-[[nodiscard]] bool is_known(oms::OutboundOrderState state) noexcept {
+// Recognize only the five M3 OMS states assigned to the schema-one submission-trace byte.
+[[nodiscard]] bool is_known_m3_submission_state(oms::OutboundOrderState state) noexcept {
   switch (state) {
   case oms::OutboundOrderState::PendingEncoding:
   case oms::OutboundOrderState::PendingInitiation:
@@ -338,7 +344,7 @@ private:
   if (fields.risk_rejection && !is_valid(*fields.risk_rejection)) {
     return false;
   }
-  if (fields.oms_state && !is_known(*fields.oms_state)) {
+  if (fields.oms_state && !is_known_m3_submission_state(*fields.oms_state)) {
     return false;
   }
   if (fields.encoding &&
