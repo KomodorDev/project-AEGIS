@@ -130,18 +130,26 @@ greater than `UINT32_MAX`, and small enough that every checked worst-case produc
 length-delimited record is representable. There are no defaults, environment overrides, runtime
 growth, or M4 operator mutation.
 
-Validation additionally requires:
+Generic `M4Policy` creation additionally requires:
 
 - account safety fences are at least the configured logical-account count;
 - exchange-order mappings are at least the outbound OMS row capacity;
 - inventory source rows are at least the reservation capacity;
 - inventory aggregate cells cover every canonical risk-policy key across all seven scopes;
 - namespace registrations are at least recovery epochs plus one;
-- the reference fixture has exactly one reference-intent slot;
 - checked `drain_width = 1 + max_pending_fill_intervals_per_order` is representable;
 - transition effects and callbacks are each at least `drain_width`;
 - per-turn audit scratch is at least `2 + drain_width`; and
-- reconciliation and catch-up scratch each represent the complete canonical fixture.
+- every checked product used to preallocate reconciliation or recovery vectors is representable.
+
+Reference-fixture capacity is validated separately, by the trusted component that owns each closed
+fixture rather than by generic policy creation. The longitudinal reference-intent driver requires
+exactly one reference-intent slot before it can be constructed. The deterministic reconciliation
+and recovery fixture declares its exact maximum batch-row and live-catch-up fact counts, then its
+builder requires `max_reconciliation_rows_per_batch` and `max_live_catchup_facts` to cover those
+counts before owner operation begins. Those component checks use `InvalidM4Policy = 930`, occur
+before allocation or mutation, and are table-tested at the exact accepted boundary. A caller cannot
+author smaller requirement counts to bypass them.
 
 Total append-only evidence can still fill over time. Every owner turn preflights its exact remaining
 needs. Failure uses the dedicated account fence and never partially mutates economics.
