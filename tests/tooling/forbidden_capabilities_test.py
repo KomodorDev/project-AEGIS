@@ -1,4 +1,4 @@
-"""Prove the deterministic M3 forbidden-capability scanner accepts only offline owner-local code."""
+"""Prove the deterministic M3/M4 scanner accepts only offline owner-local code."""
 
 from __future__ import annotations
 
@@ -615,6 +615,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                     "src/aegis/model/fixed_point.cpp",
                     "src/aegis/oms/outbound_oms.cpp",
                 ),
+                "M4_GENERAL_FILE_PATTERNS": (),
+                "M4_OWNER_PATH_FILE_PATTERNS": (),
                 "BUILD_FILES": (
                     Path("CMakeLists.txt"),
                     Path("CMakePresets.json"),
@@ -691,6 +693,52 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         self.assertTrue(direct <= discovered)
 
     # --------------------------------------------------------
+    # The explicit M4 manifest covers every current foundation file and applies owner-hop rules to
+    # production normalization without widening those rules to test drivers.
+    def test_m4_manifest_covers_foundation_and_owner_paths(self) -> None:
+        """Pin current offline files and prove M4 production receives direct-path checks."""
+
+        required = {
+            "include/aegis/model/m4_provenance.hpp",
+            "include/aegis/oms/private_order_event.hpp",
+            "include/aegis/oms/private_order_identity.hpp",
+            "include/aegis/recovery/recovery_identity.hpp",
+            "include/aegis/runtime/m4_policy.hpp",
+            "src/aegis/oms/private_order_event.cpp",
+            "src/aegis/runtime/m4_policy.cpp",
+            "src/aegis/runtime/m4_provenance_resolver.cpp",
+            "src/aegis/runtime/m4_provenance_resolver.hpp",
+            "src/aegis/runtime/private_order_event_factory.cpp",
+            "src/aegis/runtime/private_order_event_factory.hpp",
+            "tests/unit/model/m4_identity_test.cpp",
+            "tests/unit/oms/private_order_event_test.cpp",
+            "tests/unit/runtime/m4_policy_test.cpp",
+            "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+        }
+        general = set(scanner.M4_GENERAL_FILE_PATTERNS)
+        owner = set(scanner.M4_OWNER_PATH_FILE_PATTERNS)
+        self.assertTrue(required <= general)
+        self.assertTrue(owner <= general)
+        discovered = {
+            path.relative_to(REPOSITORY).as_posix()
+            for path in scanner.discover_default_paths(REPOSITORY)
+        }
+        self.assertTrue(general <= discovered)
+
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            source = self.write(
+                repository,
+                "src/aegis/runtime/private_order_event_factory.cpp",
+                "#include <future>\nvoid owner_path() { SerializedExecutor executor; }\n",
+            )
+            findings = scanner.scan_paths(repository, [source])
+            self.assertEqual(
+                [finding.rule for finding in findings],
+                ["forbidden include", "executor handoff"],
+            )
+
+    # --------------------------------------------------------
     # Default scans must not silently succeed after an explicitly assigned artifact disappears.
     def test_default_scan_fails_closed_for_missing_manifest_file(self) -> None:
         """Return scanner-error status two for a missing direct file."""
@@ -701,6 +749,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "M3_GENERAL_DIRECTORY_PREFIXES": (),
                 "M3_GENERAL_FILE_PATTERNS": ("present.cpp",),
                 "M3_DIRECT_PATH_FILE_PATTERNS": ("missing-direct.cpp",),
+                "M4_GENERAL_FILE_PATTERNS": (),
+                "M4_OWNER_PATH_FILE_PATTERNS": (),
                 "BUILD_FILES": (),
                 "BUILD_DIRECTORY_PREFIXES": (),
             }
@@ -730,6 +780,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "M3_GENERAL_DIRECTORY_PREFIXES": (Path("src/aegis/risk"),),
                 "M3_GENERAL_FILE_PATTERNS": (),
                 "M3_DIRECT_PATH_FILE_PATTERNS": (),
+                "M4_GENERAL_FILE_PATTERNS": (),
+                "M4_OWNER_PATH_FILE_PATTERNS": (),
                 "BUILD_FILES": (),
                 "BUILD_DIRECTORY_PREFIXES": (),
             }

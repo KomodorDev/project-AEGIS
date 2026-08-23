@@ -11,6 +11,9 @@ aegis_configure_owned_target(aegis_test_support)
 # Link the AEGIS public target and Catch2's variant that supplies the test-program main().
 add_executable(
   aegis_unit_tests
+  # M4-only authority support may include runtime-private composition without widening the shared
+  # M1-M3 deterministic-scenario support boundary.
+  support/m4_test_authority.cpp
   # Startup tests bind atomic validation to its canonical bytes, revisions, and golden fingerprint.
   unit/configuration/startup_configuration_test.cpp
   # These tests prove an observation grant never synthesizes or enables execution permission.
@@ -46,6 +49,8 @@ add_executable(
   unit/model/time_test.cpp
   # OMS tests pin duplicate-before-capacity admission and the complete local M3 transition table.
   unit/oms/outbound_oms_test.cpp
+  # M4 private-event tests pin every source shape, bounded field, and ingress equality rule.
+  unit/oms/private_order_event_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
   # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.
@@ -56,6 +61,8 @@ add_executable(
   unit/runtime/runtime_policy_test.cpp
   # M4 policy tests independently pin all 26 bounds, exact bytes, fingerprint, and root authority.
   unit/runtime/m4_policy_test.cpp
+  # M4 provenance tests prove source subjects are self-owned and configuration-derived only.
+  unit/runtime/m4_provenance_resolver_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
   unit/runtime/submission_coordinator_test.cpp

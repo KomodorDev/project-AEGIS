@@ -71,8 +71,10 @@ add_library(
   src/aegis/model/sha256.cpp
   # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp
-  # Outbound OMS retains local admission/state/provenance but owns no risk release or communication.
+  # OMS retains local admission/state/provenance and the closed source-normalized private-event
+  # vocabulary, but owns no risk release or communication.
   src/aegis/oms/outbound_oms.cpp
+  src/aegis/oms/private_order_event.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
   # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
@@ -81,8 +83,11 @@ add_library(
   src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
-  # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain.
+  # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain, while
+  # the trusted resolver derives caller-unforgeable subject provenance from that same authority.
   src/aegis/runtime/m4_policy.cpp
+  src/aegis/runtime/m4_provenance_resolver.cpp
+  src/aegis/runtime/private_order_event_factory.cpp
   # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
   src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
