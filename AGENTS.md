@@ -1,7 +1,7 @@
 # AGENTS.md
 
-> **Purpose:** Define the repository-wide workflow, commit hygiene and source-documentation rules
-> that every human or automated contributor must follow.
+> **Purpose:** Define the repository-wide workflow, commit hygiene, source-naming and documentation
+> rules that every human or automated contributor must follow.
 
 ## Git workflow
 
@@ -23,6 +23,44 @@
   misleading intermediate commits.
 - Before publishing, review the commit history and avoid one giant commit when a clearer decomposition
   makes sense.
+
+## Function and method naming
+
+Apply this standard to every new or renamed function, method and helper whenever the repository
+controls its name, including local, test-fixture and benchmark helpers. Names fixed by the language
+or a required interface, such as C++ constructors, destructors and overloaded operators, are
+exempt. A declaration and each call site must communicate the primary action or returned fact
+without requiring the reader to inspect the implementation or an adjacent comment. When changing
+an existing operation's behavior, verify that its current name still describes its action, result
+and caller-relevant failure policy; rename it when it no longer does.
+
+- Name a command—an operation used primarily to cause an effect or enforce a requirement—with a
+  specific imperative, or command-form, verb in its base form. Include the object or effect when
+  the verb alone would be ambiguous; for example, use `insert_order`, `cancel_route` or
+  `require_healthy`.
+- Name a query—an operation used primarily to return information without a caller-visible side
+  effect—after the fact it returns. A caller-visible side effect is a change beyond the returned
+  value, such as mutating stored state or writing output. Use question-form prefixes such as `is_`,
+  `has_`, `can_` or `should_` for Boolean (`true` or `false`) results. Use a precise result name,
+  such as `active_order_count` or `order_id`, for an accessor that directly returns the named
+  property. When the query performs a meaningful computation or search, name that operation
+  explicitly; for example, use `calculate_worst_case_exposure`, `derive_digest`,
+  `summarize_samples` or `find_route`. Do not add an artificial imperative verb when a directly
+  returned fact is already unambiguous.
+- Name a conversion, parser or factory after both its operation and the value it produces or its
+  source; for example, use `to_wire_bytes`, `parse_identifier`, `route_from_config` or
+  `create_market_runtime`. A factory is an operation that constructs and returns a value.
+- Include deliberate, caller-relevant failure behavior in a local helper's name when its return type
+  does not communicate that behavior. This means failure behavior defined by the operation's
+  contract, not an incidental implementation failure such as memory allocation. For example, use
+  `parse_identifier_or_throw<Identifier>(text)` for a helper that parses identifier text and
+  converts invalid input into an exception; do not use `id<Identifier>(text)`, which hides both the
+  parsing action and the failure policy.
+- Do not use a bare noun, generic verb or unexplained abbreviation—such as `id`, `get`, `do`,
+  `run`, `process` or `handle`—when it leaves the specific action or result unclear. An
+  established technical abbreviation may remain as a qualified noun, such as `order_id`,
+  `sha256_digest` or `utc_timestamp`, when the complete name still communicates the behavior or
+  returned fact.
 
 ## Source documentation standard
 
