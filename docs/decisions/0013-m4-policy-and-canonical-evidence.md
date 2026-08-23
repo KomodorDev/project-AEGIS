@@ -25,6 +25,13 @@ evidence names, and requires a separate accepted schema ADR before any evidence 
 
 ## Decision
 
+### Stable M4 policy error
+
+M4 appends `DomainErrorCode::InvalidM4Policy = 930`. Invalid `AEGISM4P` provenance, zero or
+over-bound capacity, a failed cross-capacity relationship, or an unrepresentable checked policy
+product returns this code with the exact policy field. Recovery-media, snapshot and reconciliation
+failures keep ADR-0012's distinct 920-929 assignments. No earlier value is renumbered.
+
 ### M1-M3 compatibility boundary
 
 The byte layout and every existing assignment in `AEGISCFG`, `AEGISTRS`, `AEGISRTS`, `AEGISRSP`,
