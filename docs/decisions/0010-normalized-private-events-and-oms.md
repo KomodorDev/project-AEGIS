@@ -380,9 +380,28 @@ The retained row also owns orthogonal fields for acknowledgement, exchange corre
 fill, pending intervals, cancellation, authoritative terminal cumulative quantity, and
 reconciliation requirement. Connectivity and cancel progress do not replace the economic state.
 
+`execution_evidence_observed` is a derived monotonic OMS cache: it is true exactly when the retained
+event registry contains any `Execution` row whose immutable first-admission resolution is `Known`
+for that `OrderId`. `Applied`, `BufferedGap`, a known execution that reaches trade classification
+before becoming `SafetyContained`, and a known source-side mismatch all set it. A retained known
+trade row therefore implies the cache, but is not required for it. Provenance failure and
+correlation conflict stop before a `Known` resolution and leave it false. Recovery validates the
+cache against the event registry. This exact meaning supplies the rejection guard's “no execution
+evidence” predicate without mistaking a zero applied cumulative quantity or a pre-trade safety
+disposition for absence of execution evidence.
+
 `CancellationState` assigns `Unassigned = 0`, `None = 1`, `Requested = 2`,
 `WriteInitiated = 3`, `OutcomeUnknown = 4`, `DefinitelyFailed = 5`, `Rejected = 6`, and
 `Confirmed = 7`.
+
+The per-order reconciliation-required flag represents unresolved live-order uncertainty rather than
+the independently latched account-safety state. `SubmissionUnknown`, an order/account timeout, a
+source disconnect, or an authoritative cancellation target above the applied cumulative quantity
+sets it. Acknowledgement, partial fill, cancel request/write outcome, cancel rejection, and other
+nonterminal facts do not clear it. It clears only when the primary state reaches `Filled`, an
+accepted pre-fill `ExchangeRejected`, a fully reconciled `Cancelled`, or `ReconciledAbsent`.
+ADR-0011 account safety remains latched until ADR-0012's explicit recovery decision even when this
+one order no longer has live uncertainty.
 
 ### Exhaustive transition partition
 
@@ -400,23 +419,32 @@ Exact event and trade duplicates are classified before the tables and leave ever
 projection, safety, and callback value unchanged. The first table is the complete accepted
 economic/projection partition:
 
+Every contiguous-execution guard uses the final post-drain cumulative quantity: the owner first
+applies the incoming contiguous interval virtually, then drains every newly contiguous retained
+interval in ascending endpoint order. Original-quantity and terminal-target comparisons use that
+final candidate, never an intermediate prefix. A noncontiguous incoming interval starts no drain
+and is evaluated only by the retained-gap row.
+
 | Source state | Stimulus and complete guard | Target/effect |
 |---|---|---|
 | `WriteInitiated`, `SubmissionUnknown` | consistent acknowledgement | `Working`; bind exchange ID; reservation unchanged |
 | `Working`, `PartiallyFilled`, `Filled`, `Cancelled` | consistent late acknowledgement | primary unchanged; acknowledgement/correlation only |
-| `WriteInitiated`, `SubmissionUnknown` | rejection with no acknowledgement, no applied fill, no retained pending interval/trade, and no execution-established exchange mapping | `ExchangeRejected`; release residual once |
+| `WriteInitiated`, `SubmissionUnknown` | rejection with no acknowledgement, `execution_evidence_observed == false` (no known execution evidence), and no retained authoritative terminal cumulative quantity | `ExchangeRejected`; release residual once |
 | `ExchangeRejected` | consistent late rejection under a distinct event identity | projection-only; no economics |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | contiguous execution ends below original quantity and no terminal target is reached | `PartiallyFilled`; convert cumulative delta atomically |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | contiguous execution reaches original quantity | `Filled`; consume residual by fill |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | valid noncontiguous execution within original quantity and terminal target | retain gap; primary/economics unchanged |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authorized cancel request and no unresolved attempt | primary unchanged; append attempt; `Requested` |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | matching unresolved cancel-write outcome | primary unchanged; close that attempt as `DefinitelyFailed`, `WriteInitiated`, or `OutcomeUnknown` |
-| `Filled`, `ExchangeRejected`, `Cancelled`, `ReconciledAbsent` | matching late cancel-write outcome for an attempt that was unresolved when the terminal fact committed | consume attempt outcome/evidence; primary and economics unchanged; `Cancelled` keeps `Confirmed` |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancel rejection, with or without a local attempt | primary/economics unchanged; close the sole unresolved attempt as `Rejected` when present |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancelled cumulative equals applied cumulative below original quantity | `Cancelled`; release residual once; `Confirmed` |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancelled cumulative is above applied, at or below original, and bounds every pending interval | retain target; set reconciliation required; release nothing |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | a later execution drain reaches retained target below original quantity | `Cancelled`; release residual once |
-| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | a later execution drain reaches retained target equal to original quantity | `Filled`; consume residual by fill |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | contiguous execution leaves the final post-drain cumulative below original quantity and, when retained, below the authoritative terminal target | `PartiallyFilled`; convert the incoming and every drained cumulative delta atomically |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | no authoritative terminal target is retained and a contiguous execution makes the final post-drain cumulative reach original quantity | convert the incoming and every drained cumulative delta atomically; `Filled`; consume the reservation fully by fill |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | valid noncontiguous execution endpoint is at or below original quantity and, when present, the authoritative terminal target | retain gap; primary/economics unchanged |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authorized cancel request; cancellation state is `None`, `DefinitelyFailed`, or `Rejected`; neither an unresolved attempt nor an authoritative terminal target is retained | primary unchanged; append attempt; `Requested` |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | first matching cancel-write outcome for the exact `Requested` attempt, with no retained write outcome | primary/economics unchanged; `DefiniteFailureBeforeAcceptance` closes the attempt as `DefinitelyFailed`; `AcceptedAndInitiated` and `AcceptedThenOutcomeLost` retain it unresolved as `WriteInitiated` and `OutcomeUnknown` |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | first matching late cancel-write outcome for an exact attempt already closed as `Rejected` or `Confirmed` by an authoritative result before any write outcome | retain the write-outcome evidence only on that exact closed attempt; primary/economics, any newer attempt, and the current order-level cancellation state remain unchanged |
+| `Filled`, `ExchangeRejected`, `Cancelled`, `ReconciledAbsent` | first matching late cancel-write outcome for an exact attempt with no retained write outcome that is closed as `Rejected` or `Confirmed` when the outcome arrives | retain the write-outcome evidence only on that exact closed attempt; primary/economics and the current order-level cancellation state remain unchanged |
+| `Filled`, `ExchangeRejected`, `Cancelled`, `ReconciledAbsent` | first matching late cancel-write outcome for the exact attempt with no retained write outcome that remains current and `Requested` when the outcome arrives | retain the first write outcome/evidence; apply the `DefinitelyFailed`, `WriteInitiated`, or `OutcomeUnknown` mapping from the ordinary first-outcome row; primary/economics unchanged |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancel rejection with no retained authoritative terminal target, with or without a local attempt | primary/economics unchanged; set `Rejected`; close the sole unresolved attempt as rejected when present |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancel rejection after a retained cancellation target set `Confirmed` | projection-only; primary/economics unchanged; `Confirmed` dominates and is not downgraded |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancelled cumulative equals applied cumulative below original quantity, no authoritative terminal cumulative quantity is retained, and the target bounds every pending interval | `Cancelled`; release residual once; set `Confirmed`; close the sole unresolved attempt as confirmed when present |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | authoritative cancelled cumulative is above applied, at or below original, bounds every pending interval, and either establishes the first terminal target or exactly equals the retained target | retain target; set reconciliation required; release nothing; set `Confirmed`; close the sole unresolved attempt as confirmed when present |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | a contiguous execution, including any newly unlocked pending-interval drain, makes the final post-drain cumulative reach the retained target below original quantity | convert the incoming and every drained cumulative delta atomically; `Cancelled`; release only the post-conversion residual once |
+| `WriteInitiated`, `SubmissionUnknown`, `Working`, `PartiallyFilled` | a contiguous execution, including any newly unlocked pending-interval drain, makes the final post-drain cumulative reach the retained target equal to original quantity | convert the incoming and every drained cumulative delta atomically; `Filled`; consume the reservation fully by fill |
 | `Filled` | late cancelled result at original quantity | primary/economics unchanged; set `Confirmed` and close the sole unresolved attempt as confirmed when present |
 | `Filled` | late cancel rejection | primary/economics unchanged; close the sole unresolved attempt as `Rejected` when present, otherwise leave prior cancellation history unchanged |
 | `Cancelled` | repeated cancelled result at the same target | projection-only; retain `Confirmed`; primary/economics unchanged |
@@ -429,10 +457,13 @@ economic/projection partition:
 | `ReconciledAbsent` | same complete-negative proof replay | projection-only; no economics |
 
 An authoritative cancellation may be unsolicited for a known order; a local cancel attempt is not
-required. A `CancelWriteOutcome` always requires the exact `CancelAttemptId` and an unresolved
-matching attempt. `PendingEncoding` and `PendingInitiation` local-failure changes remain inherited
-M3 direct OMS operations inside the synchronous submit turn; they are not normalized later-turn
-transitions.
+required. A `CancelWriteOutcome` always requires the exact `CancelAttemptId`, no retained write
+outcome for that attempt, and one of two states when the outcome arrives: the attempt remains current
+and `Requested`, or an authoritative result has already closed it as `Rejected` or `Confirmed`. The
+first case applies the ordinary outcome mapping; the second retains history only. Only that first
+write outcome is accepted, and a late outcome for an older attempt never changes a newer attempt.
+`PendingEncoding` and `PendingInitiation` local-failure changes remain inherited M3 direct OMS
+operations inside the synchronous submit turn; they are not normalized later-turn transitions.
 
 Account/source observations form a separate complete accepted table because they do not have one
 source OMS state:
@@ -457,8 +488,17 @@ The complete safety-only accepted partition is:
 
 The last row includes every authoritative fact against `PreInitiation` or `LocallyFailed`, execution
 after `ExchangeRejected` or `ReconciledAbsent`, any new execution after `Filled` or completed
-`Cancelled`, rejection after any execution evidence, terminal target below applied cumulative,
-overfill, and terminal-target violation. It makes the authoritative remainder finite and testable.
+`Cancelled`, rejection after any execution evidence or retained authoritative terminal cumulative
+quantity, terminal target below applied cumulative, overfill, a second different cancellation
+target, and any other terminal-target violation. It makes the authoritative remainder finite and
+testable.
+
+A safety-contained first-seen fact retains its event identity, immutable first-admission
+resolution, and, for an execution that reaches trade classification, its trade identity. It never
+commits a candidate new exchange-order mapping; an already committed mapping remains unchanged.
+Event-identity conflict retains the existing event-registry row, and trade-identity conflict retains
+the existing trade-registry row. The contradictory fact remains explicit evidence without becoming
+new correlation authority.
 
 Every remaining shape-valid order-scoped local source/state combination is forbidden and returns the stable
 error without OMS, reservation, inventory, mapping, dedupe, safety, or callback mutation. Invalid
@@ -490,9 +530,10 @@ returned triples are:
 | accepted then outcome lost | `SubmissionUnknown / Initiation / FakeWriteOutcomeUnknown` | request plus matching `AcceptedThenOutcomeLost` outcome |
 
 A known locally owned open order may be cancelled while its account is reconciliation-required or
-quarantined. A new explicit attempt is allowed only after the preceding attempt is
-`DefinitelyFailed` or `Rejected`; timeout, disconnect, write initiation, or outcome loss never
-schedules an automatic retry.
+quarantined. The OMS accepts a new explicit attempt only when cancellation state is `None`,
+`DefinitelyFailed`, or `Rejected`, no authoritative terminal target is retained, and no attempt is
+unresolved. `Confirmed` never permits another explicit attempt; timeout, disconnect, write
+initiation, or outcome loss never schedules an automatic retry.
 
 ### Replace is cancel plus new
 
