@@ -20,7 +20,9 @@ This document expands the [architecture overview](../architecture.md). It descri
 are **Accepted and implemented**. M3 route, fixed-risk, outbound OMS, and fake-initiation contracts
 are **Accepted and integrated** through [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
 at `dev` merge commit `962eb8602c13c1930a74c59232f96920482edb2b`. The diagram is
-**Illustrative** and does not imply queues, processes, or thread hops.
+**Illustrative** and does not imply queues, processes, or thread hops. M4 private-event, inventory,
+account-safety, fake-recovery, capacity, and evidence contracts are **Accepted for implementation**
+in ADR-0010 through ADR-0013; this status does not claim that their implementation is complete.
 
 ```mermaid
 flowchart LR
@@ -191,12 +193,13 @@ value whose explicit reconciliation mapping begins in M7.
 | Normalized market state and subscription dispatch | Data-plane executor | A complete scratch candidate commits before `Ready` dispatch; non-ready transitions expose no book view. |
 | Bot and mutable strategy runtime state | Data-plane executor | Mutated only during serialized bot callbacks. |
 | Active subscription and route-authorization view | Data-plane executor | Implemented M3 behavior installs the sealed startup routes once in canonical order and reads them inline. Dynamic route adoption is deferred. |
-| OMS order lifecycle and reconciliation state | Data-plane executor | Implemented M3 behavior admits outbound local identities and records local initiation or uncertainty. M4 adds exchange-event reconciliation. |
-| Reservations and open-order exposure | Data-plane executor | Implemented M3 check-and-reserve is atomic; definite local failures release exactly once, while initiation or uncertainty retains exposure. Later private-event transitions begin in M4. |
-| Immediate bot positions, inventory and exposure used by risk | Data-plane executor | Exchange events update this state before any later callback or risk decision runs. P&L calculation placement remains **Open**. |
+| OMS order lifecycle and reconciliation state | Data-plane executor | Implemented M3 behavior admits outbound local identities and records local initiation or uncertainty. ADR-0010 requires every live/replayed/reconciled M4 private fact to pass through one idempotent OMS plan before economic mutation. |
+| Reservations and open-order exposure | Data-plane executor | Implemented M3 check-and-reserve is atomic. ADR-0011 requires cumulative fills to convert residual reservation into confirmed exposure atomically; only definitive terminal venue facts or ADR-0012 complete proof release the remainder. |
+| Immediate bot positions, inventory and exposure used by risk | Data-plane executor | ADR-0011 assigns one owner-local inventory ledger as confirmed-position truth across all seven firm-qualified scopes. Execution price is evidence only; P&L, fees and settlement remain M12. |
 | Authoritative firm, desk and bot budgets and modes | Control-plane risk coordinator | Derived from aggregate observations and published as complete immutable snapshots. |
 | Installed risk budget/mode snapshot | Data-plane executor through the inline guard | Implemented M3 behavior installs one complete immutable startup policy. M5 may replace it only between callbacks with a newer complete revision; partial installation is forbidden. |
 | Aggregate reporting projections and UI view models | Control plane | Built from asynchronous observations and never consulted synchronously to approve an order. |
-| Durable audit, recovery and persistence state | **Open** | Ownership and reconciliation rules require a later decision. |
+| Recovery journal/snapshot protocol and fake media | Data-plane executor publishes; bounded external-lifetime fake media retains acknowledged values | ADR-0012 fixes causal publication, contiguous fake durability, snapshot cuts, replay, authoritative reconciliation, and safe convergence. Real durable storage, retention and venue-backed recovery remain M9. |
+| M4 capacity policy and canonical evidence | Sealed startup policy and owner-local bounded recorders | ADR-0013 fixes one immutable fingerprinted capacity policy and semantic M4 records without changing M1-M3 canonical bytes; required ADR-0014 precedes their byte encoders. |
 
 The single-owner model removes concurrent mutation inside the v1 data plane. It does not make control-plane reporting synchronous, and it does not require control-plane state to share the data-plane thread. The full decision and its trade-offs are recorded in [ADR-0001](../decisions/0001-serialized-data-plane-execution.md).

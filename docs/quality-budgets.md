@@ -5,7 +5,7 @@
 
 **Status:** M0 calibration, all three M2 workloads, and both M3 submission workloads are executable.
 Workload identifiers are stable; thresholds remain provisional and may be revised only with
-recorded measurements and rationale. The locally recorded M3 bundle is smoke evidence, not
+recorded measurements and rationale. The recorded M3 bundle is smoke evidence, not
 controlled-host qualification.
 
 ## Measurement rules
@@ -67,6 +67,12 @@ same operation even if its implementation evolves.
 | `BENCH-M3-SUBMIT-002` | Same request rejected inline by risk before OMS admission | latency µs p50/p99/p99.9, rejections/s, allocations/request | M3 |
 | `LOAD-M10-REF-001` | One instrument and bot for 10 minutes at 20,000 market events/s plus 100 submit attempts/s | callback and submission latency, queue age/depth, utilization, rates, counts, RSS MiB, trace hash | M10 |
 | `LOAD-M10-BURST-001` | The reference workload plus a 10-second public-data burst at 100,000 events/s | same as sustained workload plus time to coherent recovery | M10 |
+
+M4 defines no named performance workload or qualification threshold. Its private events execute on
+later serialized owner turns and do not extend either M3 submission timing interval. M4 therefore
+regresses the existing M0, M2 and M3 collectors/validators unchanged; any future M4 workload needs
+an explicit quality-budget decision fixing its stable ID, timing interval, metrics, validator,
+smoke-versus-qualification rules and any threshold before implementation.
 
 The M0 harness measurement is evidence that the runner, release build, JSON output, and artifact path
 work. It has no product-latency threshold because it deliberately performs no AEGIS behavior.

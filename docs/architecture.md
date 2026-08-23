@@ -32,6 +32,10 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [ADR-0007: Market-state validity](decisions/0007-market-state-validity.md)
 - [ADR-0008: Canonical bot-bound submission and fixed risk](decisions/0008-canonical-submission-and-fixed-risk.md)
 - [ADR-0009: Outbound OMS and conservative fake initiation](decisions/0009-outbound-oms-and-fake-initiation.md)
+- [ADR-0010: Normalized private events and extended OMS](decisions/0010-normalized-private-events-and-oms.md)
+- [ADR-0011: Inventory, reservation conversion and account safety](decisions/0011-inventory-reservation-and-account-safety.md)
+- [ADR-0012: Fake-backed recovery and crash consistency](decisions/0012-fake-backed-recovery-and-crash-consistency.md)
+- [ADR-0013: M4 capacity policy and canonical evidence semantics](decisions/0013-m4-policy-and-canonical-evidence.md)
 - [M0 reference scenario](reference-scenario.md)
 - [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
@@ -411,7 +415,11 @@ A definite pre-acceptance failure releases its reservation exactly once, while b
 uncertainty retain conservative exposure. Order acknowledgements, rejections and fills begin in M4
 and are processed asynchronously on later turns of the same executor. They reconcile OMS state
 before reservations and immediate inventory are updated and before the originating bot receives its
-order event. Detailed private-event transitions remain **Open** for M4.
+order event. ADR-0010 fixes the private-event identities, complete transition table, correlation,
+fill ordering, idempotency, cancellation projection, and callback contract. ADR-0011 fixes atomic
+reservation-to-inventory conversion and account safety; ADR-0012 fixes fake-backed recovery; and
+ADR-0013 fixes every M4 capacity and semantic evidence record. A required ADR-0014 will fix the
+exact new evidence bytes before an encoder is implemented.
 
 **Integrated M3 status (2026-08-23):** The complete route → canonical validation → identity →
 fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented.

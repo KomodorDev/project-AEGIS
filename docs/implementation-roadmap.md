@@ -229,6 +229,18 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ## M4 — OMS, Inventory and Recovery Contract
 
+**Accepted contract status (2026-08-23):**
+[ADR-0010](decisions/0010-normalized-private-events-and-oms.md) fixes the normalized private-event
+vocabulary, correlation, idempotency, fill ordering, extended OMS, cancellation and callback rules.
+[ADR-0011](decisions/0011-inventory-reservation-and-account-safety.md) fixes cumulative reservation
+conversion, signed seven-scope inventory and account quarantine.
+[ADR-0012](decisions/0012-fake-backed-recovery-and-crash-consistency.md) fixes fake durability,
+journal/snapshot ordering, complete reconciliation proof, restart identities, safe convergence and
+the one-shot reference intent. [ADR-0013](decisions/0013-m4-policy-and-canonical-evidence.md) fixes
+the immutable M4 capacity policy, stable evidence semantics, provenance scopes and fail-closed
+headroom. A required ADR-0014 must fix exact new evidence bytes before any M4 encoder or byte golden.
+Implementation and exit evidence remain to be completed on the M4 feature branch.
+
 ### Outcome
 
 Normalized private-order events produce one coherent OMS, reservation and inventory state before the bot can react, and the same contracts define recovery before any private venue integration begins.
@@ -239,7 +251,7 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 
 ### Scope
 
-- Implement the conceptual OMS transition matrix for acknowledgements, exchange rejections, fill-before-ack, partial and full fills, cancel requests and results, local failures, timeouts, duplicate trade IDs, unknown orders and valid out-of-order delivery.
+- Implement ADR-0010's accepted OMS transition matrix for acknowledgements, exchange rejections, fill-before-ack, partial and full fills, cancel requests and results, local failures, timeouts, duplicate trade IDs, unknown orders and valid out-of-order delivery.
 - Define client/exchange identifier correlation, cumulative-versus-incremental fill handling and idempotency rules. Treat replace as cancel-plus-new unless a demonstrated venue requirement justifies another model, and reserve for both orders while both may coexist.
 - Treat timeouts, disconnects, cancel requests and cancel-write completion as non-terminal. Release exposure only after a definitive terminal venue event or authoritative reconciliation.
 - Apply every private event through OMS reconciliation before changing reservations or inventory.
@@ -247,8 +259,10 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 - Notify the bot only after owner-local OMS, reservation, exposure and inventory updates complete.
 - Add the longitudinal reference driver: one injected `SubmitReferenceIntent` causes exactly one
   fixed M3 request on the next Ready callback and never submits it again automatically.
-- Decide recovery authority and crash consistency before networking: stable identities across restart, journal/snapshot ordering and durability guarantees, replay/live-catch-up boundary, local-versus-exchange source-of-truth rules and quarantine of unknown/external orders.
+- Implement ADR-0012's accepted recovery authority and crash-consistency rules: stable identities across restart, journal/snapshot ordering and fake durability, replay/live-catch-up fencing, split source of truth and quarantine of unknown/external orders.
 - Define audit events now, including order, route/account, configuration, metadata and risk-policy provenance; durable storage arrives in M9.
+- Implement ADR-0013's capacity policy and semantic records, then accept ADR-0014 and implement its
+  separate canonical M4 evidence schemas without changing any M1-M3 bytes or fingerprints.
 - Add fake journal/reconciliation adapters and inject a crash at every lifecycle transition.
 
 ### Exit Gate

@@ -177,48 +177,50 @@ no socket, endpoint, credential, private session, or exchange participant. A bou
 session-local write sequencer and its overload policy remain M8 work and cannot become a pre-risk
 service queue.
 
-## 3. Acknowledgements, Rejections and Fills — M4 and Later
+## 3. Private-Order Reconciliation — Accepted M4 Contract
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant X as Exchange
-    participant V as Venue / account session
+    participant X as Authoritative fake source
+    participant V as Private critical admission
     participant O as OMS
     participant R as Reservation / exposure state
     participant I as Position / inventory state
     participant B as Bot / strategy
     participant C as Risk coordinator
 
-    X-->>V: Native acknowledgement, rejection or fill
+    X-->>V: Normalized acknowledgement, rejection, fill or reconciliation row
     Note over V,B: A later data-plane executor turn begins
-    V->>V: Parse, normalize and correlate native message
-    V->>O: Normalized OrderEvent
+    V->>V: Copy complete bounded fact and assign admission order
+    V->>O: Correlate, deduplicate and classify normalized OrderEvent
 
-    alt Exchange acknowledgement
+    alt Acknowledgement
         O->>O: Reconcile acknowledgement with OMS state
         O->>R: Apply acknowledgement consequence, if any
-    else Exchange rejection
+    else Rejection or definitive cancellation
         O->>O: Reconcile rejection with OMS state
         O->>R: Apply rejection consequence to reserved exposure
-    else Fill, including a partial fill
+    else Fill, including fill-before-ack or a gap-closing batch
         O->>O: Reconcile fill with OMS order state
         O->>R: Apply fill consequence to reservation and exposure
         O->>I: Apply fill with bot, desk and firm attribution
     end
 
-    Note over R,I: Owner-local state changes complete before another risk decision
+    Note over R,I: One preflighted no-fail commit completes before another risk decision
     O->>B: on_order_event(event, context)
     R-->>C: Exposure and reservation observation, if any
     I-->>C: Position and inventory observation, if any
     Note over R,C: Control-plane reporting is asynchronous and cannot delay the callback path
 ```
 
-This flow is not implemented by M3. Every later private order or execution event shown here must pass
-through OMS reconciliation. A fill cannot update a reporting ledger while bypassing OMS or the
-immediate position state used by subsequent risk decisions. M4 owns the exact OMS states and
-reservation effects for acknowledgements, rejections, partial fills, cancellations, and
-out-of-order exchange events.
+This flow is not implemented by M3. ADR-0010 accepts the exact M4 normalized event, correlation,
+deduplication, out-of-order fill, OMS, cancellation, and callback rules. ADR-0011 accepts the joint
+OMS/reservation/inventory plan and all seven scope aggregates. ADR-0012 requires live, replayed and
+authoritative order/execution facts to use this same path and dispatches non-order recovery records
+through closed typed restore planners. ADR-0013 fixes admission headroom and canonical evidence. No
+timeout, disconnect, cancel request, cancel-write result, incomplete snapshot, or open-order absence
+releases exposure.
 
 ## 4. Risk Snapshot Publication and Enforcement — M5 and Later
 
@@ -294,12 +296,11 @@ a callback never observes a partial or older authority.
 
 ## Later-Milestone Open Items
 
-- Detailed private-event OMS states, exchange identifiers, correlation rules and event ordering.
-- Reservation transitions for acknowledgements, exchange rejections, partial fills, cancellations,
-  timeouts, reconciliation, and recovery.
 - Exact hierarchical semantics of `ReduceOnly` and `Halted`, including existing-order cancellation and budget reductions below current exposure.
 - Session write sequencing, outbound overload policy and cross-plane reporting backpressure.
-- Reconnect, recovery, exchange reconciliation and persistence behavior.
+- Native authenticated reconnect/query/stream mechanics and durable persistence implementation.
 - Asynchronous-I/O and public venue networking libraries.
 
-Reconnect and reconciliation sequences are intentionally deferred until the OMS state model and recovery policy are decided.
+ADR-0012 fixes the venue-neutral recovery sequence, including acknowledged namespace registration,
+typed replay, one closed catch-up fence, and safe convergence. M7 must prove a native authoritative-
+completeness mechanism; M9 must implement the accepted journal/snapshot protocol durably.

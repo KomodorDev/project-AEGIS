@@ -1,8 +1,8 @@
 # Repository Layout
 
-> **Purpose:** Describe the implemented M1-M3 source/test ownership boundaries, later growth
-> direction, and dependency rules that expose current coupling and prevent empty scaffolding or
-> hidden new cycles.
+> **Purpose:** Describe the implemented M1-M3 and accepted M4 source/test ownership boundaries,
+> later growth direction, and dependency rules that expose current coupling and prevent empty
+> scaffolding or hidden new cycles.
 
 **Status:** The directories used through M3 are implemented and integrated. The intended dependency
 direction has documented M2 and M3 same-library coupling described below; the folder graph is not
@@ -18,7 +18,13 @@ follow [ADR-0006](../decisions/0006-bounded-deterministic-runtime.md) and
 [ADR-0007](../decisions/0007-market-state-validity.md). M3 execution, risk, OMS, fake-initiation,
 and evidence ownership follows
 [ADR-0008](../decisions/0008-canonical-submission-and-fixed-risk.md) and
-[ADR-0009](../decisions/0009-outbound-oms-and-fake-initiation.md).
+[ADR-0009](../decisions/0009-outbound-oms-and-fake-initiation.md). Accepted M4 private-event,
+inventory, account-safety and recovery ownership follows
+[ADR-0010](../decisions/0010-normalized-private-events-and-oms.md),
+[ADR-0011](../decisions/0011-inventory-reservation-and-account-safety.md), and
+[ADR-0012](../decisions/0012-fake-backed-recovery-and-crash-consistency.md), with the shared M4
+capacity and evidence boundary in
+[ADR-0013](../decisions/0013-m4-policy-and-canonical-evidence.md).
 
 Return to the [architecture overview](../architecture.md).
 
@@ -59,20 +65,21 @@ include/aegis/                 src/aegis/
 | `market_data` | Subscription declarations plus M2 recorded fixture, normalized update/event, transactional book, and validity contracts. It contains no venue networking. |
 | `execution` | M1 execution-route declarations plus M3 canonical order/result contracts, owner-local authorization, submission policy/measurement values, exact fake encoding, and the structurally offline fake initiator; real transmission begins in M8. |
 | `configuration` | Atomic startup validation, canonical `AEGISCFG` encoding, SHA-256 identity, and revision provenance across the M1 sections. |
-| `risk` | M3 immutable `AEGISRSP` fixed policy, exact exposure, atomic multi-scope checks, reservations, and exact-once definitive release. Dynamic modes and control-plane policy calculation begin in M5. |
-| `oms` | M3 bounded outbound identity admission and local encoding/initiation state. Private-event reconciliation and the complete exchange lifecycle begin in M4. |
-| `runtime` | M2 policy, bounded admission, deterministic/dedicated drivers, bot/strategy ownership, Ready/state callbacks, and M3 fake-submission composition, private coordinator, diagnostics, evidence projection, and capability-limited bot context. |
-| `trace` | Separate bounded M1 `AEGISTRS`, M2 `AEGISRTS`, and M3 `AEGISSTS` canonical evidence; external reporting and persistence are excluded. |
+| `risk` | M3 immutable `AEGISRSP` fixed policy, exact exposure, atomic multi-scope reservations and exact-once definitive release; M4 adds cumulative residual conversion and reads owner-local confirmed inventory. Dynamic modes and control-plane policy begin in M5. |
+| `oms` | M3 bounded outbound identity admission and local initiation state; M4 owns normalized private identities/events, exact correlation/deduplication, the extended lifecycle, cancellation projection and reconciliation plan. |
+| `inventory` | M4 owner-local signed confirmed position, seven-scope projections and separately unattributed account exposure. P&L, fees, settlement and durable ownership remain later work. |
+| `recovery` | M4 bounded fake journal/snapshot/reconciliation values and safe-convergence coordinator contracts. No filesystem, database, credential, session or native query belongs here; M9 implements durability. |
+| `runtime` | M2 policy, bounded admission, deterministic/dedicated drivers, bot/strategy ownership and Ready/state callbacks; M3 fake submission; M4 private critical admission, account gating, order/recovery callbacks and longitudinal intent composition. |
+| `trace` | Separate bounded M1 `AEGISTRS`, M2 `AEGISRTS`, M3 `AEGISSTS`, and versioned M4 private/audit/recovery canonical evidence; external reporting and real persistence are excluded. |
 
 Component-owned types stay with their component. A normalized market event will belong to
 `market_data`, an order request will belong to `execution`, and a risk mode will belong to `risk`.
 A type moves to `model` only when it is genuinely neutral and shared.
 
-The expected later areas remain proposed:
+The remaining venue-native area stays proposed:
 
 | Proposed area | Intended responsibility |
 |---|---|
-| `inventory` | Fill-derived positions, exposure attribution, and bot/desk/firm aggregation. Durable ledger ownership and P&L placement remain open. |
 | `venues/<venue>` | Venue-native connectivity, parsing, symbol mapping, authentication, reconciliation, and order encoding. |
 
 ## Dependency Rules
