@@ -79,11 +79,47 @@ code, tests, build files, scripts and Markdown documentation.
 
 ### Logical-block comments
 
+These requirements are a project-specific application of the C++ Core Guidelines on
+[function specifications][cpp-functions], [class invariants][cpp-class-invariants],
+[non-redundant comments][cpp-comment-code], [intent comments][cpp-comment-intent],
+[crisp comments][cpp-comment-crisp], [preconditions][cpp-preconditions] and
+[postconditions][cpp-postconditions], including the preference for
+[checkable preconditions][cpp-expects] and [checkable postconditions][cpp-ensures]. Apply them to
+every language used in this repository.
+
+[cpp-functions]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#s-functions
+[cpp-class-invariants]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#rc-struct
+[cpp-comment-code]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#rl-comments
+[cpp-comment-intent]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#rl-comments-intent
+[cpp-comment-crisp]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#rl-comments-crisp
+[cpp-preconditions]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#ri-pre
+[cpp-postconditions]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#ri-post
+[cpp-expects]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#ri-expects
+[cpp-ensures]: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html#ri-ensures
+
 - Put a concise explanatory comment immediately above each meaningful logical block: a public type
   or contract group, a non-trivial function, an algorithm phase, a validation phase, a canonical
   encoding section, a test fixture, or a group of tests proving one behavior.
-- Explain intent, invariants, ordering, failure policy or architectural reason. Do not narrate
-  obvious syntax or restate the following line.
+- Give every class-like type, function and method a description that states its purpose at the level
+  of its user or caller. For a class-like type, state the responsibility it owns and its boundary.
+  For a function or method, state the operation it performs and its intended outcome.
+- When relevant, a class-like type's description must also state its invariant—a condition
+  established by construction, assumed at entry to public operations and reestablished before
+  those operations return—plus important ownership, lifetime, valid-state or thread-safety
+  guarantees. State an invariant shared by all methods once in the class description; do not repeat
+  it for every method.
+- When relevant, a function or method's description must also explain the meaning and constraints
+  of its inputs; its observable behavior, side effects, state changes or ordering; its return value,
+  other outputs or resulting state; its preconditions and postconditions; and its caller-relevant
+  failure behavior, including how an error is reported. A precondition is a requirement that must
+  hold before a call; a postcondition is a guarantee that must hold after the documented form of
+  completion.
+- Prefer precise names, types, qualifiers and machine-checkable contracts over prose when they can
+  express a guarantee completely. Information is relevant to the description when it is needed to
+  use or review the construct correctly and is not already clear from its name, types, qualifiers,
+  return type or formal contracts. A concise sentence can cover several items; do not add empty
+  `Inputs:` or `Outputs:` sections when there is nothing useful to say. State intent and guarantees,
+  not obvious syntax, a copy of the declaration or incidental implementation steps.
 - Split long algorithms into named phases with comments wherever a reviewer must otherwise infer
   why the steps occur in that order.
 - In tests, explain the production contract or regression risk being proved, not the mechanics of
@@ -112,8 +148,13 @@ Apply the boundaries as follows:
 - In Python, leave at least one blank line immediately before every divider. Follow Ruff's
   formatter-native two blank lines around top-level definitions rather than forcing exactly one
   there; nested dividers normally retain one blank line.
-- Put the opening divider first and the explanatory comment immediately after it. The description
-  must explain responsibility, invariant or intent before the declaration or code it governs.
+- Put the opening divider first and the explanatory comment immediately after it. For a C or C++
+  class-like type, function or method, this comment is the required description and must satisfy the
+  logical-block comment rules above.
+- In Python, a divider comment and a normal docstring may satisfy the description rules together.
+  Put the caller-facing contract in the docstring and use the divider comment for a complementary
+  responsibility, invariant or architectural reason; do not repeat the same sentences in both. If
+  the construct has no docstring, the divider comment alone must satisfy all applicable rules.
 - Close every governed block with the same divider, separated from the governed code by the required
   blank line. The final class, function or algorithm phase in a file must also have an explicit
   closing divider; reaching a C++ namespace close, a Python dedent or end of file is not an implicit
@@ -148,7 +189,7 @@ class OrderBook final {
 public:
 
   // --------------------------------------------------------
-  // Validates and inserts one order without partial mutation.
+  // Inserts the order when valid; otherwise returns a validation error without modifying the book.
   [[nodiscard]] Result<void> add(Order order);
 
   // --------------------------------------------------------
@@ -157,7 +198,7 @@ public:
 // ########################################################################
 
 // --------------------------------------------------------
-// Validates and inserts one order without partial mutation.
+// Inserts the order when valid; otherwise returns a validation error without modifying the book.
 Result<void> OrderBook::add(Order order) {
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -185,14 +226,14 @@ Python example:
 
 
 # ########################################################################
-# Owns validated orders and preserves canonical insertion order.
+# Keeps invalid orders outside the owned sequence by centralizing validation.
 class OrderBook:
-    """Own a validated order collection in canonical insertion order."""
+    """Own validated orders in canonical insertion order."""
 
     # --------------------------------------------------------
-    # Validates and inserts one order without partial mutation.
+    # Prevents partial book mutation by validating before insertion.
     def add(self, order: Order) -> None:
-        """Validate and insert one order without partial mutation."""
+        """Insert the order when valid; otherwise raise without modifying the book."""
 
         # ++++++++++++++++++++++++++++++++++++++++
         # Reject invalid input before changing owned state.
