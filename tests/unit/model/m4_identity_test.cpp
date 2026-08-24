@@ -57,7 +57,7 @@ template <typename Identity> void require_opaque_bounds(std::string_view field) 
 
 // --------------------------------------------------------
 // Construct a visible deterministic namespace so byte-layout expectations stay test-authored.
-[[nodiscard]] aegis::model::OrderNamespace test_namespace(std::uint8_t seed) {
+[[nodiscard]] aegis::model::OrderNamespace create_order_namespace_from_seed(std::uint8_t seed) {
   aegis::model::OrderNamespace::Bytes bytes{};
   for (std::size_t index = 0U; index < bytes.size(); ++index) {
     bytes[index] = static_cast<std::uint8_t>(seed + static_cast<std::uint8_t>(index));
@@ -103,7 +103,7 @@ TEST_CASE("M4 opaque private identity comparison is deterministic") {
 // --------------------------------------------------------
 // Namespace-counter identities expose their accepted 16-byte prefix and big-endian counter bytes.
 TEST_CASE("M4 namespace counter identities use one canonical 24 byte profile") {
-  const auto order_namespace = test_namespace(0x10U);
+  const auto order_namespace = create_order_namespace_from_seed(0x10U);
   const auto runtime_epoch = aegis::recovery::RuntimeEpochId::from_parts(order_namespace, 0x0102U);
   REQUIRE(runtime_epoch);
   STATIC_REQUIRE(aegis::recovery::RuntimeEpochId::byte_size == 24U);
@@ -162,8 +162,8 @@ TEST_CASE("M4 namespace counter identities use one canonical 24 byte profile") {
 // --------------------------------------------------------
 // Reconciliation and cancel identities append their counters without changing retained parents.
 TEST_CASE("M4 composite identities preserve complete parent identities") {
-  const auto first_namespace = test_namespace(0x20U);
-  const auto second_namespace = test_namespace(0x40U);
+  const auto first_namespace = create_order_namespace_from_seed(0x20U);
+  const auto second_namespace = create_order_namespace_from_seed(0x40U);
   const auto first_epoch = aegis::recovery::RuntimeEpochId::from_parts(first_namespace, 1U).value();
   const auto second_epoch =
       aegis::recovery::RuntimeEpochId::from_parts(second_namespace, 1U).value();
@@ -217,7 +217,7 @@ TEST_CASE("M4 composite identities preserve complete parent identities") {
 // --------------------------------------------------------
 // Move-only providers emit UINT64_MAX once, then preserve subsystem-specific sticky exhaustion.
 TEST_CASE("M4 identity providers never wrap or duplicate terminal counters") {
-  const auto order_namespace = test_namespace(0x50U);
+  const auto order_namespace = create_order_namespace_from_seed(0x50U);
   auto runtime_result = aegis::recovery::RuntimeEpochIdProvider::create(
       order_namespace, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(runtime_result);
@@ -261,7 +261,7 @@ TEST_CASE("M4 identity providers never wrap or duplicate terminal counters") {
 // --------------------------------------------------------
 // Cancel and reconciliation providers bind every emitted ordinal to their complete typed parents.
 TEST_CASE("M4 composite identity providers retain parent scope and sticky exhaustion") {
-  const auto order_namespace = test_namespace(0x60U);
+  const auto order_namespace = create_order_namespace_from_seed(0x60U);
   const auto runtime_epoch =
       aegis::recovery::RuntimeEpochId::from_parts(order_namespace, 1U).value();
   auto order_provider = aegis::model::DeterministicOrderIdProvider::create(order_namespace).value();
