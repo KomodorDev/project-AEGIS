@@ -53,7 +53,8 @@ struct ReferenceIntentIdTag {
 };
 
 // ########################################################################
-// Expand one-based recovery ordinals with the shared validation and exhaustion profile.
+// Interesting syntax: this local macro gives every one-based recovery ordinal the same validation
+// kernel while preserving a distinct tag, field, and exhaustion profile for each public type.
 #define AEGIS_RECOVERY_ORDINAL_TAG(TagName, FieldName)                                             \
   struct TagName {                                                                                 \
     static constexpr std::string_view field = FieldName;                                           \
@@ -72,7 +73,7 @@ AEGIS_RECOVERY_ORDINAL_TAG(JournalSequenceTag, "journal_sequence");
 AEGIS_RECOVERY_ORDINAL_TAG(SnapshotCommitOrdinalTag, "snapshot_commit_ordinal");
 
 // ########################################################################
-// Audit ordinal fixes lineage-global canonical audit order.
+// Audit ordinal fixes canonical audit order within one runtime epoch.
 AEGIS_RECOVERY_ORDINAL_TAG(AuditOrdinalTag, "audit_ordinal");
 
 // ########################################################################
@@ -120,6 +121,8 @@ public:
 
   // --------------------------------------------------------
   // Validate the local ordinal before appending it to the complete runtime epoch.
+  // Interesting syntax: the constrained integer parameter rejects floating-point and unsupported
+  // caller types before the explicit range and nonzero checks run.
   template <model::detail::CheckedIntegerInput Counter>
   [[nodiscard]] static model::Result<ReconciliationEpochId>
   from_parts(const RuntimeEpochId& runtime_epoch_id, Counter counter) {
@@ -189,6 +192,8 @@ public:
 
   // --------------------------------------------------------
   // Restore a checked next ordinal without permitting implicit negative conversion.
+  // Interesting syntax: the constrained integer parameter keeps signed and unsigned inputs
+  // available for explicit validation while excluding unsupported caller types at compile time.
   template <model::detail::CheckedIntegerInput Counter>
   [[nodiscard]] static model::Result<ReconciliationEpochIdProvider>
   create(RuntimeEpochId runtime_epoch_id, Counter initial_counter) {
@@ -207,6 +212,8 @@ public:
 
   // --------------------------------------------------------
   // Transfer stream ownership and poison the moved-from provider.
+  // Interesting syntax: the explicit move operations copy the small counter state, then mark the
+  // source exhausted so moving cannot duplicate live identity authority.
   ReconciliationEpochIdProvider(ReconciliationEpochIdProvider&& other) noexcept
       : runtime_epoch_id_{other.runtime_epoch_id_}, next_counter_{other.next_counter_},
         exhausted_{other.exhausted_} {
