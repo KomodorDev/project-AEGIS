@@ -1,22 +1,22 @@
 # M3 Exit Evidence
 
-> **Purpose:** Record the locally complete canonical-submission implementation, deterministic exit
-> proof, named workload smoke evidence, forbidden-capability audit, and published-but-unmerged state.
+> **Purpose:** Record the canonical-submission implementation, deterministic exit proof, named
+> workload smoke evidence, forbidden-capability audit, publication, and completed integration.
 
-**Status:** M3 is locally complete on `codex/m3-canonical-submission` at clean implementation and
+**Status:** M3 was verified on `codex/m3-canonical-submission` at clean implementation and
 benchmark producer `27087d4da423546041295de43e7fa2fb31425b63`, with tree
 `2e339a5d97bdc9b6bd4522e754c6052783cb01b4`. The branch starts from the integrated M2 baseline
 `d7733bb16a52d5ec954338f861d798d8c6620dad` and reconciles the later comment-only CI `dev` tip
 `94598c38a750d40f5e10030ebf33706f459bff17` before publication. Normal, formatting, ASan+UBSan,
 TSan, Release, deterministic replay, forbidden-capability, and M0/M2/M3 benchmark-evidence checks
-passed locally as recorded below.
+passed locally as recorded below. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
+later merged the final feature head `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` unchanged into
+`dev` as `962eb8602c13c1930a74c59232f96920482edb2b` on 2026-08-23.
 
-Publication is distinct from integration: the feature branch is pushed and
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) is open against `dev`, but M3 is not
-merged. The integrated capability baseline therefore remains M2. Remote CI status is tracked by the
-pull request and is not used to replace the revision-specific local record below. The recorded M3
-performance bundle is valid smoke evidence from uncontrolled host conditions; it makes no
-`REF-MAC-01` qualification or provisional-threshold claim.
+Publication, integration, and producer evidence remain distinct facts. The completed merge records
+repository integration but does not replace or reinterpret the revision-specific local record
+below. The recorded M3 performance bundle is valid smoke evidence from uncontrolled host
+conditions; it makes no `REF-MAC-01` qualification or provisional-threshold claim.
 
 ## Dependency and revision record
 
@@ -27,13 +27,18 @@ performance bundle is valid smoke evidence from uncontrolled host conditions; it
 | `dev` tip reconciled before M3 publication | `94598c38a750d40f5e10030ebf33706f459bff17` from comment-only CI [PR #9](https://github.com/KomodorDev/project-AEGIS/pull/9) |
 | M3 branch | `codex/m3-canonical-submission` |
 | M3 pull request | [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev` |
+| Final M3 feature head | `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` |
+| Final M3 feature tree | `f58410737c473bc3992d7cfd7c934d41db1d11cf` |
 | M3 implementation range | `d7733bb16a52d5ec954338f861d798d8c6620dad..27087d4da423546041295de43e7fa2fb31425b63` |
 | Clean implementation and benchmark producer | `27087d4da423546041295de43e7fa2fb31425b63` |
 | Producer tree | `2e339a5d97bdc9b6bd4522e754c6052783cb01b4` |
 | Clean worktree fingerprint | `64d17613312d21071e25a1816ad9abe920d87ef98ba1596dad8d2c469b7ed886` |
 | Evidence captured | 2026-08-22 |
-| Publication state | Branch pushed; PR #10 open against `dev` |
-| Integration state | Not merged; `dev` remains at the M2 capability baseline |
+| Publication state | Branch pushed; PR #10 published against `dev` |
+| Integration merge | `962eb8602c13c1930a74c59232f96920482edb2b` on 2026-08-23 |
+| Integration parents | `94598c38a750d40f5e10030ebf33706f459bff17` and `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` |
+| Integration tree | `f58410737c473bc3992d7cfd7c934d41db1d11cf`; identical to the final feature tree |
+| Integration state | Merged into `dev`; integrated capability baseline is M3 |
 
 The evidence is revision-specific. A later documentation-only commit may describe this producer but
 does not move its source, test, executable, or benchmark identity.
@@ -261,4 +266,7 @@ private session, or real order transmission is present in M3.
 - Publication was explicitly authorized on 2026-08-22; the branch is pushed and PR #10 targets
   `dev`, never `main`.
 - Remote CI and review status are tracked on PR #10 and do not rewrite the local producer evidence.
-- Until PR #10 merges, the repository's integrated capability baseline remains M2.
+- PR #10 merged final feature head `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` into `dev` as
+  `962eb8602c13c1930a74c59232f96920482edb2b` on 2026-08-23.
+- The merge tree exactly matches the final feature tree, so integration introduced no content
+  change. The repository's integrated capability baseline is M3.

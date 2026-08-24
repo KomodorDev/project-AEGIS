@@ -1,13 +1,13 @@
 # Runtime Flows
 
-> **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 local submission
+> **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 submission
 > boundaries sequence complete work without implying hidden thread hops or partial state.
 
-**Status: Implemented M2 market flow and locally implemented M3 local-submission flow.** M2
+**Status: Implemented and integrated M2 market flow and M3 local-submission flow.** M2
 implements the recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic,
 and replay branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and
-deterministic fake boundaries, and the M3 feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements Flow 2. Private sessions,
+deterministic fake boundaries. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
+integrated Flow 2 into `dev` as merge commit `962eb8602c13c1930a74c59232f96920482edb2b`. Private sessions,
 exchange events, dynamic risk, and recovery remain later work.
 
 Return to the [architecture overview](../architecture.md) or read
@@ -81,7 +81,7 @@ sequenceDiagram
 ```
 
 State transitions use a separate `on_market_state` callback and never carry a tradable book. The M2
-observation-only composition installs no submission authority. The locally implemented M3
+observation-only composition installs no submission authority. The integrated M3
 composition adds only the bot-bound fake submission boundary shown in Flow 2, without adding an
 executor hop inside a callback.
 
@@ -90,10 +90,11 @@ dedicated drivers invoke the same turn processor; the M2 reference scenario prov
 callback vectors, structured diagnostics, `AEGISRTS` records, canonical bytes, and digest agree
 exactly.
 
-## 2. Order Submission — Locally Implemented M3
+## 2. Order Submission — Integrated M3
 
 The M3 feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements this complete direct flow.
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) implements this complete direct flow
+and was merged unchanged into `dev` as `962eb8602c13c1930a74c59232f96920482edb2b`.
 The [M3 exit-evidence record](../milestones/m3-exit-evidence.md) pins the ordinary result matrix,
 exact traces, retained state, and same-turn proof. No M3 submission component or repository fixture
 in this flow has live communication capability.
@@ -176,48 +177,50 @@ no socket, endpoint, credential, private session, or exchange participant. A bou
 session-local write sequencer and its overload policy remain M8 work and cannot become a pre-risk
 service queue.
 
-## 3. Acknowledgements, Rejections and Fills — M4 and Later
+## 3. Private-Order Reconciliation — Accepted M4 Contract
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant X as Exchange
-    participant V as Venue / account session
+    participant X as Authoritative fake source
+    participant V as Private critical admission
     participant O as OMS
     participant R as Reservation / exposure state
     participant I as Position / inventory state
     participant B as Bot / strategy
     participant C as Risk coordinator
 
-    X-->>V: Native acknowledgement, rejection or fill
+    X-->>V: Normalized acknowledgement, rejection, fill or reconciliation row
     Note over V,B: A later data-plane executor turn begins
-    V->>V: Parse, normalize and correlate native message
-    V->>O: Normalized OrderEvent
+    V->>V: Copy complete bounded fact and assign admission order
+    V->>O: Correlate, deduplicate and classify normalized OrderEvent
 
-    alt Exchange acknowledgement
+    alt Acknowledgement
         O->>O: Reconcile acknowledgement with OMS state
         O->>R: Apply acknowledgement consequence, if any
-    else Exchange rejection
+    else Rejection or definitive cancellation
         O->>O: Reconcile rejection with OMS state
         O->>R: Apply rejection consequence to reserved exposure
-    else Fill, including a partial fill
+    else Fill, including fill-before-ack or a gap-closing batch
         O->>O: Reconcile fill with OMS order state
         O->>R: Apply fill consequence to reservation and exposure
         O->>I: Apply fill with bot, desk and firm attribution
     end
 
-    Note over R,I: Owner-local state changes complete before another risk decision
+    Note over R,I: One preflighted no-fail commit completes before another risk decision
     O->>B: on_order_event(event, context)
     R-->>C: Exposure and reservation observation, if any
     I-->>C: Position and inventory observation, if any
     Note over R,C: Control-plane reporting is asynchronous and cannot delay the callback path
 ```
 
-This flow is not implemented by M3. Every later private order or execution event shown here must pass
-through OMS reconciliation. A fill cannot update a reporting ledger while bypassing OMS or the
-immediate position state used by subsequent risk decisions. M4 owns the exact OMS states and
-reservation effects for acknowledgements, rejections, partial fills, cancellations, and
-out-of-order exchange events.
+This flow is not implemented by M3. ADR-0010 accepts the exact M4 normalized event, correlation,
+deduplication, out-of-order fill, OMS, cancellation, and callback rules. ADR-0011 accepts the joint
+OMS/reservation/inventory plan and all seven scope aggregates. ADR-0012 requires live, replayed and
+authoritative order/execution facts to use this same path and dispatches non-order recovery records
+through closed typed restore planners. ADR-0013 fixes admission headroom and canonical evidence. No
+timeout, disconnect, cancel request, cancel-write result, incomplete snapshot, or open-order absence
+releases exposure.
 
 ## 4. Risk Snapshot Publication and Enforcement — M5 and Later
 
@@ -293,12 +296,11 @@ a callback never observes a partial or older authority.
 
 ## Later-Milestone Open Items
 
-- Detailed private-event OMS states, exchange identifiers, correlation rules and event ordering.
-- Reservation transitions for acknowledgements, exchange rejections, partial fills, cancellations,
-  timeouts, reconciliation, and recovery.
 - Exact hierarchical semantics of `ReduceOnly` and `Halted`, including existing-order cancellation and budget reductions below current exposure.
 - Session write sequencing, outbound overload policy and cross-plane reporting backpressure.
-- Reconnect, recovery, exchange reconciliation and persistence behavior.
+- Native authenticated reconnect/query/stream mechanics and durable persistence implementation.
 - Asynchronous-I/O and public venue networking libraries.
 
-Reconnect and reconciliation sequences are intentionally deferred until the OMS state model and recovery policy are decided.
+ADR-0012 fixes the venue-neutral recovery sequence, including acknowledged namespace registration,
+typed replay, one closed catch-up fence, and safe convergence. M7 must prove a native authoritative-
+completeness mechanism; M9 must implement the accepted journal/snapshot protocol durably.

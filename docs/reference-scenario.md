@@ -52,9 +52,20 @@ Its default mode is observe-only. Every callback produces one runtime-owned cano
 containing the callback ordinal, readiness state, normalized best bid/ask fields when coherent, and
 relevant metadata/book revisions. Non-ready input never creates an order intent. M4's longitudinal
 fake-lifecycle replay adds one `SubmitReferenceIntent`: the strategy submits the
-fixed M3 request on the next `Ready` callback exactly once and records all later callbacks without
-submitting again. M3 owns the request's supported vocabulary and economics; it does not add the
-`SubmitReferenceIntent` command type.
+fixed M3 request below on the next `Ready` callback exactly once and records all later callbacks
+without submitting again. The intent is consumed for local rejection, local initiation or
+uncertainty. Recovery marks an ambiguous consumption/call crash window outcome unknown and never
+retries it. ADR-0012 owns this command; M3's request vocabulary and direct path remain unchanged.
+
+| One-shot request field | Fixed value |
+|---|---|
+| Route | `route.deribit-testnet-btc-perpetual` |
+| Instrument | `BTC-USD-PERPETUAL` |
+| Side | Buy |
+| Type | Limit |
+| Time in force | GTC |
+| Price | `100.0` |
+| Quantity | `2` |
 
 | Stage | Behavior |
 |---|---|
@@ -72,8 +83,9 @@ submitting again. M3 owns the request's supported vocabulary and economics; it d
 
 No stage silently retries an ambiguous submission. A market-data subscription never implies
 execution permission. This table fixes externally visible scenario behavior, including the
-implemented M3 contract, but not the still-deferred M4–M11 private-protocol, lifecycle, dynamic-risk,
-recovery, or operator-interface designs owned by those milestones.
+implemented M3 contract and accepted venue-neutral M4 lifecycle/recovery contract. Native private
+protocol, dynamic risk, durable recovery and operator-interface designs remain owned by M7, M5,
+M9 and M11 respectively.
 
 ## M2 deterministic replay
 

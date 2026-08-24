@@ -32,19 +32,23 @@ Supporting documents provide more detail without turning conceptual diagrams int
 - [ADR-0007: Market-state validity](decisions/0007-market-state-validity.md)
 - [ADR-0008: Canonical bot-bound submission and fixed risk](decisions/0008-canonical-submission-and-fixed-risk.md)
 - [ADR-0009: Outbound OMS and conservative fake initiation](decisions/0009-outbound-oms-and-fake-initiation.md)
+- [ADR-0010: Normalized private events and extended OMS](decisions/0010-normalized-private-events-and-oms.md)
+- [ADR-0011: Inventory, reservation conversion and account safety](decisions/0011-inventory-reservation-and-account-safety.md)
+- [ADR-0012: Fake-backed recovery and crash consistency](decisions/0012-fake-backed-recovery-and-crash-consistency.md)
+- [ADR-0013: M4 capacity policy and canonical evidence semantics](decisions/0013-m4-policy-and-canonical-evidence.md)
 - [M0 reference scenario](reference-scenario.md)
 - [Initial correctness and performance budgets](quality-budgets.md)
 - [Proposed implementation roadmap](implementation-roadmap.md)
 - [M1 exit evidence](milestones/m1-exit-evidence.md)
 - [M2 exit evidence](milestones/m2-exit-evidence.md)
-- [M3 local exit evidence](milestones/m3-exit-evidence.md)
+- [M3 exit evidence](milestones/m3-exit-evidence.md)
 
 ## System Architecture
 
 The diagram groups components by latency responsibility. Solid arrows show the immediate data and
 order path; dotted arrows show asynchronous observations or complete snapshot publication.
-It shows the accepted end-state relationships, not the capability currently enabled by the local
-M3 build. The locally implemented slice stops after OMS admission, exact fake encoding, and an
+It shows the accepted end-state relationships, not only the capability enabled by the integrated
+M3 build. The implemented slice stops after OMS admission, exact fake encoding, and an
 in-memory fake accepted-slot copy; venue sessions, native encoding, exchange events, and real
 transmission remain later milestones.
 
@@ -411,14 +415,19 @@ A definite pre-acceptance failure releases its reservation exactly once, while b
 uncertainty retain conservative exposure. Order acknowledgements, rejections and fills begin in M4
 and are processed asynchronously on later turns of the same executor. They reconcile OMS state
 before reservations and immediate inventory are updated and before the originating bot receives its
-order event. Detailed private-event transitions remain **Open** for M4.
+order event. ADR-0010 fixes the private-event identities, complete transition table, correlation,
+fill ordering, idempotency, cancellation projection, and callback contract. ADR-0011 fixes atomic
+reservation-to-inventory conversion and account safety; ADR-0012 fixes fake-backed recovery; and
+ADR-0013 fixes every M4 capacity and semantic evidence record. A required ADR-0014 will fix the
+exact new evidence bytes before an encoder is implemented.
 
-**Local implementation status (2026-08-22):** The complete route → canonical validation → identity
-→ fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented
-and verified on the M3 feature branch published as
-[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10), targeting `dev`. Its [M3 exit-evidence
-record](milestones/m3-exit-evidence.md) binds deterministic replay and smoke timing to clean producer
-`27087d4da423546041295de43e7fa2fb31425b63`. M3 is not merged, and the diagram's live venue/session
+**Integrated M3 status (2026-08-23):** The complete route → canonical validation → identity →
+fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented.
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) merged final feature head
+`2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` unchanged into `dev` as
+`962eb8602c13c1930a74c59232f96920482edb2b`. The [M3 exit-evidence
+record](milestones/m3-exit-evidence.md) continues to bind deterministic replay and smoke timing to
+clean producer `27087d4da423546041295de43e7fa2fb31425b63`. The diagram's live venue/session
 portion remains unimplemented.
 
 ## Hierarchical Risk Budgets
