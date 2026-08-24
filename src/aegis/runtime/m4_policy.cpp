@@ -231,7 +231,7 @@ public:
 
   // --------------------------------------------------------
   // Transfer the completed byte vector only after the caller has appended every field.
-  [[nodiscard]] std::vector<std::byte> take() && { return std::move(bytes_); }
+  [[nodiscard]] std::vector<std::byte> take_canonical_bytes() && { return std::move(bytes_); }
 
   // --------------------------------------------------------
   // Hide mutable writer storage from policy callers.
@@ -281,7 +281,7 @@ encode_policy(const CanonicalInputs& inputs, const M4PolicyCapacities& capacitie
   writer.append_u64(capacities.max_namespace_registrations);
   writer.append_u64(capacities.max_recovery_notifications);
   writer.append_u64(capacities.max_reference_intents);
-  auto bytes = std::move(writer).take();
+  auto bytes = std::move(writer).take_canonical_bytes();
   if (bytes.size() != canonical_m4_policy_byte_size) {
     return model::Result<std::vector<std::byte>>::failure(
         DomainError::at_field(DomainErrorCode::EncodingOverflow, "m4_policy"));
