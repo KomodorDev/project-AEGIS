@@ -82,7 +82,8 @@ constexpr std::array<CapacityCase, 26U> capacity_cases{{
 
 // --------------------------------------------------------
 // Parse exact fixture identifiers and fail immediately for an authored test defect.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
   auto parsed = Identifier::parse(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M4 policy fixture"};
@@ -91,19 +92,20 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 }
 
 // --------------------------------------------------------
-// Seal the unchanged M3 public-source policy against one supplied startup configuration.
+// Create the unchanged sealed M3 runtime policy or throw for an invalid test fixture.
 [[nodiscard]] aegis::runtime::RuntimePolicy
-runtime_policy(const aegis::configuration::StartupConfiguration& configuration) {
+create_runtime_policy_or_throw(const aegis::configuration::StartupConfiguration& configuration) {
   auto created = aegis::runtime::RuntimePolicy::create(
-      configuration, aegis::runtime::RuntimePolicyParams{
-                         aegis::runtime::RuntimePolicyLimits{2U, 4096U, 64U, 20U, 5'000'000'000U,
-                                                             4U, 64U, 128U, 32U, 100'000U},
-                         {{id<aegis::model::MarketSourceId>("source.deribit-btc-perpetual"),
-                           id<aegis::model::VenueId>("deribit"),
-                           id<aegis::model::InstrumentId>("BTC-USD-PERPETUAL"),
-                           id<aegis::model::VenueInstrumentId>("BTC-PERPETUAL"),
-                           aegis::model::InstrumentMetadataRevision::initial()}},
-                     });
+      configuration,
+      aegis::runtime::RuntimePolicyParams{
+          aegis::runtime::RuntimePolicyLimits{2U, 4096U, 64U, 20U, 5'000'000'000U, 4U, 64U, 128U,
+                                              32U, 100'000U},
+          {{parse_identifier_or_throw<aegis::model::MarketSourceId>("source.deribit-btc-perpetual"),
+            parse_identifier_or_throw<aegis::model::VenueId>("deribit"),
+            parse_identifier_or_throw<aegis::model::InstrumentId>("BTC-USD-PERPETUAL"),
+            parse_identifier_or_throw<aegis::model::VenueInstrumentId>("BTC-PERPETUAL"),
+            aegis::model::InstrumentMetadataRevision::initial()}},
+      });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M4 policy fixture"};
   }
@@ -111,10 +113,11 @@ runtime_policy(const aegis::configuration::StartupConfiguration& configuration) 
 }
 
 // --------------------------------------------------------
-// Build the exact deterministic M3 fake submission stack so M4 sees only sealed public policies.
+// Create the deterministic M3 submission stack or throw before an invalid fixture can be used.
 [[nodiscard]] std::unique_ptr<aegis::runtime::SubmissionCoordinator>
-submission_coordinator(const aegis::configuration::StartupConfiguration& configuration,
-                       const aegis::runtime::RuntimePolicy& policy) {
+create_submission_coordinator_or_throw(
+    const aegis::configuration::StartupConfiguration& configuration,
+    const aegis::runtime::RuntimePolicy& policy) {
   constexpr std::uint64_t maximum_attempts = 10U;
   auto encoder = aegis::execution::FakeEncoderScript::create(
       aegis::execution::FakeEncodingAction::Encode, maximum_attempts,
@@ -153,14 +156,16 @@ submission_coordinator(const aegis::configuration::StartupConfiguration& configu
 }
 
 // --------------------------------------------------------
-// Construct the complete real authority while optionally changing its sealed configuration hash.
-[[nodiscard]] PolicyAuthority authority(bool add_peer_subscription = false) {
+// Create complete sealed authority or throw; the optional peer deliberately changes its hash.
+[[nodiscard]] PolicyAuthority create_policy_authority_or_throw(bool add_peer_subscription = false) {
   auto params = aegis::test_support::m3_enabled_two_firm_configuration_params();
   if (add_peer_subscription) {
     params.subscriptions.push_back(aegis::market_data::Subscription{
-        id<aegis::model::SubscriptionId>("subscription.deribit-peer-btc-perpetual-book"),
-        id<aegis::model::BotId>("bot.subsidiary-reference"), id<aegis::model::VenueId>("deribit"),
-        id<aegis::model::InstrumentId>("BTC-USD-PERPETUAL"),
+        parse_identifier_or_throw<aegis::model::SubscriptionId>(
+            "subscription.deribit-peer-btc-perpetual-book"),
+        parse_identifier_or_throw<aegis::model::BotId>("bot.subsidiary-reference"),
+        parse_identifier_or_throw<aegis::model::VenueId>("deribit"),
+        parse_identifier_or_throw<aegis::model::InstrumentId>("BTC-USD-PERPETUAL"),
         aegis::market_data::SubscriptionChannel::OrderBook});
   }
   auto configured = aegis::configuration::StartupConfiguration::create(std::move(params));
@@ -168,14 +173,14 @@ submission_coordinator(const aegis::configuration::StartupConfiguration& configu
     throw std::logic_error{"invalid startup configuration in M4 policy fixture"};
   }
   auto configuration = std::move(configured).value();
-  auto runtime = runtime_policy(configuration);
-  auto submission = submission_coordinator(configuration, runtime);
+  auto runtime = create_runtime_policy_or_throw(configuration);
+  auto submission = create_submission_coordinator_or_throw(configuration, runtime);
   return PolicyAuthority{std::move(configuration), std::move(runtime), std::move(submission)};
 }
 
 // --------------------------------------------------------
 // Values 101 through 125 plus one make field order visible while satisfying every relationship.
-[[nodiscard]] aegis::runtime::M4PolicyCapacities golden_capacities() {
+[[nodiscard]] aegis::runtime::M4PolicyCapacities golden_m4_policy_capacities() {
   return aegis::runtime::M4PolicyCapacities{
       101U, 102U, 103U, 104U, 105U, 106U, 107U, 108U, 109U, 110U, 111U, 112U, 113U,
       114U, 115U, 116U, 117U, 118U, 119U, 120U, 121U, 122U, 123U, 124U, 125U, 1U,
@@ -184,7 +189,7 @@ submission_coordinator(const aegis::configuration::StartupConfiguration& configu
 
 // --------------------------------------------------------
 // A coherent generic policy supports exhaustive mutation without selecting a reference fixture.
-[[nodiscard]] aegis::runtime::M4PolicyCapacities ordinary_capacities() {
+[[nodiscard]] aegis::runtime::M4PolicyCapacities ordinary_m4_policy_capacities() {
   return aegis::runtime::M4PolicyCapacities{
       32U, 32U, 32U, 32U, 32U, 32U, 32U, 4U,  32U, 32U, 32U, 32U, 32U,
       32U, 32U, 32U, 32U, 32U, 32U, 8U,  16U, 16U, 4U,  5U,  32U, 3U,
@@ -192,9 +197,9 @@ submission_coordinator(const aegis::configuration::StartupConfiguration& configu
 }
 
 // --------------------------------------------------------
-// Call the sole public factory with policies retained by the real M3 composition root.
+// Create an M4 policy result through the sole public factory and retained M3 authority.
 [[nodiscard]] aegis::model::Result<aegis::runtime::M4Policy>
-create_policy(const PolicyAuthority& sealed, aegis::runtime::M4PolicyCapacities capacities) {
+create_m4_policy(const PolicyAuthority& sealed, aegis::runtime::M4PolicyCapacities capacities) {
   return aegis::runtime::M4Policy::create(sealed.configuration, sealed.runtime_policy,
                                           sealed.submission->reservations().policy(),
                                           sealed.submission->policy(), capacities);
@@ -202,6 +207,8 @@ create_policy(const PolicyAuthority& sealed, aegis::runtime::M4PolicyCapacities 
 
 // --------------------------------------------------------
 // Append one unsigned integer to test-owned bytes in literal big-endian order.
+// Interesting syntax: the explicit zero check ends the unsigned countdown before subtraction
+// could wrap from zero to the type's maximum value.
 void append_u64(std::vector<std::byte>& bytes, std::uint64_t value) {
   for (unsigned int shift = 56U;; shift -= 8U) {
     bytes.push_back(std::byte{static_cast<std::uint8_t>((value >> shift) & 0xffU)});
@@ -212,9 +219,9 @@ void append_u64(std::vector<std::byte>& bytes, std::uint64_t value) {
 }
 
 // --------------------------------------------------------
-// Construct complete expected bytes without calling a production writer or capacity table.
-[[nodiscard]] std::vector<std::byte> golden_bytes(const PolicyAuthority& sealed) {
-  const auto capacities = golden_capacities();
+// Derive complete expected bytes without calling a production writer or capacity table.
+[[nodiscard]] std::vector<std::byte> derive_golden_m4_policy_bytes(const PolicyAuthority& sealed) {
+  const auto capacities = golden_m4_policy_capacities();
   const auto& risk_policy = sealed.submission->reservations().policy();
   const auto& submission_policy = sealed.submission->policy();
   std::vector<std::byte> bytes;
@@ -274,10 +281,10 @@ TEST_CASE("M4 policy matches the complete AEGISM4P schema one golden") {
   STATIC_REQUIRE(!std::is_same_v<aegis::runtime::M4PolicyFingerprint,
                                  aegis::runtime::RuntimePolicyFingerprint>);
 
-  const auto sealed = authority();
-  const auto policy = create_policy(sealed, golden_capacities());
+  const auto sealed = create_policy_authority_or_throw();
+  const auto policy = create_m4_policy(sealed, golden_m4_policy_capacities());
   REQUIRE(policy);
-  const auto expected = golden_bytes(sealed);
+  const auto expected = derive_golden_m4_policy_bytes(sealed);
   REQUIRE(expected.size() == 362U);
   REQUIRE(policy.value().canonical_bytes() == expected);
   REQUIRE(policy.value().fingerprint().to_hex() ==
@@ -298,23 +305,23 @@ TEST_CASE("M4 policy matches the complete AEGISM4P schema one golden") {
 // --------------------------------------------------------
 // Every named field independently rejects zero and a value one above the accepted u32 ceiling.
 TEST_CASE("M4 policy validates every authored capacity before narrowing") {
-  const auto sealed = authority();
+  const auto sealed = create_policy_authority_or_throw();
   const auto over_bound =
       static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U;
 
   for (const auto& capacity_case : capacity_cases) {
-    auto zero = ordinary_capacities();
+    auto zero = ordinary_m4_policy_capacities();
     zero.*(capacity_case.member) = 0U;
-    const auto zero_result = create_policy(sealed, zero);
+    const auto zero_result = create_m4_policy(sealed, zero);
     CAPTURE(capacity_case.name);
     REQUIRE_FALSE(zero_result);
     REQUIRE(zero_result.error().code == aegis::model::DomainErrorCode::InvalidM4Policy);
     REQUIRE(zero_result.error().context.field ==
             "m4_policy.capacities." + std::string{capacity_case.name});
 
-    auto too_large = ordinary_capacities();
+    auto too_large = ordinary_m4_policy_capacities();
     too_large.*(capacity_case.member) = over_bound;
-    const auto over_result = create_policy(sealed, too_large);
+    const auto over_result = create_m4_policy(sealed, too_large);
     REQUIRE_FALSE(over_result);
     REQUIRE(over_result.error().code == aegis::model::DomainErrorCode::InvalidM4Policy);
     REQUIRE(over_result.error().context.field ==
@@ -325,56 +332,56 @@ TEST_CASE("M4 policy validates every authored capacity before narrowing") {
 // --------------------------------------------------------
 // Every derived lower bound rejects one below and all bounds accept together at exact equality.
 TEST_CASE("M4 policy enforces fixed owner and atomic turn relationships") {
-  const auto sealed = authority();
-  auto capacities = ordinary_capacities();
+  const auto sealed = create_policy_authority_or_throw();
+  auto capacities = ordinary_m4_policy_capacities();
   capacities.max_account_safety_fences = 1U;
-  auto result = create_policy(sealed, capacities);
+  auto result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_account_safety_fences");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_exchange_order_mappings = 3U;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_exchange_order_mappings");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_inventory_source_rows = 3U;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_inventory_source_rows");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_inventory_aggregate_cells = 13U;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_inventory_aggregate_cells");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_namespace_registrations = capacities.max_recovery_epochs;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_namespace_registrations");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_transition_effects_per_turn = capacities.max_pending_fill_intervals_per_order;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_transition_effects_per_turn");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_order_callbacks_per_turn = capacities.max_pending_fill_intervals_per_order;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_order_callbacks_per_turn");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_private_audit_records = capacities.max_pending_fill_intervals_per_order + 2U;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_private_audit_records");
 
-  auto exact = ordinary_capacities();
+  auto exact = ordinary_m4_policy_capacities();
   exact.max_account_safety_fences = 2U;
   exact.max_exchange_order_mappings = 4U;
   exact.max_inventory_source_rows = 4U;
@@ -383,75 +390,123 @@ TEST_CASE("M4 policy enforces fixed owner and atomic turn relationships") {
   exact.max_transition_effects_per_turn = exact.max_pending_fill_intervals_per_order + 1U;
   exact.max_order_callbacks_per_turn = exact.max_pending_fill_intervals_per_order + 1U;
   exact.max_private_audit_records = exact.max_pending_fill_intervals_per_order + 3U;
-  REQUIRE(create_policy(sealed, exact));
+  REQUIRE(create_m4_policy(sealed, exact));
 }
 
 // --------------------------------------------------------
 // Generic policy accepts multiple intent slots; the later trusted reference driver requires one.
 TEST_CASE("M4 generic policy does not impersonate reference fixture validation") {
-  const auto sealed = authority();
-  auto capacities = ordinary_capacities();
+  const auto sealed = create_policy_authority_or_throw();
+  auto capacities = ordinary_m4_policy_capacities();
   capacities.max_reference_intents = 7U;
-  const auto result = create_policy(sealed, capacities);
+  const auto result = create_m4_policy(sealed, capacities);
   REQUIRE(result);
   REQUIRE(result.value().capacities().max_reference_intents == 7U);
 }
 
 // --------------------------------------------------------
-// Both checked scratch products reject overflow and accept their exact u32 product boundary.
-TEST_CASE("M4 policy checks every reconciliation and recovery product") {
-  const auto sealed = authority();
+// Audit backing products reject overflow in fixed precedence and accept exact u32 boundaries.
+TEST_CASE("M4 policy checks topology-derived audit backing products") {
+  const auto sealed = create_policy_authority_or_throw();
   const auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
 
-  auto capacities = ordinary_capacities();
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Primary backing is checked first when both retained nested-storage products overflow.
+  auto capacities = ordinary_m4_policy_capacities();
+  capacities.max_private_audit_records = 65'536U;
+  capacities.max_transition_effects_per_turn = 65'536U;
+  capacities.max_order_callbacks_per_turn = 196'612U;
+  REQUIRE(capacities.max_private_audit_records * capacities.max_transition_effects_per_turn ==
+          maximum + 1U);
+  REQUIRE((capacities.max_private_audit_records / 3U) * capacities.max_order_callbacks_per_turn >
+          maximum);
+  auto result = create_m4_policy(sealed, capacities);
+  REQUIRE_FALSE(result);
+  REQUIRE(result.error().context.field == "m4_policy.capacities.max_transition_effects_per_turn");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Consecutive factors around 2^16 prove the exact accepted primary-backing boundary.
+  capacities = ordinary_m4_policy_capacities();
+  capacities.max_private_audit_records = 65'535U;
+  capacities.max_transition_effects_per_turn = 65'537U;
+  REQUIRE(capacities.max_private_audit_records * capacities.max_transition_effects_per_turn ==
+          maximum);
+  REQUIRE(create_m4_policy(sealed, capacities));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Three slots reserved per callback span derive the exact Planned-buffer pool upper bound.
+  capacities = ordinary_m4_policy_capacities();
+  capacities.max_private_audit_records = 196'608U;
+  capacities.max_transition_effects_per_turn = 5U;
+  capacities.max_order_callbacks_per_turn = 65'536U;
+  result = create_m4_policy(sealed, capacities);
+  REQUIRE_FALSE(result);
+  REQUIRE(result.error().context.field == "m4_policy.capacities.max_order_callbacks_per_turn");
+
+  capacities.max_private_audit_records = 196'605U;
+  capacities.max_order_callbacks_per_turn = 65'537U;
+  REQUIRE((capacities.max_private_audit_records / 3U) * capacities.max_order_callbacks_per_turn ==
+          maximum);
+  REQUIRE(create_m4_policy(sealed, capacities));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Both checked reconciliation/recovery products reject overflow and accept exact u32 boundaries.
+TEST_CASE("M4 policy checks every reconciliation and recovery product") {
+  const auto sealed = create_policy_authority_or_throw();
+  const auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
+
+  auto capacities = ordinary_m4_policy_capacities();
   capacities.max_reconciliation_batches = maximum;
   capacities.max_reconciliation_rows_per_batch = 2U;
-  auto result = create_policy(sealed, capacities);
+  auto result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_reconciliation_rows_per_batch");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_reconciliation_batches = maximum;
   capacities.max_reconciliation_rows_per_batch = 1U;
-  REQUIRE(create_policy(sealed, capacities));
+  REQUIRE(create_m4_policy(sealed, capacities));
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_recovery_epochs = (maximum / 2U) + 1U;
   capacities.max_namespace_registrations = capacities.max_recovery_epochs + 1U;
   capacities.max_recovery_notifications = 2U;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_recovery_notifications");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_recovery_epochs = 65'535U;
   capacities.max_namespace_registrations = 65'536U;
   capacities.max_recovery_notifications = 65'537U;
   REQUIRE(capacities.max_recovery_epochs * capacities.max_recovery_notifications == maximum);
-  REQUIRE(create_policy(sealed, capacities));
+  REQUIRE(create_m4_policy(sealed, capacities));
 }
 
 // --------------------------------------------------------
 // Each disconnected M1-M3 authority fails before policy bytes or root provenance can exist.
 TEST_CASE("M4 policy rejects every mismatched sealed authority") {
-  const auto first = authority();
-  const auto second = authority(true);
+  const auto first = create_policy_authority_or_throw();
+  const auto second = create_policy_authority_or_throw(true);
 
-  auto result = aegis::runtime::M4Policy::create(second.configuration, first.runtime_policy,
-                                                 first.submission->reservations().policy(),
-                                                 first.submission->policy(), ordinary_capacities());
+  auto result = aegis::runtime::M4Policy::create(
+      second.configuration, first.runtime_policy, first.submission->reservations().policy(),
+      first.submission->policy(), ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.runtime_policy_fingerprint");
 
-  result = aegis::runtime::M4Policy::create(first.configuration, first.runtime_policy,
-                                            second.submission->reservations().policy(),
-                                            first.submission->policy(), ordinary_capacities());
+  result = aegis::runtime::M4Policy::create(
+      first.configuration, first.runtime_policy, second.submission->reservations().policy(),
+      first.submission->policy(), ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.risk_policy_fingerprint");
 
-  result = aegis::runtime::M4Policy::create(first.configuration, first.runtime_policy,
-                                            first.submission->reservations().policy(),
-                                            second.submission->policy(), ordinary_capacities());
+  result = aegis::runtime::M4Policy::create(
+      first.configuration, first.runtime_policy, first.submission->reservations().policy(),
+      second.submission->policy(), ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.submission_policy_fingerprint");
 }
@@ -459,35 +514,37 @@ TEST_CASE("M4 policy rejects every mismatched sealed authority") {
 // --------------------------------------------------------
 // Maximal drain and epoch values fail at their checked addition relationships before wrap.
 TEST_CASE("M4 policy rejects unrepresentable drain and namespace relationships") {
-  const auto sealed = authority();
+  const auto sealed = create_policy_authority_or_throw();
   const auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
-  auto capacities = ordinary_capacities();
+  auto capacities = ordinary_m4_policy_capacities();
   capacities.max_pending_fill_intervals_per_order = maximum;
-  auto result = create_policy(sealed, capacities);
+  auto result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field ==
           "m4_policy.capacities.max_pending_fill_intervals_per_order");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_pending_fill_intervals_per_order = maximum - 2U;
   capacities.max_transition_effects_per_turn = maximum;
   capacities.max_order_callbacks_per_turn = maximum;
   capacities.max_private_audit_records = maximum;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_private_audit_records");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_pending_fill_intervals_per_order = maximum - 3U;
   capacities.max_transition_effects_per_turn = maximum - 2U;
   capacities.max_order_callbacks_per_turn = maximum - 2U;
   capacities.max_private_audit_records = maximum;
-  REQUIRE(create_policy(sealed, capacities));
+  result = create_m4_policy(sealed, capacities);
+  REQUIRE_FALSE(result);
+  REQUIRE(result.error().context.field == "m4_policy.capacities.max_transition_effects_per_turn");
 
-  capacities = ordinary_capacities();
+  capacities = ordinary_m4_policy_capacities();
   capacities.max_recovery_epochs = maximum;
   capacities.max_namespace_registrations = maximum;
-  result = create_policy(sealed, capacities);
+  result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_namespace_registrations");
 

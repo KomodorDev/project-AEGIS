@@ -90,14 +90,14 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
 
 // --------------------------------------------------------
 // Return one stable combined-policy failure without exposing authored numeric values as text.
-[[nodiscard]] model::Result<void> invalid(std::string_view field) {
+[[nodiscard]] model::Result<void> m4_policy_validation_failure_from_field(std::string_view field) {
   return model::Result<void>::failure(DomainError::at_field(
       DomainErrorCode::InvalidM4Policy, std::string{"m4_policy."} + std::string{field}));
 }
 
 // --------------------------------------------------------
-// Check a product before multiplication and require a u32-representable bounded result.
-[[nodiscard]] bool product_fits_u32(std::uint64_t left, std::uint64_t right) noexcept {
+// Report whether multiplication can produce one u32-representable result without wrapping.
+[[nodiscard]] bool is_product_u32_representable(std::uint64_t left, std::uint64_t right) noexcept {
   const auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
   return left == 0U || (right <= maximum / left && left * right <= maximum);
 }
@@ -113,56 +113,73 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
   for (const auto& field : capacity_fields) {
     const auto value = capacities.*(field.member);
     if (value == 0U || value > maximum) {
-      return invalid(std::string{"capacities."} + std::string{field.name});
+      return m4_policy_validation_failure_from_field(std::string{"capacities."} +
+                                                     std::string{field.name});
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Prove fixed owners can represent the complete already-sealed M1-M3 authority surface.
   if (capacities.max_account_safety_fences < requirements.logical_account_count) {
-    return invalid("capacities.max_account_safety_fences");
+    return m4_policy_validation_failure_from_field("capacities.max_account_safety_fences");
   }
   if (capacities.max_exchange_order_mappings < requirements.outbound_oms_capacity) {
-    return invalid("capacities.max_exchange_order_mappings");
+    return m4_policy_validation_failure_from_field("capacities.max_exchange_order_mappings");
   }
   if (capacities.max_inventory_source_rows < requirements.reservation_capacity) {
-    return invalid("capacities.max_inventory_source_rows");
+    return m4_policy_validation_failure_from_field("capacities.max_inventory_source_rows");
   }
   if (capacities.max_inventory_aggregate_cells < requirements.inventory_aggregate_cell_count) {
-    return invalid("capacities.max_inventory_aggregate_cells");
+    return m4_policy_validation_failure_from_field("capacities.max_inventory_aggregate_cells");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A fresh registered namespace is required in addition to every recoverable epoch.
   if (capacities.max_recovery_epochs == maximum ||
       capacities.max_namespace_registrations < capacities.max_recovery_epochs + 1U) {
-    return invalid("capacities.max_namespace_registrations");
+    return m4_policy_validation_failure_from_field("capacities.max_namespace_registrations");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One new fill plus every retained gap must fit one atomic transition/callback/audit plan.
   if (capacities.max_pending_fill_intervals_per_order == maximum) {
-    return invalid("capacities.max_pending_fill_intervals_per_order");
+    return m4_policy_validation_failure_from_field(
+        "capacities.max_pending_fill_intervals_per_order");
   }
   const auto drain_width = capacities.max_pending_fill_intervals_per_order + 1U;
   if (capacities.max_transition_effects_per_turn < drain_width) {
-    return invalid("capacities.max_transition_effects_per_turn");
+    return m4_policy_validation_failure_from_field("capacities.max_transition_effects_per_turn");
   }
   if (capacities.max_order_callbacks_per_turn < drain_width) {
-    return invalid("capacities.max_order_callbacks_per_turn");
+    return m4_policy_validation_failure_from_field("capacities.max_order_callbacks_per_turn");
   }
   if (drain_width > maximum - 2U || capacities.max_private_audit_records < drain_width + 2U) {
-    return invalid("capacities.max_private_audit_records");
+    return m4_policy_validation_failure_from_field("capacities.max_private_audit_records");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // The two currently materialized worst-case vectors use u32 counts and cannot wrap products.
-  if (!product_fits_u32(capacities.max_reconciliation_batches,
-                        capacities.max_reconciliation_rows_per_batch)) {
-    return invalid("capacities.max_reconciliation_rows_per_batch");
+  // Retained primary rows each need one full-capacity effect buffer. Callback-bearing spans reserve
+  // at least three physical slots, so at most floor(audit slots / 3) retained Planned rows need
+  // reference buffers.
+  if (!is_product_u32_representable(capacities.max_private_audit_records,
+                                    capacities.max_transition_effects_per_turn)) {
+    return m4_policy_validation_failure_from_field("capacities.max_transition_effects_per_turn");
   }
-  if (!product_fits_u32(capacities.max_recovery_epochs, capacities.max_recovery_notifications)) {
-    return invalid("capacities.max_recovery_notifications");
+  const auto maximum_planned_callback_rows = capacities.max_private_audit_records / 3U;
+  if (!is_product_u32_representable(maximum_planned_callback_rows,
+                                    capacities.max_order_callbacks_per_turn)) {
+    return m4_policy_validation_failure_from_field("capacities.max_order_callbacks_per_turn");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The two reconciliation/recovery worst-case vectors also use u32 aggregate element counts.
+  if (!is_product_u32_representable(capacities.max_reconciliation_batches,
+                                    capacities.max_reconciliation_rows_per_batch)) {
+    return m4_policy_validation_failure_from_field("capacities.max_reconciliation_rows_per_batch");
+  }
+  if (!is_product_u32_representable(capacities.max_recovery_epochs,
+                                    capacities.max_recovery_notifications)) {
+    return m4_policy_validation_failure_from_field("capacities.max_recovery_notifications");
   }
   return model::Result<void>::success();
 
@@ -195,6 +212,8 @@ public:
 
   // --------------------------------------------------------
   // Append one capacity or revision in unsigned big-endian order.
+  // Interesting syntax: the explicit zero check ends the unsigned countdown before subtraction
+  // could wrap from zero to the type's maximum value.
   void append_u64(std::uint64_t value) {
     for (unsigned int shift = 56U;; shift -= 8U) {
       bytes_.push_back(std::byte{static_cast<std::uint8_t>((value >> shift) & 0xffU)});
