@@ -180,7 +180,7 @@ create_submission_coordinator_or_throw(
 
 // --------------------------------------------------------
 // Values 101 through 125 plus one make field order visible while satisfying every relationship.
-[[nodiscard]] aegis::runtime::M4PolicyCapacities golden_m4_policy_capacities() {
+[[nodiscard]] aegis::runtime::M4PolicyCapacities create_golden_m4_policy_capacities() {
   return aegis::runtime::M4PolicyCapacities{
       101U, 102U, 103U, 104U, 105U, 106U, 107U, 108U, 109U, 110U, 111U, 112U, 113U,
       114U, 115U, 116U, 117U, 118U, 119U, 120U, 121U, 122U, 123U, 124U, 125U, 1U,
@@ -189,7 +189,7 @@ create_submission_coordinator_or_throw(
 
 // --------------------------------------------------------
 // A coherent generic policy supports exhaustive mutation without selecting a reference fixture.
-[[nodiscard]] aegis::runtime::M4PolicyCapacities ordinary_m4_policy_capacities() {
+[[nodiscard]] aegis::runtime::M4PolicyCapacities create_ordinary_m4_policy_capacities() {
   return aegis::runtime::M4PolicyCapacities{
       32U, 32U, 32U, 32U, 32U, 32U, 32U, 4U,  32U, 32U, 32U, 32U, 32U,
       32U, 32U, 32U, 32U, 32U, 32U, 8U,  16U, 16U, 4U,  5U,  32U, 3U,
@@ -221,7 +221,7 @@ void append_u64(std::vector<std::byte>& bytes, std::uint64_t value) {
 // --------------------------------------------------------
 // Derive complete expected bytes without calling a production writer or capacity table.
 [[nodiscard]] std::vector<std::byte> derive_golden_m4_policy_bytes(const PolicyAuthority& sealed) {
-  const auto capacities = golden_m4_policy_capacities();
+  const auto capacities = create_golden_m4_policy_capacities();
   const auto& risk_policy = sealed.submission->reservations().policy();
   const auto& submission_policy = sealed.submission->policy();
   std::vector<std::byte> bytes;
@@ -282,7 +282,7 @@ TEST_CASE("M4 policy matches the complete AEGISM4P schema one golden") {
                                  aegis::runtime::RuntimePolicyFingerprint>);
 
   const auto sealed = create_policy_authority_or_throw();
-  const auto policy = create_m4_policy(sealed, golden_m4_policy_capacities());
+  const auto policy = create_m4_policy(sealed, create_golden_m4_policy_capacities());
   REQUIRE(policy);
   const auto expected = derive_golden_m4_policy_bytes(sealed);
   REQUIRE(expected.size() == 362U);
@@ -310,7 +310,7 @@ TEST_CASE("M4 policy validates every authored capacity before narrowing") {
       static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U;
 
   for (const auto& capacity_case : capacity_cases) {
-    auto zero = ordinary_m4_policy_capacities();
+    auto zero = create_ordinary_m4_policy_capacities();
     zero.*(capacity_case.member) = 0U;
     const auto zero_result = create_m4_policy(sealed, zero);
     CAPTURE(capacity_case.name);
@@ -319,7 +319,7 @@ TEST_CASE("M4 policy validates every authored capacity before narrowing") {
     REQUIRE(zero_result.error().context.field ==
             "m4_policy.capacities." + std::string{capacity_case.name});
 
-    auto too_large = ordinary_m4_policy_capacities();
+    auto too_large = create_ordinary_m4_policy_capacities();
     too_large.*(capacity_case.member) = over_bound;
     const auto over_result = create_m4_policy(sealed, too_large);
     REQUIRE_FALSE(over_result);
@@ -333,55 +333,55 @@ TEST_CASE("M4 policy validates every authored capacity before narrowing") {
 // Every derived lower bound rejects one below and all bounds accept together at exact equality.
 TEST_CASE("M4 policy enforces fixed owner and atomic turn relationships") {
   const auto sealed = create_policy_authority_or_throw();
-  auto capacities = ordinary_m4_policy_capacities();
+  auto capacities = create_ordinary_m4_policy_capacities();
   capacities.max_account_safety_fences = 1U;
   auto result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_account_safety_fences");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_exchange_order_mappings = 3U;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_exchange_order_mappings");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_inventory_source_rows = 3U;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_inventory_source_rows");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_inventory_aggregate_cells = 13U;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_inventory_aggregate_cells");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_namespace_registrations = capacities.max_recovery_epochs;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_namespace_registrations");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_transition_effects_per_turn = capacities.max_pending_fill_intervals_per_order;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_transition_effects_per_turn");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_order_callbacks_per_turn = capacities.max_pending_fill_intervals_per_order;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_order_callbacks_per_turn");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_private_audit_records = capacities.max_pending_fill_intervals_per_order + 2U;
   result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_private_audit_records");
 
-  auto exact = ordinary_m4_policy_capacities();
+  auto exact = create_ordinary_m4_policy_capacities();
   exact.max_account_safety_fences = 2U;
   exact.max_exchange_order_mappings = 4U;
   exact.max_inventory_source_rows = 4U;
@@ -397,7 +397,7 @@ TEST_CASE("M4 policy enforces fixed owner and atomic turn relationships") {
 // Generic policy accepts multiple intent slots; the later trusted reference driver requires one.
 TEST_CASE("M4 generic policy does not impersonate reference fixture validation") {
   const auto sealed = create_policy_authority_or_throw();
-  auto capacities = ordinary_m4_policy_capacities();
+  auto capacities = create_ordinary_m4_policy_capacities();
   capacities.max_reference_intents = 7U;
   const auto result = create_m4_policy(sealed, capacities);
   REQUIRE(result);
@@ -412,7 +412,7 @@ TEST_CASE("M4 policy checks topology-derived audit backing products") {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Primary backing is checked first when both retained nested-storage products overflow.
-  auto capacities = ordinary_m4_policy_capacities();
+  auto capacities = create_ordinary_m4_policy_capacities();
   capacities.max_private_audit_records = 65'536U;
   capacities.max_transition_effects_per_turn = 65'536U;
   capacities.max_order_callbacks_per_turn = 196'612U;
@@ -426,7 +426,7 @@ TEST_CASE("M4 policy checks topology-derived audit backing products") {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Consecutive factors around 2^16 prove the exact accepted primary-backing boundary.
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_private_audit_records = 65'535U;
   capacities.max_transition_effects_per_turn = 65'537U;
   REQUIRE(capacities.max_private_audit_records * capacities.max_transition_effects_per_turn ==
@@ -435,7 +435,7 @@ TEST_CASE("M4 policy checks topology-derived audit backing products") {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Three slots reserved per callback span derive the exact Planned-buffer pool upper bound.
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_private_audit_records = 196'608U;
   capacities.max_transition_effects_per_turn = 5U;
   capacities.max_order_callbacks_per_turn = 65'536U;
@@ -458,19 +458,19 @@ TEST_CASE("M4 policy checks every reconciliation and recovery product") {
   const auto sealed = create_policy_authority_or_throw();
   const auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
 
-  auto capacities = ordinary_m4_policy_capacities();
+  auto capacities = create_ordinary_m4_policy_capacities();
   capacities.max_reconciliation_batches = maximum;
   capacities.max_reconciliation_rows_per_batch = 2U;
   auto result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_reconciliation_rows_per_batch");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_reconciliation_batches = maximum;
   capacities.max_reconciliation_rows_per_batch = 1U;
   REQUIRE(create_m4_policy(sealed, capacities));
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_recovery_epochs = (maximum / 2U) + 1U;
   capacities.max_namespace_registrations = capacities.max_recovery_epochs + 1U;
   capacities.max_recovery_notifications = 2U;
@@ -478,7 +478,7 @@ TEST_CASE("M4 policy checks every reconciliation and recovery product") {
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_recovery_notifications");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_recovery_epochs = 65'535U;
   capacities.max_namespace_registrations = 65'536U;
   capacities.max_recovery_notifications = 65'537U;
@@ -494,19 +494,19 @@ TEST_CASE("M4 policy rejects every mismatched sealed authority") {
 
   auto result = aegis::runtime::M4Policy::create(
       second.configuration, first.runtime_policy, first.submission->reservations().policy(),
-      first.submission->policy(), ordinary_m4_policy_capacities());
+      first.submission->policy(), create_ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.runtime_policy_fingerprint");
 
   result = aegis::runtime::M4Policy::create(
       first.configuration, first.runtime_policy, second.submission->reservations().policy(),
-      first.submission->policy(), ordinary_m4_policy_capacities());
+      first.submission->policy(), create_ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.risk_policy_fingerprint");
 
   result = aegis::runtime::M4Policy::create(
       first.configuration, first.runtime_policy, first.submission->reservations().policy(),
-      second.submission->policy(), ordinary_m4_policy_capacities());
+      second.submission->policy(), create_ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.submission_policy_fingerprint");
 }
@@ -516,14 +516,14 @@ TEST_CASE("M4 policy rejects every mismatched sealed authority") {
 TEST_CASE("M4 policy rejects unrepresentable drain and namespace relationships") {
   const auto sealed = create_policy_authority_or_throw();
   const auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
-  auto capacities = ordinary_m4_policy_capacities();
+  auto capacities = create_ordinary_m4_policy_capacities();
   capacities.max_pending_fill_intervals_per_order = maximum;
   auto result = create_m4_policy(sealed, capacities);
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field ==
           "m4_policy.capacities.max_pending_fill_intervals_per_order");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_pending_fill_intervals_per_order = maximum - 2U;
   capacities.max_transition_effects_per_turn = maximum;
   capacities.max_order_callbacks_per_turn = maximum;
@@ -532,7 +532,7 @@ TEST_CASE("M4 policy rejects unrepresentable drain and namespace relationships")
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_private_audit_records");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_pending_fill_intervals_per_order = maximum - 3U;
   capacities.max_transition_effects_per_turn = maximum - 2U;
   capacities.max_order_callbacks_per_turn = maximum - 2U;
@@ -541,7 +541,7 @@ TEST_CASE("M4 policy rejects unrepresentable drain and namespace relationships")
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.capacities.max_transition_effects_per_turn");
 
-  capacities = ordinary_m4_policy_capacities();
+  capacities = create_ordinary_m4_policy_capacities();
   capacities.max_recovery_epochs = maximum;
   capacities.max_namespace_registrations = maximum;
   result = create_m4_policy(sealed, capacities);

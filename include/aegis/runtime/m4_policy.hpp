@@ -19,6 +19,7 @@
 
 namespace aegis::runtime {
 
+// Pin the public schema version and exact encoded size used by every AEGISM4P producer and reader.
 inline constexpr std::uint16_t canonical_m4_policy_schema_version = 1U;
 inline constexpr std::size_t canonical_m4_policy_byte_size = 362U;
 
@@ -99,7 +100,9 @@ class M4Policy final {
 public:
 
   // --------------------------------------------------------
-  // Derive M4 authority only from one mutually consistent set of sealed M1-M3 policies.
+  // Derive M4 authority only from one mutually consistent set of sealed M1-M3 policies;
+  // inconsistent authority or invalid capacities return InvalidM4Policy in the Result without
+  // publishing a policy.
   [[nodiscard]] static model::Result<M4Policy>
   create(const configuration::StartupConfiguration& configuration,
          const RuntimePolicy& runtime_policy, const risk::RiskPolicySnapshot& risk_policy,

@@ -186,6 +186,8 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
+// --------------------------------------------------------
+
 // ########################################################################
 // This fixed writer implements only the positional AEGISM4P schema-one primitives.
 class CanonicalM4PolicyWriter final {
