@@ -1,5 +1,5 @@
-// Purpose: validate bounded private-event primitives and implement complete structural versus
-// receive-time-independent ingress equality without correlation, OMS, or economic mutation.
+// Purpose: validate bounded private-event primitives and project complete receive-time-free
+// ingress semantics and normalized equality without correlation, OMS, or economic mutation.
 
 #include "aegis/oms/private_order_event.hpp"
 
@@ -12,8 +12,8 @@ namespace {
 
 // --------------------------------------------------------
 // Compare exactly one active origin shape while deliberately excluding receive time.
-[[nodiscard]] bool ingress_origin_equal(const PrivateEventOriginValue& left,
-                                        const PrivateEventOriginValue& right) noexcept {
+[[nodiscard]] bool are_ingress_origins_equal(const PrivateEventOriginValue& left,
+                                             const PrivateEventOriginValue& right) noexcept {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Different active origin alternatives can never identify the same ingress fact.
@@ -164,12 +164,44 @@ model::ReceiveTimestamp NormalizedPrivateOrderInput::receive_time() const noexce
 
 // --------------------------------------------------------
 // Compare every correlation-independent ingress field except receive time.
-bool NormalizedPrivateOrderInput::ingress_semantically_equal(
+bool NormalizedPrivateOrderInput::is_ingress_semantically_equal_to(
     const NormalizedPrivateOrderInput& other) const {
   return subject_scope_ == other.subject_scope_ &&
          logical_account_id_ == other.logical_account_id_ && venue_id_ == other.venue_id_ &&
          provenance_ == other.provenance_ && payload_ == other.payload_ &&
-         ingress_origin_equal(origin_value_, other.origin_value_);
+         are_ingress_origins_equal(origin_value_, other.origin_value_);
+}
+
+// --------------------------------------------------------
+// Project every normalized source field except its local receive observation.
+PrivateEventIngressSemanticValue
+PrivateEventIngressSemanticValue::from_normalized_input(const NormalizedPrivateOrderInput& input) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Remove only receive time while preserving the exact active source-domain identity.
+  auto ingress_origin = std::visit(
+      [](const auto& origin) -> PrivateIngressOriginValue {
+        using Origin = std::decay_t<decltype(origin)>;
+        if constexpr (std::is_same_v<Origin, LocalPrivateEventOrigin>) {
+          return LocalPrivateIngressOrigin{origin.event_id, origin.source_time};
+        } else if constexpr (std::is_same_v<Origin, VenuePrivateEventOrigin>) {
+          return VenuePrivateIngressOrigin{origin.event_key, origin.source_time};
+        } else {
+          static_assert(std::is_same_v<Origin, ReconciliationPrivateEventOrigin>);
+          return ReconciliationPrivateIngressOrigin{origin.reconciliation_epoch_id,
+                                                    origin.authoritative_cut_id, origin.row_ordinal,
+                                                    origin.cut_time};
+        }
+      },
+      input.origin_value());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Copy the remaining immutable source fields without enriching provenance or correlation.
+  return PrivateEventIngressSemanticValue{std::move(ingress_origin),  input.subject_scope(),
+                                          input.logical_account_id(), input.venue_id(),
+                                          input.provenance(),         input.payload()};
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------

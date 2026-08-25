@@ -236,7 +236,7 @@ PINNED_FETCHCONTENT_DECLARATIONS: dict[str, tuple[str, ...]] = {
 ALLOWED_BUILD_URLS = frozenset({CATCH2_FETCHCONTENT_URL, GOOGLE_BENCHMARK_FETCHCONTENT_URL})
 
 # General include rules reject communication, authentication, and database dependencies from every
-# selected M3 production/build/benchmark path even when no call site exists yet.
+# selected M3/M4 production, build, and benchmark path even when no call site exists yet.
 GENERAL_FORBIDDEN_INCLUDE = re.compile(
     r"^\s*#\s*include\s*[<\"](?:"
     r"arpa/(?:inet|nameser(?:_compat)?)\.h|asio(?:\.hpp|/)|boost/asio(?:\.hpp|/)|curl/|"
@@ -405,7 +405,7 @@ CMAKE_LINK_OPTIONS_COMMAND = re.compile(
 CMAKE_ARGUMENT = re.compile(r'"[^"]*"|[^\s]+')
 ALLOWED_CMAKE_LINK_OPTIONS = frozenset({"-fsanitize=${sanitizer_list}"})
 
-# Compile-time requires-expressions are the one safe way M3 tests prove forbidden members are
+# Compile-time requires-expressions are the one safe way M3/M4 tests prove forbidden members are
 # absent. Only the exact one-member probe grammar is masked; executable calls and declarations
 # remain visible.
 NEGATIVE_CAPABILITY_PROBE = re.compile(
@@ -688,7 +688,7 @@ def is_direct_path(relative: Path) -> bool:
 
 
 # --------------------------------------------------------
-# Report whether a path can add compile, link, dependency, preset, or CI capability to M3.
+# Report whether a path can add compile, link, dependency, preset, or CI capability to M3 or M4.
 def is_build_path(relative: Path) -> bool:
     """Classify every explicit or recursively discovered repository build-control file."""
 
@@ -861,7 +861,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
             )
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Reject acquisition commands for which M3 has no accepted input vocabulary at all.
+    # Reject acquisition commands for which M3/M4 has no accepted input vocabulary at all.
     for match in CMAKE_UNAPPROVED_ACQUISITION_COMMAND.finditer(text):
         findings.append(
             violation_at(
@@ -875,7 +875,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
         )
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Reject global/property/directory link surfaces for which M3 has no accepted use.
+    # Reject global/property/directory link surfaces for which M3/M4 has no accepted use.
     for match in CMAKE_UNAPPROVED_LINK_SURFACE.finditer(text):
         findings.append(
             violation_at(
@@ -1037,7 +1037,7 @@ def parse_arguments(arguments: Sequence[str] | None = None) -> argparse.Namespac
         "paths",
         nargs="*",
         type=Path,
-        help="optional repository-relative files; omit to scan the fixed M3-owned set",
+        help="optional repository-relative files; omit to scan the fixed M3/M4-owned set",
     )
     return parser.parse_args(arguments)
 

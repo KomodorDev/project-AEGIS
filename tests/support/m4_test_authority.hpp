@@ -20,15 +20,18 @@ struct M4TestAuthority {
 
 // --------------------------------------------------------
 // Return coherent generic capacities that satisfy every accepted M4 policy relationship.
-[[nodiscard]] runtime::M4PolicyCapacities ordinary_m4_capacities() noexcept;
+[[nodiscard]] runtime::M4PolicyCapacities create_ordinary_m4_policy_capacities() noexcept;
 
 // --------------------------------------------------------
-// Build the real sealed M1-M3 chain and derive one matching M4 policy with authored capacities.
-[[nodiscard]] M4TestAuthority m4_test_authority(runtime::M4PolicyCapacities capacities);
+// Build the real sealed M1-M3 chain and derive one matching M4 policy; invalid fixture authority
+// throws std::logic_error without returning a partial value.
+[[nodiscard]] M4TestAuthority
+create_m4_test_authority_or_throw(runtime::M4PolicyCapacities capacities);
 
 // --------------------------------------------------------
-// Build the same authority with the ordinary coherent capacity fixture.
-[[nodiscard]] M4TestAuthority m4_test_authority();
+// Build the same authority with ordinary coherent capacities; invalid fixture authority throws
+// std::logic_error without returning a partial value.
+[[nodiscard]] M4TestAuthority create_m4_test_authority_or_throw();
 
 // --------------------------------------------------------
 

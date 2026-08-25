@@ -21,34 +21,35 @@ class M4ProvenanceResolver final {
 public:
 
   // --------------------------------------------------------
-  // Reject a configuration/root mismatch before any provenance value can be published.
+  // Publish a self-owned resolver only when configuration and root match; return
+  // InvalidPrivateEvent for authority mismatch or translated allocation failure without publishing
+  // a partial resolver.
   [[nodiscard]] static model::Result<M4ProvenanceResolver>
   create(const configuration::StartupConfiguration& configuration, const M4Policy& policy);
 
   // --------------------------------------------------------
   // Produce the root-only lineage/runtime profile with typed subject absence.
-  [[nodiscard]] model::M4Provenance root_only() const noexcept;
+  [[nodiscard]] model::M4Provenance create_root_only_provenance() const noexcept;
 
   // --------------------------------------------------------
   // Require an exact configured account/venue binding and derive its owning firm.
   [[nodiscard]] model::Result<model::M4Provenance>
-  configured_account(const model::LogicalAccountId& logical_account_id,
-                     const model::VenueId& venue_id) const;
+  create_configured_account_provenance(const model::LogicalAccountId& logical_account_id,
+                                       const model::VenueId& venue_id) const;
 
   // --------------------------------------------------------
   // Require an exact configured account/venue/instrument tuple and derive metadata revision.
   [[nodiscard]] model::Result<model::M4Provenance>
-  configured_instrument(const model::LogicalAccountId& logical_account_id,
-                        const model::VenueId& venue_id,
-                        const model::InstrumentId& instrument_id) const;
+  create_configured_instrument_provenance(const model::LogicalAccountId& logical_account_id,
+                                          const model::VenueId& venue_id,
+                                          const model::InstrumentId& instrument_id) const;
 
   // --------------------------------------------------------
   // Retain the maximal source provenance independently proved for an authoritative raw subject;
   // unknown/mismatched locators remain represented rather than becoming local ownership.
-  [[nodiscard]] model::M4Provenance
-  authoritative_source(const model::LogicalAccountId& logical_account_id,
-                       const model::VenueId& venue_id,
-                       const std::optional<model::InstrumentId>& instrument_id) const noexcept;
+  [[nodiscard]] model::M4Provenance derive_authoritative_source_provenance(
+      const model::LogicalAccountId& logical_account_id, const model::VenueId& venue_id,
+      const std::optional<model::InstrumentId>& instrument_id) const noexcept;
 
   // --------------------------------------------------------
   // Expose the root copy used by every value from this resolver.
@@ -65,6 +66,7 @@ private:
       : configuration_{std::move(configuration)}, root_{std::move(root)} {}
 
   // --------------------------------------------------------
+  // Retain the sealed configuration authority and its exact matching root copy.
   configuration::StartupConfiguration configuration_;
   model::M4RootProvenance root_;
 };

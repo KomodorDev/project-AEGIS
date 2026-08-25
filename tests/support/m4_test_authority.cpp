@@ -23,8 +23,10 @@ namespace aegis::test_support {
 namespace {
 
 // --------------------------------------------------------
-// Parse fixture identifiers once and treat invalid literals as test-authoring failures.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
+// Parse one fixture identifier or throw std::logic_error when its literal violates the nominal
+// grammar.
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
   auto parsed = Identifier::parse(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M4 authority fixture"};
@@ -33,17 +35,19 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 }
 
 // --------------------------------------------------------
-// Seal the unchanged M2 runtime policy against the M3-enabled two-firm configuration.
+// Create the unchanged M2 runtime policy against the M3-enabled two-firm configuration, or throw
+// std::logic_error when the sealed authority is inconsistent.
 [[nodiscard]] runtime::RuntimePolicy
-runtime_policy(const configuration::StartupConfiguration& configuration) {
+create_runtime_policy_or_throw(const configuration::StartupConfiguration& configuration) {
   auto created = runtime::RuntimePolicy::create(
       configuration,
       runtime::RuntimePolicyParams{
           runtime::RuntimePolicyLimits{2U, 4096U, 64U, 20U, 5'000'000'000U, 4U, 64U, 128U, 32U,
                                        100'000U},
-          {{id<model::MarketSourceId>("source.deribit-btc-perpetual"),
-            id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-            id<model::VenueInstrumentId>("BTC-PERPETUAL"),
+          {{parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+            parse_identifier_or_throw<model::VenueId>("deribit"),
+            parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+            parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
             model::InstrumentMetadataRevision::initial()}}});
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M4 authority fixture"};
@@ -52,10 +56,11 @@ runtime_policy(const configuration::StartupConfiguration& configuration) {
 }
 
 // --------------------------------------------------------
-// Build the deterministic M3 fake coordinator solely to obtain its sealed risk/submission policy.
+// Create the deterministic M3 fake coordinator used to obtain sealed risk/submission policy, or
+// throw std::logic_error when any dependency or composition step fails.
 [[nodiscard]] std::unique_ptr<runtime::SubmissionCoordinator>
-submission_coordinator(const configuration::StartupConfiguration& configuration,
-                       const runtime::RuntimePolicy& policy) {
+create_submission_coordinator_or_throw(const configuration::StartupConfiguration& configuration,
+                                       const runtime::RuntimePolicy& policy) {
   constexpr std::uint64_t maximum_attempts = 10U;
   auto encoder =
       execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, maximum_attempts,
@@ -98,7 +103,7 @@ submission_coordinator(const configuration::StartupConfiguration& configuration,
 
 // --------------------------------------------------------
 // Return coherent generic capacities that satisfy every accepted M4 policy relationship.
-runtime::M4PolicyCapacities ordinary_m4_capacities() noexcept {
+runtime::M4PolicyCapacities create_ordinary_m4_policy_capacities() noexcept {
   return runtime::M4PolicyCapacities{
       32U, 32U, 32U, 32U, 32U, 32U, 32U, 4U,  32U, 32U, 32U, 32U, 32U,
       32U, 32U, 32U, 32U, 32U, 32U, 8U,  16U, 16U, 4U,  5U,  32U, 3U,
@@ -106,8 +111,9 @@ runtime::M4PolicyCapacities ordinary_m4_capacities() noexcept {
 }
 
 // --------------------------------------------------------
-// Build the real sealed M1-M3 chain and derive one matching M4 policy with authored capacities.
-M4TestAuthority m4_test_authority(runtime::M4PolicyCapacities capacities) {
+// Build the real sealed M1-M3 chain and derive one matching M4 policy; invalid fixture authority
+// throws std::logic_error without returning a partial value.
+M4TestAuthority create_m4_test_authority_or_throw(runtime::M4PolicyCapacities capacities) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal the unchanged reference configuration and runtime authority first.
@@ -117,11 +123,11 @@ M4TestAuthority m4_test_authority(runtime::M4PolicyCapacities capacities) {
     throw std::logic_error{"invalid startup configuration in M4 authority fixture"};
   }
   auto configuration = std::move(configured).value();
-  auto runtime = runtime_policy(configuration);
+  auto runtime = create_runtime_policy_or_throw(configuration);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive risk/submission authority from the deterministic offline M3 composition.
-  auto submission = submission_coordinator(configuration, runtime);
+  auto submission = create_submission_coordinator_or_throw(configuration, runtime);
   auto policy =
       runtime::M4Policy::create(configuration, runtime, submission->reservations().policy(),
                                 submission->policy(), capacities);
@@ -139,8 +145,11 @@ M4TestAuthority m4_test_authority(runtime::M4PolicyCapacities capacities) {
 // --------------------------------------------------------
 
 // --------------------------------------------------------
-// Build the same authority with the ordinary coherent capacity fixture.
-M4TestAuthority m4_test_authority() { return m4_test_authority(ordinary_m4_capacities()); }
+// Build the same authority with ordinary coherent capacities; invalid fixture authority throws
+// std::logic_error without returning a partial value.
+M4TestAuthority create_m4_test_authority_or_throw() {
+  return create_m4_test_authority_or_throw(create_ordinary_m4_policy_capacities());
+}
 
 // --------------------------------------------------------
 

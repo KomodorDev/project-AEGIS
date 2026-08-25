@@ -266,6 +266,7 @@ private:
       : root_{std::move(root)}, subject_{std::move(subject)} {}
 
   // --------------------------------------------------------
+  // Retain the mandatory root and optional closed subject as one immutable provenance value.
   M4RootProvenance root_;
   std::optional<M4SubjectProvenance> subject_;
 

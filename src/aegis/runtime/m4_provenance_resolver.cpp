@@ -14,7 +14,8 @@ namespace {
 
 // --------------------------------------------------------
 // Report every provenance-authority mismatch through the stable private-event validation domain.
-template <typename Value> [[nodiscard]] model::Result<Value> invalid(std::string field) {
+template <typename Value>
+[[nodiscard]] model::Result<Value> provenance_resolution_failure_from_field(std::string field) {
   return model::Result<Value>::failure(
       model::DomainError::at_field(model::DomainErrorCode::InvalidPrivateEvent, std::move(field)));
 }
@@ -24,7 +25,8 @@ template <typename Value> [[nodiscard]] model::Result<Value> invalid(std::string
 } // namespace
 
 // --------------------------------------------------------
-// Reject a configuration/root mismatch before any provenance value can be published.
+// Publish a self-owned resolver only after authority validation and complete configuration copying;
+// return InvalidPrivateEvent for mismatch/allocation failure without publishing partial state.
 model::Result<M4ProvenanceResolver>
 M4ProvenanceResolver::create(const configuration::StartupConfiguration& configuration,
                              const M4Policy& policy) {
@@ -33,10 +35,12 @@ M4ProvenanceResolver::create(const configuration::StartupConfiguration& configur
   // The root must identify this exact sealed configuration and organization authority.
   const auto& root = policy.root_provenance();
   if (root.configuration_fingerprint() != configuration.fingerprint().bytes()) {
-    return invalid<M4ProvenanceResolver>("m4_provenance.configuration_fingerprint");
+    return provenance_resolution_failure_from_field<M4ProvenanceResolver>(
+        "m4_provenance.configuration_fingerprint");
   }
   if (root.organization_revision() != configuration.organization().revision()) {
-    return invalid<M4ProvenanceResolver>("m4_provenance.organization_revision");
+    return provenance_resolution_failure_from_field<M4ProvenanceResolver>(
+        "m4_provenance.organization_revision");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -44,9 +48,11 @@ M4ProvenanceResolver::create(const configuration::StartupConfiguration& configur
   try {
     return model::Result<M4ProvenanceResolver>::success(M4ProvenanceResolver{configuration, root});
   } catch (const std::bad_alloc&) {
-    return invalid<M4ProvenanceResolver>("m4_provenance.capacity_allocation");
+    return provenance_resolution_failure_from_field<M4ProvenanceResolver>(
+        "m4_provenance.capacity_allocation");
   } catch (const std::length_error&) {
-    return invalid<M4ProvenanceResolver>("m4_provenance.capacity_allocation");
+    return provenance_resolution_failure_from_field<M4ProvenanceResolver>(
+        "m4_provenance.capacity_allocation");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -54,24 +60,24 @@ M4ProvenanceResolver::create(const configuration::StartupConfiguration& configur
 
 // --------------------------------------------------------
 // Produce the root-only lineage/runtime profile with typed subject absence.
-model::M4Provenance M4ProvenanceResolver::root_only() const noexcept {
+model::M4Provenance M4ProvenanceResolver::create_root_only_provenance() const noexcept {
   return model::M4Provenance{root_};
 }
 
 // --------------------------------------------------------
 // Require an exact configured account/venue binding and derive its owning firm.
-model::Result<model::M4Provenance>
-M4ProvenanceResolver::configured_account(const model::LogicalAccountId& logical_account_id,
-                                         const model::VenueId& venue_id) const {
+model::Result<model::M4Provenance> M4ProvenanceResolver::create_configured_account_provenance(
+    const model::LogicalAccountId& logical_account_id, const model::VenueId& venue_id) const {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A local account/source fact requires exact sealed ownership and venue binding.
   const auto* const binding = configuration_.find_logical_account(logical_account_id);
   if (binding == nullptr) {
-    return invalid<model::M4Provenance>("m4_provenance.logical_account_id");
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.logical_account_id");
   }
   if (binding->venue_id != venue_id) {
-    return invalid<model::M4Provenance>("m4_provenance.venue_id");
+    return provenance_resolution_failure_from_field<model::M4Provenance>("m4_provenance.venue_id");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -87,23 +93,24 @@ M4ProvenanceResolver::configured_account(const model::LogicalAccountId& logical_
 
 // --------------------------------------------------------
 // Require an exact configured account/venue/instrument tuple and derive metadata revision.
-model::Result<model::M4Provenance>
-M4ProvenanceResolver::configured_instrument(const model::LogicalAccountId& logical_account_id,
-                                            const model::VenueId& venue_id,
-                                            const model::InstrumentId& instrument_id) const {
+model::Result<model::M4Provenance> M4ProvenanceResolver::create_configured_instrument_provenance(
+    const model::LogicalAccountId& logical_account_id, const model::VenueId& venue_id,
+    const model::InstrumentId& instrument_id) const {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Establish exact account ownership before instrument support can be claimed.
   const auto* const binding = configuration_.find_logical_account(logical_account_id);
   if (binding == nullptr) {
-    return invalid<model::M4Provenance>("m4_provenance.logical_account_id");
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.logical_account_id");
   }
   if (binding->venue_id != venue_id) {
-    return invalid<model::M4Provenance>("m4_provenance.venue_id");
+    return provenance_resolution_failure_from_field<model::M4Provenance>("m4_provenance.venue_id");
   }
   const auto* const metadata = configuration_.find_instrument_metadata(venue_id, instrument_id);
   if (metadata == nullptr) {
-    return invalid<model::M4Provenance>("m4_provenance.instrument_id");
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.instrument_id");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -121,7 +128,7 @@ M4ProvenanceResolver::configured_instrument(const model::LogicalAccountId& logic
 
 // --------------------------------------------------------
 // Retain the maximal source provenance independently proved for an authoritative raw subject.
-model::M4Provenance M4ProvenanceResolver::authoritative_source(
+model::M4Provenance M4ProvenanceResolver::derive_authoritative_source_provenance(
     const model::LogicalAccountId& logical_account_id, const model::VenueId& venue_id,
     const std::optional<model::InstrumentId>& instrument_id) const noexcept {
 

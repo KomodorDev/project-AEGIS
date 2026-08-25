@@ -140,6 +140,16 @@ contract rather than a tenth ordinary event kind.
 `Cancelled = 1` and `CancelRejected = 2`. `LocalFailureCertainty` assigns
 `ProvenBeforeAcceptance = 1` and `AcceptanceCouldHaveOccurred = 2`.
 
+An ordinary producer supplies a `PrivateOrderIngressAttempt`: one complete bounded source fact whose
+typed `PrivateIngressOriginValue` contains the source identity and source time but cannot represent
+local receive time or executor admission. The trusted runtime receipt boundary later attaches its
+own observed receive timestamp to form `NormalizedPrivateOrderInput`; the attempt contributes no
+receive timestamp to that decision. Compatibility normalization APIs may attach an explicitly
+supplied receive timestamp for value-level tests and pre-admission callers, but the returned
+normalized value grants neither executor admission nor consumption authority. Reconciliation
+remains a separate trusted normalization path and exposes no producer-facing reconciliation attempt
+API.
+
 `PrivateEventSubjectScope` assigns `Order = 1`, `Account = 2`, and `PrivateSource = 3`. The closed
 origin envelope is:
 
@@ -197,6 +207,11 @@ authority. Bounded reason detail is retained as opaque evidence and never used t
 `InsufficientAuthority = 3`, `InsufficientFunds = 4`, `PostOnlyWouldCross = 5`, and
 `VenueRiskRejected = 6`. Zero and unassigned categories reject. Rejection detail is zero through
 256 opaque bytes; a larger value rejects before admission.
+
+An affected `PrivateSourceEpochId` is a valid nonempty typed identity only. M4 assigns no
+current/stale or order-ownership meaning to its opaque bytes, and replay classification remains keyed
+by the complete event identity. Adapter-specific epoch lifecycle and freshness semantics remain M6/M7
+integration work.
 
 Source-side presence is fixed before correlation: it is optional on venue ingress and required on a
 reconciliation execution row. After correlation, a known execution derives its economic side only
