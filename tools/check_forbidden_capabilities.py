@@ -1,4 +1,7 @@
-"""Reject live capabilities from all M3 paths and forbidden hops from its production direct path."""
+"""Reject live capabilities from M3/M4 paths.
+
+Owner-local production paths additionally reject blocking work and execution handoffs.
+"""
 
 from __future__ import annotations
 
@@ -138,6 +141,53 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
     "src/aegis/runtime/submission_diagnostics.cpp",
     "src/aegis/trace/submission_trace.cpp",
 )
+
+# M4 paths remain an explicit credential-free/offline manifest so later connectivity milestones
+# cannot silently make the OMS, inventory, recovery foundation, tests, or evidence helpers live.
+M4_GENERAL_FILE_PATTERNS = (
+    "include/aegis/configuration/startup_configuration.hpp",
+    "include/aegis/market_data/subscription.hpp",
+    "include/aegis/model/bounded_identity.hpp",
+    "include/aegis/model/m4_provenance.hpp",
+    "include/aegis/oms/private_order_event.hpp",
+    "include/aegis/oms/private_order_identity.hpp",
+    "include/aegis/recovery/recovery_identity.hpp",
+    "include/aegis/runtime/m4_policy.hpp",
+    "src/aegis/configuration/startup_configuration.cpp",
+    "src/aegis/oms/private_order_event.cpp",
+    "src/aegis/runtime/m4_policy.cpp",
+    "src/aegis/runtime/m4_provenance_resolver.cpp",
+    "src/aegis/runtime/m4_provenance_resolver.hpp",
+    "src/aegis/runtime/private_order_event_factory.cpp",
+    "src/aegis/runtime/private_order_event_factory.hpp",
+    "tests/support/m4_private_event_fixture.hpp",
+    "tests/support/m4_test_authority.cpp",
+    "tests/support/m4_test_authority.hpp",
+    "tests/unit/model/m4_identity_test.cpp",
+    "tests/unit/oms/private_order_event_test.cpp",
+    "tests/unit/runtime/m4_policy_test.cpp",
+    "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+)
+
+# These current M4 production files can execute during private owner admission/normalization and
+# therefore inherit the M3 direct path's no-file, no-handoff, no-blocking rule set.
+M4_OWNER_PATH_FILE_PATTERNS = (
+    "include/aegis/configuration/startup_configuration.hpp",
+    "include/aegis/market_data/subscription.hpp",
+    "include/aegis/model/bounded_identity.hpp",
+    "include/aegis/model/m4_provenance.hpp",
+    "include/aegis/oms/private_order_event.hpp",
+    "include/aegis/oms/private_order_identity.hpp",
+    "include/aegis/recovery/recovery_identity.hpp",
+    "include/aegis/runtime/m4_policy.hpp",
+    "src/aegis/configuration/startup_configuration.cpp",
+    "src/aegis/oms/private_order_event.cpp",
+    "src/aegis/runtime/m4_policy.cpp",
+    "src/aegis/runtime/m4_provenance_resolver.cpp",
+    "src/aegis/runtime/m4_provenance_resolver.hpp",
+    "src/aegis/runtime/private_order_event_factory.cpp",
+    "src/aegis/runtime/private_order_event_factory.hpp",
+)
 BUILD_FILES = (
     Path("CMakeLists.txt"),
     Path("tests/CMakeLists.txt"),
@@ -194,7 +244,7 @@ PINNED_FETCHCONTENT_DECLARATIONS: dict[str, tuple[str, ...]] = {
 ALLOWED_BUILD_URLS = frozenset({CATCH2_FETCHCONTENT_URL, GOOGLE_BENCHMARK_FETCHCONTENT_URL})
 
 # General include rules reject communication, authentication, and database dependencies from every
-# selected M3 production/build/benchmark path even when no call site exists yet.
+# selected M3/M4 production, build, and benchmark path even when no call site exists yet.
 GENERAL_FORBIDDEN_INCLUDE = re.compile(
     r"^\s*#\s*include\s*[<\"](?:"
     r"arpa/(?:inet|nameser(?:_compat)?)\.h|asio(?:\.hpp|/)|boost/asio(?:\.hpp|/)|curl/|"
@@ -363,7 +413,7 @@ CMAKE_LINK_OPTIONS_COMMAND = re.compile(
 CMAKE_ARGUMENT = re.compile(r'"[^"]*"|[^\s]+')
 ALLOWED_CMAKE_LINK_OPTIONS = frozenset({"-fsanitize=${sanitizer_list}"})
 
-# Compile-time requires-expressions are the one safe way M3 tests prove forbidden members are
+# Compile-time requires-expressions are the one safe way M3/M4 tests prove forbidden members are
 # absent. Only the exact one-member probe grammar is masked; executable calls and declarations
 # remain visible.
 NEGATIVE_CAPABILITY_PROBE = re.compile(
@@ -637,15 +687,16 @@ def source_position(text: str, offset: int) -> tuple[int, int]:
 
 
 # --------------------------------------------------------
-# Report whether one selected path can execute as part of the production BotContext submit stack.
+# Report whether one selected path can execute in the M3 submit or M4 private owner stack.
 def is_direct_path(relative: Path) -> bool:
-    """Classify exact production direct-path files independently from fixture/runtime drivers."""
+    """Classify exact owner-local production files independently from fixtures and drivers."""
 
-    return relative.as_posix() in M3_DIRECT_PATH_FILE_PATTERNS
+    path = relative.as_posix()
+    return path in M3_DIRECT_PATH_FILE_PATTERNS or path in M4_OWNER_PATH_FILE_PATTERNS
 
 
 # --------------------------------------------------------
-# Report whether a path can add compile, link, dependency, preset, or CI capability to M3.
+# Report whether a path can add compile, link, dependency, preset, or CI capability to M3 or M4.
 def is_build_path(relative: Path) -> bool:
     """Classify every explicit or recursively discovered repository build-control file."""
 
@@ -665,14 +716,20 @@ def is_cmake_path(relative: Path) -> bool:
 
 
 # --------------------------------------------------------
-# Require every explicitly assigned M3/build artifact and discovery root before scanning defaults.
+# Require every explicitly assigned M3/M4/build artifact and discovery root before defaults.
 def validate_required_manifest(repository: Path) -> None:
     """Fail closed when an assigned file or directory silently disappears from default discovery."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Require the explicit general, direct, and build file union without silently dropping entries.
     required_files = {
-        Path(relative) for relative in (*M3_GENERAL_FILE_PATTERNS, *M3_DIRECT_PATH_FILE_PATTERNS)
+        Path(relative)
+        for relative in (
+            *M3_GENERAL_FILE_PATTERNS,
+            *M3_DIRECT_PATH_FILE_PATTERNS,
+            *M4_GENERAL_FILE_PATTERNS,
+            *M4_OWNER_PATH_FILE_PATTERNS,
+        )
     }
     required_files.update(BUILD_FILES)
     for relative in sorted(required_files, key=Path.as_posix):
@@ -692,7 +749,7 @@ def validate_required_manifest(repository: Path) -> None:
 
 
 # --------------------------------------------------------
-# Discover every currently present M3 source, test, fixture, tool, benchmark, and build artifact.
+# Discover every assigned M3/M4 source, test, fixture, tool, benchmark, and build artifact.
 def discover_default_paths(repository: Path) -> list[Path]:
     """Return the validated explicit/directory union in deterministic repository-relative order."""
 
@@ -701,7 +758,7 @@ def discover_default_paths(repository: Path) -> list[Path]:
     validate_required_manifest(repository)
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Union recursive M3 and CMake files with every explicit general, direct, and build assignment.
+    # Union recursive M3/CMake files with every explicit M3/M4 and build assignment.
     paths: set[Path] = set()
     for prefix in M3_GENERAL_DIRECTORY_PREFIXES:
         directory = repository / prefix
@@ -709,7 +766,13 @@ def discover_default_paths(repository: Path) -> list[Path]:
     for prefix in BUILD_DIRECTORY_PREFIXES:
         directory = repository / prefix
         paths.update(path for path in directory.rglob("*.cmake") if path.is_file())
-    for relative in (*M3_GENERAL_FILE_PATTERNS, *M3_DIRECT_PATH_FILE_PATTERNS, *BUILD_FILES):
+    for relative in (
+        *M3_GENERAL_FILE_PATTERNS,
+        *M3_DIRECT_PATH_FILE_PATTERNS,
+        *M4_GENERAL_FILE_PATTERNS,
+        *M4_OWNER_PATH_FILE_PATTERNS,
+        *BUILD_FILES,
+    ):
         paths.add(repository / relative)
     return sorted(paths, key=lambda path: path.relative_to(repository).as_posix())
 
@@ -806,7 +869,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
             )
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Reject acquisition commands for which M3 has no accepted input vocabulary at all.
+    # Reject acquisition commands for which M3/M4 has no accepted input vocabulary at all.
     for match in CMAKE_UNAPPROVED_ACQUISITION_COMMAND.finditer(text):
         findings.append(
             violation_at(
@@ -820,7 +883,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
         )
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Reject global/property/directory link surfaces for which M3 has no accepted use.
+    # Reject global/property/directory link surfaces for which M3/M4 has no accepted use.
     for match in CMAKE_UNAPPROVED_LINK_SURFACE.finditer(text):
         findings.append(
             violation_at(
@@ -946,7 +1009,7 @@ def scan_file(repository: Path, path: Path) -> list[Violation]:
 # --------------------------------------------------------
 # Validate explicit or discovered files and return findings in deterministic path/location order.
 def scan_paths(repository: Path, paths: Iterable[Path] | None = None) -> list[Violation]:
-    """Scan M3 defaults or caller-selected files beneath one repository root."""
+    """Scan M3/M4 defaults or caller-selected files beneath one repository root."""
 
     repository = repository.resolve()
     selected = discover_default_paths(repository) if paths is None else list(paths)
@@ -982,7 +1045,7 @@ def parse_arguments(arguments: Sequence[str] | None = None) -> argparse.Namespac
         "paths",
         nargs="*",
         type=Path,
-        help="optional repository-relative files; omit to scan the fixed M3-owned set",
+        help="optional repository-relative files; omit to scan the fixed M3/M4-owned set",
     )
     return parser.parse_args(arguments)
 

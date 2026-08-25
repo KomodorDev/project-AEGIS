@@ -211,10 +211,13 @@ The fake journal is an append-only bounded sequence of immutable canonical recov
    incompatible lineage/provenance is a recovery fault.
 
 The closed `JournalRecordKind` assignments and semantic payloads are in ADR-0013. `PrivateEventInput`
-replays through the normal event reconciler. `ReconciliationInput` dispatches each order/execution
-row through that reconciler and each position/permission/margin/completeness row through its typed
-validation/safety planner. Submission projection, namespace, identity high-water, account fence,
-reference intent, recovery decision, and notification records use their own validated idempotent
+replays through the normal event reconciler, which must derive the same complete tagged correlation
+result and validate it against the journaled immutable first-admission resolution before
+committing. A mismatch is a recovery conflict; replay never ignores, upgrades, or replaces the
+journaled resolution. `ReconciliationInput` dispatches each order/execution row through that
+reconciler and each position/permission/margin/completeness row through its typed validation/safety
+planner. Submission projection, namespace, identity high-water, account fence, reference intent,
+recovery decision, and notification records use their own validated idempotent
 restore planners. No dispatcher directly edits reservation or inventory outside a complete accepted
 plan, and no non-event record is cast into `PrivateOrderEvent`.
 

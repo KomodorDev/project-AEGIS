@@ -200,19 +200,24 @@ needs. Failure uses the dedicated account fence and never partially mutates econ
 `MissingJournalInput = 2`, `InvalidSnapshot = 3`, `LocalProvenanceMissing = 4`, and
 `CallbackDeliveryAmbiguous = 5`.
 
-One semantic `PrivateEventEvidence` owns root/subject provenance, runtime epoch, admission ordinal,
-receive time, the complete normalized event, semantic equality fields from ADR-0010, disposition,
-optional reconciliation epoch/journal sequence, and diagnostic linkage. One semantic
+One semantic `PrivateEventEvidence` owns root provenance, the source-normalized subject, the
+complete immutable tagged first-admission resolution fixed by ADR-0010, runtime epoch, admission
+ordinal, receive time, the complete normalized ingress event, both field-by-field equality
+projections from ADR-0010, disposition, optional reconciliation epoch/journal sequence, and
+diagnostic linkage. One semantic
 `OrderAuditRecord` owns runtime epoch/audit ordinal/kind, tagged origin, root/subject provenance,
 all present order/exchange/trade/cancel identities, exact OMS before/after, exact reservation
 before/after including closure cause, canonical inventory effect rows, account-safety before/after,
 callback decision/range, recovery gap, and optional domain error.
 
-Canonical inventory effect order is firm, scope kind, subject, instrument, then currency. Exact
-semantic duplicate comparison is field-by-field over every normalized semantic field and excludes
-only receive time and evidence ordinals named by ADR-0010. Until ADR-0014 accepts a digest preimage,
-production stores/compares the full bounded typed semantic value and must not invent a private byte
-encoding.
+Canonical inventory effect order is firm, scope kind, subject, instrument, then currency. Event-key
+duplicate comparison is field-by-field over ADR-0010's complete immutable correlation-independent
+ingress semantic value. It excludes only receive time and evidence ordinals named by ADR-0010 and
+never recomputes or compares the first-admission resolved subject after finding an existing event
+key. For a first-seen event, trade-key comparison follows correlation and compares the retained
+closed execution/economic tuple plus the immutable `Known(OrderId)` or locator-bearing `Unknown`
+resolution tag fixed by ADR-0010. Until ADR-0014 accepts digest preimages, production stores and
+compares both complete bounded typed values directly and must not invent a private byte encoding.
 
 ### Stable journal semantics
 
@@ -243,7 +248,7 @@ link. Its closed payload is:
 |---|---|
 | namespace | order namespace and registry count after append |
 | submission projection | composite runtime/raw attempt; order and reservation IDs; full M3 request side/type/TIF/price/quantity; all caller-unforgeable attribution; account/route/venue/instrument and metadata; original approved quantity/notional and all seven scope keys; reservation state/remainder/cumulative allocation/closure; M3 OMS row/state; encoding/write identity and result; full submit disposition/stage/reason; applicable counter highs |
-| private event | complete normalized typed event before disposition |
+| private event | complete normalized typed source event plus its complete immutable tagged first-admission resolution before disposition |
 | reconciliation input | batch identity, row kind/ordinal, cut, and complete typed row |
 | safety fence | account, attempted admission ordinal, source identity/value, reason, and loss count |
 | reference intent | intent ID, state, and optional complete submit result |
@@ -272,7 +277,10 @@ reconciliation epoch, journal cut/watermark, and these complete semantic section
 - inventory source: known fill source/order and signed quantity/notional attribution;
 - inventory aggregate: canonical seven-scope cell key and exact signed/reserved/worst values;
 - unattributed exposure: kind, stable key, quantifiable projection or bounded retained fact;
-- event/trade identity: complete key, full semantic comparison value, and disposition;
+- event identity: complete key, full ingress comparison value, complete immutable tagged
+  first-admission resolution, and original disposition;
+- trade identity: complete key, full first-resolution execution/economic comparison value, and
+  disposition;
 - account safety: state, first reason, first quarantine reason, ordered active reasons/provenance;
 - reference intent: identity, recoverable state, and optional submit result; and
 - recovery notification: reconciliation epoch, bot, and Planned/Delivered state.
@@ -362,7 +370,7 @@ The deterministic reducer mapping is:
 | lookup Present | correlate and normalize acknowledgement; compare retained account/venue | `UnknownOrder` | safety-contained contradiction |
 | lookup Absent | retain negative evidence only; never release alone | `UnknownOrder` for unknown local identity | safety-contained contradiction |
 | open order | compare side/price/original quantity/metadata; normalize acknowledgement; fills still require execution rows | create/update `UnknownOpenOrder` by exchange key | safety-contained contradiction |
-| execution | require source-row side equal retained OMS side, omit side from the known normalized event, then use the normal OMS plan | pass required authoritative source-row side into the unknown normalized event and create/update unknown-trade projection | side mismatch or another contradiction makes the batch `Conflict` before economic mutation |
+| execution | retain source-row side unchanged in normalized ingress/evidence, require it equal retained OMS side, omit it only from the resolved known transition projection, then use the normal OMS plan | retain required authoritative source-row side in normalized ingress/evidence and create/update unknown-trade projection | side mismatch or another contradiction makes the batch `Conflict` before economic mutation |
 | current position | validate against cut inventory and replace/check position-difference row | retain unattributed difference | `UnexplainedPosition`/safety contradiction |
 | permission | validate accepted configured authority | retain mismatch | `PermissionMismatch` |
 | margin mode | validate accepted configured mode | retain mismatch | `MarginModeMismatch` |
@@ -372,10 +380,11 @@ baseline and retained side for later unknown execution/cancellation consistency 
 same account/venue/exchange key. A later execution row supplies its own authoritative side and must
 equal that retained side when the open-order row exists; mismatch makes the batch `Conflict`. The
 open-order row never supplies local bot, desk, strategy, route, or ownership. Reconciliation
-execution rows always require source-row side; this is authoritative input evidence, not a
-caller-owned normalized known-order field. A matching known row validates and strips it as specified
-above. An unknown row retains and passes it through, so the ADR-0010 optional-side case remains
-available to venue-origin events but not to this complete reconciliation row shape.
+execution rows always require source-row side; this is authoritative input evidence retained in the
+source-normalized event. A matching known row validates it and strips it only from the resolved
+known transition projection. An unknown row retains and passes it through, so the ADR-0010
+optional-side case remains available to venue-origin events but not to this complete reconciliation
+row shape.
 
 `RecoveryDecision : u8` assigns `MakeOperational = 1`,
 `KeepReconciliationRequired = 2`, and `KeepQuarantined = 3`. `ConvergenceClass : u8` assigns
