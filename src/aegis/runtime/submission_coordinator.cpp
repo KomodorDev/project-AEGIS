@@ -1,5 +1,5 @@
-// Purpose: construct the credential-free M3 submission stack and execute every canonical local
-// stage synchronously with exact rollback, conservative uncertainty, and bounded evidence.
+// Purpose: construct the credential-free M3 submission stack, optionally install one dormant M4
+// child while pristine, and preserve the unchanged synchronous path and bounded evidence.
 
 #include "submission_coordinator.hpp"
 
@@ -7,6 +7,7 @@
 #include "aegis/model/domain_error.hpp"
 #include "aegis/model/sha256.hpp"
 #include "aegis/runtime/bot_runtime.hpp"
+#include "private_order_reconciler.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -46,6 +48,7 @@ class SubmissionActiveGuard final {
 public:
 
   // --------------------------------------------------------
+  // Mark one callback-local submission active and retain its trace context for the guarded scope.
   SubmissionActiveGuard(bool& active,
                         std::optional<trace::SubmissionTraceContext>& context) noexcept
       : active_{active}, context_{context} {
@@ -53,6 +56,7 @@ public:
   }
 
   // --------------------------------------------------------
+  // Clear the callback-local trace context before reopening the owner to another submission.
   ~SubmissionActiveGuard() {
     context_.reset();
     active_ = false;
@@ -60,6 +64,7 @@ public:
 
   // --------------------------------------------------------
 private:
+  // Retain aliases to the two callback-local fields whose cleanup this scope guarantees.
   bool& active_;
   std::optional<trace::SubmissionTraceContext>& context_;
 };
@@ -324,6 +329,48 @@ SubmissionCoordinator::SubmissionCoordinator(
       trace_sink_{std::move(trace_provenance), policy_.capacities().submission_trace_capacity},
       diagnostics_{std::move(diagnostic_provenance),
                    policy_.capacities().submission_diagnostic_capacity} {}
+
+// --------------------------------------------------------
+// Destroy the last-declared dormant child before the M3 components it may inspect unwind.
+SubmissionCoordinator::~SubmissionCoordinator() = default;
+
+// --------------------------------------------------------
+// Install one fully validated dormant child only on a wholly pristine coordinator; every failure
+// returns InvalidM4Policy with all M3 business, evidence, fault, and probe state unchanged.
+model::Result<void> SubmissionCoordinator::install_dormant_private_order_reconciler(
+    const configuration::StartupConfiguration& configuration, const M4Policy& policy) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject reinstallation and every prior, active, faulted, evidenced, or instrumented M3 state
+  // before inspecting authority or allocating the dormant child.
+  if (private_order_reconciler_ || submit_active_ || attempts_consumed_ != 0U || reentry_traced_ ||
+      runtime_faulted_ || terminal_error_.has_value() || active_trace_context_.has_value() ||
+      reentry_probe_.has_value() || trace_append_fault_for_test_.has_value() ||
+      outbound_oms_.size() != 0U || ledger_.held_reservation_count() != 0U ||
+      encoder_.invocations_consumed() != 0U || initiator_.invocations_consumed() != 0U ||
+      trace_sink_.size() != 0U || diagnostics_.size() != 0U ||
+      diagnostics_.accepted_count() != 0U || diagnostics_.dropped_count() != 0U) {
+    return model::Result<void>::failure(model::DomainError::at_field(
+        model::DomainErrorCode::InvalidM4Policy, "private_order_reconciler.install_state"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Construct into a temporary so authority or allocation failure leaves this owner untouched.
+  auto created =
+      PrivateOrderReconciler::create_dormant_private_order_reconciler(*this, configuration, policy);
+  if (!created) {
+    return model::Result<void>::failure(std::move(created).error());
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Interesting syntax: the default-deleter unique_ptr is statically no-throw move-assignable, so
+  // sole publication cannot add a failure after every validation and allocation has completed.
+  static_assert(std::is_nothrow_move_assignable_v<std::unique_ptr<PrivateOrderReconciler>>);
+  private_order_reconciler_ = std::move(created).value();
+  return model::Result<void>::success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
 
 // --------------------------------------------------------
 // Copy only inert request/count data into the private bounded probe before any outer attempt

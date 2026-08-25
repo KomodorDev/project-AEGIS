@@ -1,10 +1,14 @@
-// Purpose: build one sealed fake-only M1-M4 authority fixture for M4 unit tests without exposing
+// Purpose: build sealed fake-only M1-M4 value and owner fixtures for unit tests without exposing
 // private coordinator mechanics or changing any accepted M1-M3 canonical fixture.
 
 #pragma once
 
 #include "aegis/configuration/startup_configuration.hpp"
 #include "aegis/runtime/m4_policy.hpp"
+#include "aegis/runtime/runtime_policy.hpp"
+#include "aegis/runtime/submission_coordinator.hpp"
+
+#include <memory>
 
 namespace aegis::test_support {
 
@@ -13,6 +17,18 @@ namespace aegis::test_support {
 // value/factory tests; temporary M3 composition objects do not escape construction.
 struct M4TestAuthority {
   configuration::StartupConfiguration configuration;
+  runtime::M4Policy m4_policy;
+};
+
+// ########################################################################
+
+// ########################################################################
+// The owner fixture keeps the exact sealed configuration, runtime policy, sole M3 coordinator,
+// and derived M4 policy together so owner-bound tests cannot substitute unrelated authority.
+struct M4OwnerTestAuthority {
+  configuration::StartupConfiguration configuration;
+  runtime::RuntimePolicy runtime_policy;
+  std::unique_ptr<runtime::SubmissionCoordinator> submission;
   runtime::M4Policy m4_policy;
 };
 
@@ -32,6 +48,19 @@ create_m4_test_authority_or_throw(runtime::M4PolicyCapacities capacities);
 // Build the same authority with ordinary coherent capacities; invalid fixture authority throws
 // std::logic_error without returning a partial value.
 [[nodiscard]] M4TestAuthority create_m4_test_authority_or_throw();
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Build an authored sealed chain while retaining the sole coordinator; invalid fixture authority
+// throws std::logic_error without returning a partial owner.
+[[nodiscard]] M4OwnerTestAuthority
+create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParams params);
+
+// --------------------------------------------------------
+// Build the reference sealed chain while retaining the sole coordinator; invalid fixture authority
+// throws std::logic_error without returning a partial owner.
+[[nodiscard]] M4OwnerTestAuthority create_m4_owner_test_authority_or_throw();
 
 // --------------------------------------------------------
 

@@ -1,5 +1,5 @@
-// Purpose: compose the complete deterministic M3 submission stack at the runtime layer and execute
-// route, risk, OMS, exact encoding, and offline fake initiation synchronously on one owner turn.
+// Purpose: compose the deterministic M3 submission stack, optionally install one dormant M4
+// pre-activation child while pristine, and execute the unchanged synchronous submission path.
 
 #pragma once
 
@@ -37,6 +37,19 @@ class BotContext;
 // ########################################################################
 
 // ########################################################################
+// The immutable M4 policy is borrowed only while a dormant owner-bound child validates and copies
+// it.
+class M4Policy;
+
+// ########################################################################
+
+// ########################################################################
+// The source-private dormant identity owner remains incomplete at this public M3 boundary.
+class PrivateOrderReconciler;
+
+// ########################################################################
+
+// ########################################################################
 // Source-private fault points let focused tests force exact canonical-append containment branches
 // without installing a callback, polymorphic fault source, or public runtime capability.
 enum class TraceAppendFaultPointForTest : std::uint8_t {
@@ -50,7 +63,8 @@ enum class TraceAppendFaultPointForTest : std::uint8_t {
 
 // ########################################################################
 // SubmissionCoordinator owns every mutable M3 component and is the sole direct-path entry below
-// BotContext. It exposes inspection only as immutable evidence and lower-layer state views.
+// BotContext. Before any M3 activity it may install one dormant, inspection-only M4 child, which is
+// destroyed first; no public operation activates that child or gives it event-processing authority.
 class SubmissionCoordinator final {
 public:
 
@@ -62,46 +76,78 @@ public:
          const runtime::RuntimePolicy& runtime_policy, FakeSubmissionRuntimeParams params);
 
   // --------------------------------------------------------
+  // Keep the final coordinator address and every uniquely owned M3/M4 component stable.
   SubmissionCoordinator(const SubmissionCoordinator&) = delete;
   SubmissionCoordinator& operator=(const SubmissionCoordinator&) = delete;
   SubmissionCoordinator(SubmissionCoordinator&&) = delete;
   SubmissionCoordinator& operator=(SubmissionCoordinator&&) = delete;
 
+  // --------------------------------------------------------
+  // Destroy the source-private child while its complete type and every borrowed owner component are
+  // still available; destruction performs no event processing.
+  ~SubmissionCoordinator();
+
+  // --------------------------------------------------------
+  // Install one fully allocated dormant identity child only while every M3 activity, evidence,
+  // fault, and test-probe field remains pristine. Dirty state, authority disagreement, unavailable
+  // capacity, or allocation failure returns InvalidM4Policy and leaves this owner unchanged;
+  // success publishes exactly one inspection-only child without activating private processing.
+  [[nodiscard]] model::Result<void>
+  install_dormant_private_order_reconciler(const configuration::StartupConfiguration& configuration,
+                                           const M4Policy& policy);
+
+  // --------------------------------------------------------
+  // Borrow the installed dormant child, or return null before successful installation.
+  [[nodiscard]] const PrivateOrderReconciler* private_order_reconciler() const noexcept {
+    return private_order_reconciler_.get();
+  }
+
+  // --------------------------------------------------------
+  // Borrow the exact installed route catalog used by the synchronous M3 owner.
   [[nodiscard]] const execution::OwnerLocalRouteCatalog& routes() const noexcept { return routes_; }
 
   // --------------------------------------------------------
+  // Borrow the exact owner-local reservation ledger used by synchronous submission.
   [[nodiscard]] const risk::ReservationLedger& reservations() const noexcept { return ledger_; }
 
   // --------------------------------------------------------
+  // Borrow the immutable submission policy that sized and authorized this owner.
   [[nodiscard]] const execution::SubmissionPolicy& policy() const noexcept { return policy_; }
 
   // --------------------------------------------------------
+  // Borrow the exact outbound OMS owned by the synchronous submission path.
   [[nodiscard]] const oms::OutboundOms& outbound_oms() const noexcept { return outbound_oms_; }
 
   // --------------------------------------------------------
+  // Borrow the deterministic credential-free encoder used by this owner.
   [[nodiscard]] const execution::DeterministicFakeOrderEncoder& encoder() const noexcept {
     return encoder_;
   }
 
   // --------------------------------------------------------
+  // Borrow the deterministic credential-free write initiator used by this owner.
   [[nodiscard]] const execution::DeterministicFakeWriteInitiator& initiator() const noexcept {
     return initiator_;
   }
 
   // --------------------------------------------------------
+  // Borrow the bounded canonical submission-trace prefix retained by this owner.
   [[nodiscard]] const trace::SubmissionTraceSink& trace_sink() const noexcept {
     return trace_sink_;
   }
 
   // --------------------------------------------------------
+  // Borrow the bounded submission-diagnostic prefix retained by this owner.
   [[nodiscard]] const runtime::SubmissionDiagnosticSink& diagnostics() const noexcept {
     return diagnostics_;
   }
 
   // --------------------------------------------------------
+  // Return whether an impossible lower-layer invariant has permanently faulted this owner.
   [[nodiscard]] bool runtime_faulted() const noexcept { return runtime_faulted_; }
 
   // --------------------------------------------------------
+  // Borrow the first terminal owner error, or typed absence while no fault is latched.
   [[nodiscard]] const std::optional<model::DomainError>& terminal_error() const noexcept {
     return terminal_error_;
   }
@@ -171,11 +217,14 @@ private:
     // ########################################################################
 
     // --------------------------------------------------------
+    // Bind one armed rollback right to the exact reservation and callback-local owner state.
     ReservationRollbackGuard(SubmissionCoordinator& coordinator,
                              model::ReservationId reservation_id, CallbackBinding binding,
                              model::OrderId order_id) noexcept;
 
     // --------------------------------------------------------
+    // Prevent duplicate rollback rights or reseating, and exercise any still-armed right at
+    // destruction.
     ReservationRollbackGuard(const ReservationRollbackGuard&) = delete;
     ReservationRollbackGuard& operator=(const ReservationRollbackGuard&) = delete;
     ReservationRollbackGuard(ReservationRollbackGuard&&) = delete;
@@ -193,9 +242,11 @@ private:
     retain_after_acceptance(const execution::FakeInitiationResult& initiation) noexcept;
 
     // --------------------------------------------------------
+    // Return the guard's exact one-way lifecycle state.
     [[nodiscard]] State state() const noexcept { return state_; }
 
     // --------------------------------------------------------
+    // Return the exact reservation protected by this guard.
     [[nodiscard]] model::ReservationId reservation_id() const noexcept { return reservation_id_; }
 
     // --------------------------------------------------------
@@ -276,6 +327,8 @@ private:
       const std::optional<std::uint64_t>* captured_measurement_finished = nullptr) noexcept;
 
   // --------------------------------------------------------
+  // Retain every M3 owner component, activity/fault latch, and the last-declared dormant M4 child;
+  // all mutable fields remain source-private to the serialized submission path.
   execution::OwnerLocalRouteCatalog routes_;
   risk::ReservationLedger ledger_;
   execution::SubmissionPolicy policy_;
@@ -294,6 +347,9 @@ private:
   std::optional<trace::SubmissionTraceContext> active_trace_context_;
   std::optional<ReentryProbe> reentry_probe_;
   std::optional<TraceAppendFaultPointForTest> trace_append_fault_for_test_;
+  // Declaring the source-private child last makes default destruction release it before every M3
+  // component whose immutable views it retains.
+  std::unique_ptr<PrivateOrderReconciler> private_order_reconciler_;
 };
 
 // ########################################################################

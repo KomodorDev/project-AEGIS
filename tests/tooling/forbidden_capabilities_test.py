@@ -694,9 +694,9 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
     # --------------------------------------------------------
     # The explicit M4 manifest covers every current foundation file and applies owner-hop rules to
-    # production normalization without widening those rules to test drivers.
+    # production owner construction/normalization without widening them to test drivers.
     def test_m4_manifest_covers_foundation_and_owner_paths(self) -> None:
-        """Pin current offline files and prove M4 production receives direct-path checks."""
+        """Pin current offline files and prove M4 owner production receives direct-path checks."""
 
         required = {
             "include/aegis/configuration/startup_configuration.hpp",
@@ -717,11 +717,17 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/runtime/m4_provenance_resolver.hpp",
             "src/aegis/runtime/private_order_event_factory.cpp",
             "src/aegis/runtime/private_order_event_factory.hpp",
+            "src/aegis/runtime/private_order_reconciler.cpp",
+            "src/aegis/runtime/private_order_reconciler.hpp",
+            "tests/support/m4_private_event_fixture.hpp",
+            "tests/support/m4_test_authority.cpp",
+            "tests/support/m4_test_authority.hpp",
             "tests/unit/model/m4_identity_test.cpp",
             "tests/unit/oms/private_order_event_test.cpp",
             "tests/unit/oms/private_order_resolution_test.cpp",
             "tests/unit/runtime/m4_policy_test.cpp",
             "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+            "tests/unit/runtime/private_order_reconciler_test.cpp",
         }
         required_owner = {
             "include/aegis/configuration/startup_configuration.hpp",
@@ -742,6 +748,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/runtime/m4_provenance_resolver.hpp",
             "src/aegis/runtime/private_order_event_factory.cpp",
             "src/aegis/runtime/private_order_event_factory.hpp",
+            "src/aegis/runtime/private_order_reconciler.cpp",
+            "src/aegis/runtime/private_order_reconciler.hpp",
         }
         general = set(scanner.M4_GENERAL_FILE_PATTERNS)
         owner = set(scanner.M4_OWNER_PATH_FILE_PATTERNS)
@@ -763,6 +771,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "include/aegis/risk/account_safety.hpp",
                 "src/aegis/configuration/startup_configuration.cpp",
                 "src/aegis/oms/private_order_resolution.cpp",
+                "src/aegis/runtime/private_order_reconciler.cpp",
+                "src/aegis/runtime/private_order_reconciler.hpp",
             ):
                 with self.subTest(path=path):
                     source = self.write(

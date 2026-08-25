@@ -84,11 +84,12 @@ add_library(
   src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
-  # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain, while
-  # the trusted resolver derives caller-unforgeable subject provenance from that same authority.
+  # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain; trusted
+  # runtime composition may install dormant owner-bound identity storage before any M3 activity.
   src/aegis/runtime/m4_policy.cpp
   src/aegis/runtime/m4_provenance_resolver.cpp
   src/aegis/runtime/private_order_event_factory.cpp
+  src/aegis/runtime/private_order_reconciler.cpp
   # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
   src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
