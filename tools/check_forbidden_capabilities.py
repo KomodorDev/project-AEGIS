@@ -145,11 +145,15 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
 # M4 paths remain an explicit credential-free/offline manifest so later connectivity milestones
 # cannot silently make the OMS, inventory, recovery foundation, tests, or evidence helpers live.
 M4_GENERAL_FILE_PATTERNS = (
+    "include/aegis/configuration/startup_configuration.hpp",
+    "include/aegis/market_data/subscription.hpp",
+    "include/aegis/model/bounded_identity.hpp",
     "include/aegis/model/m4_provenance.hpp",
     "include/aegis/oms/private_order_event.hpp",
     "include/aegis/oms/private_order_identity.hpp",
     "include/aegis/recovery/recovery_identity.hpp",
     "include/aegis/runtime/m4_policy.hpp",
+    "src/aegis/configuration/startup_configuration.cpp",
     "src/aegis/oms/private_order_event.cpp",
     "src/aegis/runtime/m4_policy.cpp",
     "src/aegis/runtime/m4_provenance_resolver.cpp",
@@ -168,11 +172,15 @@ M4_GENERAL_FILE_PATTERNS = (
 # These current M4 production files can execute during private owner admission/normalization and
 # therefore inherit the M3 direct path's no-file, no-handoff, no-blocking rule set.
 M4_OWNER_PATH_FILE_PATTERNS = (
+    "include/aegis/configuration/startup_configuration.hpp",
+    "include/aegis/market_data/subscription.hpp",
+    "include/aegis/model/bounded_identity.hpp",
     "include/aegis/model/m4_provenance.hpp",
     "include/aegis/oms/private_order_event.hpp",
     "include/aegis/oms/private_order_identity.hpp",
     "include/aegis/recovery/recovery_identity.hpp",
     "include/aegis/runtime/m4_policy.hpp",
+    "src/aegis/configuration/startup_configuration.cpp",
     "src/aegis/oms/private_order_event.cpp",
     "src/aegis/runtime/m4_policy.cpp",
     "src/aegis/runtime/m4_provenance_resolver.cpp",

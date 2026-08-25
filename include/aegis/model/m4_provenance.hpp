@@ -1,5 +1,6 @@
-// Purpose: carry the exact shared M4 root authority needed by OMS, inventory, recovery, runtime,
-// and evidence without making those lower subsystems depend on a composition-root policy type.
+// Purpose: carry the exact shared M4 root authority and resolver-minted subject provenance needed
+// by OMS, inventory, recovery, runtime, and evidence without introducing composition-policy
+// coupling.
 
 #pragma once
 

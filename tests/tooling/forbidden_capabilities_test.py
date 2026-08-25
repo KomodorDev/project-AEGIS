@@ -699,11 +699,15 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         """Pin current offline files and prove M4 production receives direct-path checks."""
 
         required = {
+            "include/aegis/configuration/startup_configuration.hpp",
+            "include/aegis/market_data/subscription.hpp",
+            "include/aegis/model/bounded_identity.hpp",
             "include/aegis/model/m4_provenance.hpp",
             "include/aegis/oms/private_order_event.hpp",
             "include/aegis/oms/private_order_identity.hpp",
             "include/aegis/recovery/recovery_identity.hpp",
             "include/aegis/runtime/m4_policy.hpp",
+            "src/aegis/configuration/startup_configuration.cpp",
             "src/aegis/oms/private_order_event.cpp",
             "src/aegis/runtime/m4_policy.cpp",
             "src/aegis/runtime/m4_provenance_resolver.cpp",
@@ -715,9 +719,27 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/runtime/m4_policy_test.cpp",
             "tests/unit/runtime/m4_provenance_resolver_test.cpp",
         }
+        required_owner = {
+            "include/aegis/configuration/startup_configuration.hpp",
+            "include/aegis/market_data/subscription.hpp",
+            "include/aegis/model/bounded_identity.hpp",
+            "include/aegis/model/m4_provenance.hpp",
+            "include/aegis/oms/private_order_event.hpp",
+            "include/aegis/oms/private_order_identity.hpp",
+            "include/aegis/recovery/recovery_identity.hpp",
+            "include/aegis/runtime/m4_policy.hpp",
+            "src/aegis/configuration/startup_configuration.cpp",
+            "src/aegis/oms/private_order_event.cpp",
+            "src/aegis/runtime/m4_policy.cpp",
+            "src/aegis/runtime/m4_provenance_resolver.cpp",
+            "src/aegis/runtime/m4_provenance_resolver.hpp",
+            "src/aegis/runtime/private_order_event_factory.cpp",
+            "src/aegis/runtime/private_order_event_factory.hpp",
+        }
         general = set(scanner.M4_GENERAL_FILE_PATTERNS)
         owner = set(scanner.M4_OWNER_PATH_FILE_PATTERNS)
         self.assertTrue(required <= general)
+        self.assertTrue(required_owner <= owner)
         self.assertTrue(owner <= general)
         discovered = {
             path.relative_to(REPOSITORY).as_posix()
@@ -727,16 +749,22 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(
-                repository,
-                "src/aegis/runtime/private_order_event_factory.cpp",
-                "#include <future>\nvoid owner_path() { SerializedExecutor executor; }\n",
-            )
-            findings = scanner.scan_paths(repository, [source])
-            self.assertEqual(
-                [finding.rule for finding in findings],
-                ["forbidden include", "executor handoff"],
-            )
+            for path in (
+                "include/aegis/market_data/subscription.hpp",
+                "include/aegis/model/bounded_identity.hpp",
+                "src/aegis/configuration/startup_configuration.cpp",
+            ):
+                with self.subTest(path=path):
+                    source = self.write(
+                        repository,
+                        path,
+                        "#include <future>\nvoid owner_path() { SerializedExecutor executor; }\n",
+                    )
+                    findings = scanner.scan_paths(repository, [source])
+                    self.assertEqual(
+                        [finding.rule for finding in findings],
+                        ["forbidden include", "executor handoff"],
+                    )
 
     # --------------------------------------------------------
     # Default scans must not silently succeed after an explicitly assigned artifact disappears.
