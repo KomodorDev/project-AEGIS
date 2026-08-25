@@ -57,13 +57,15 @@ M4 appends these stable `DomainErrorCode` values without changing earlier assign
 | 906 | `PrivateCounterExhausted` |
 
 One-event classification uses this failure precedence: owner/capability/re-entry gate; normalized
-ingress shape and assigned values; independently provable provenance/account/venue consistency;
-exact event duplicate/conflict over the correlation-independent ingress semantic value; correlation;
+ingress shape and assigned values; exact event duplicate/conflict over the correlation-independent
+ingress semantic value; independently provable provenance/account/venue consistency; correlation;
 exact trade duplicate/conflict over the first-admission resolved order/economics value; OMS
-transition; checked reservation/inventory plan; domain and evidence capacity; commit. Exact
-duplicate disposition precedes ordinary OMS capacity, just as M3 duplicate order identity precedes
-OMS capacity. A safety conflict follows its accepted quarantine plan rather than returning an
-economic partial failure.
+transition; checked reservation/inventory plan; domain and evidence capacity; commit. Event lookup
+before owner-provenance consistency is safe because an exact duplicate never mutates economics and
+reuses the retained first-admission resolution. It also gives a first-seen provenance failure one
+stable replay identity. Exact duplicate disposition precedes ordinary OMS capacity, just as M3
+duplicate order identity precedes OMS capacity. A safety conflict follows its accepted quarantine
+plan rather than returning an economic partial failure.
 
 ### Bounded private identities
 
@@ -163,10 +165,11 @@ origin envelope is:
 `NotOrderScoped = 4`. The immutable first-admission resolution is a closed tagged value: `Known`
 carries the exact local `OrderId` and complete retained-order subject; `Unknown` carries no extra
 subject because the source event already owns the maximal independently proved subject; and
-`Conflict` carries the stable `AccountSafetyReason::CorrelationConflict`. `NotOrderScoped` carries
-no extra subject and is required only for an account-scoped timeout or private-source disconnect,
-whose deterministic account-wide projection is not one-order correlation. A conflict stops before
-trade lookup and economic mutation. Zero and unassigned resolution values reject.
+`Conflict` carries exactly one assigned pre-trade `AccountSafetyReason`: `ProvenanceMismatch` or
+`CorrelationConflict`. No other account-safety reason is a resolution payload. `NotOrderScoped`
+carries no extra subject and is required only for an account-scoped timeout or private-source
+disconnect, whose deterministic account-wide projection is not one-order correlation. A conflict
+stops before trade lookup and economic mutation. Zero and unassigned resolution values reject.
 
 Every origin carries logical account, venue, and the complete applicable `M4Provenance` fixed by
 ADR-0013. Provenance in the normalized ingress value is correlation-independent and origin-based.
@@ -285,6 +288,12 @@ The reconciler checks the event key before correlation and the OMS transition:
 
 - the same key and correlation-independent ingress semantic value is an exact event duplicate;
 - the same key with a different ingress semantic value is an event-identity conflict.
+
+This lookup also precedes owner-provenance consistency. A first-seen normalized input whose root,
+account, venue, or independently proved source subject conflicts with the bound owner is retained as
+`SafetyContained` with `Conflict(ProvenanceMismatch)`. Its field-for-field identical replay is
+`ExactEventDuplicate`; the same key with any changed ingress-semantic field is
+`EventIdentityConflict`.
 
 Only a first-seen event reaches correlation and an execution's independent trade check:
 
@@ -520,7 +529,7 @@ The complete safety-only accepted partition is:
 |---|---|
 | shape-valid authoritative unknown acknowledgement, rejection, or cancellation | retain the event; add `UnknownOrder`; quarantine; no known-order economics |
 | shape-valid authoritative unknown execution | retain the event; add `UnknownTrade` first and `UnknownOrder` second when no retained authoritative unknown-order row has the same exchange key; quarantine; no known-order economics |
-| authoritative correlation, event-identity, trade-identity, or provenance conflict | retain conflict digest; apply its exact ADR-0011 quarantine reason; no economics |
+| event-identity or provenance conflict from any origin, or authoritative correlation or trade-identity conflict | retain conflict value; apply its exact ADR-0011 quarantine reason; no economics |
 | shape-valid authoritative acknowledgement, rejection, execution, or cancellation result for a known row that is not accepted by the economic/projection table | retain keys and fact as `SafetyContained`; apply `AuthoritativeContradiction`; no order economics |
 
 The last row includes every authoritative fact against `PreInitiation` or `LocallyFailed`, execution
@@ -537,6 +546,12 @@ commits a candidate new exchange-order mapping; an already committed mapping rem
 Event-identity conflict retains the existing event-registry row, and trade-identity conflict retains
 the existing trade-registry row. The contradictory fact remains explicit evidence without becoming
 new correlation authority.
+
+Reusing a local `LocalOrderEventId` with changed ingress semantics is the same
+`SafetyContained`/`EventIdentityConflict` fault as changing an authoritative event key; it is not
+the forbidden local state remainder. It changes no economics or mapping and emits no order callback
+because the conflicting local input cannot select a trusted originating order. A field-for-field
+equal local replay remains `ExactEventDuplicate` and likewise emits no callback.
 
 Every remaining shape-valid order-scoped local source/state combination is forbidden and returns the stable
 error without OMS, reservation, inventory, mapping, dedupe, safety, or callback mutation. Invalid
@@ -603,7 +618,8 @@ not add a new pure virtual requirement to every M1-M3 strategy. Order callbacks 
 cause context and never invent a market-data `SubscriptionId`.
 
 All newly contiguous facts in one owner turn commit before the first resulting callback. Every
-accepted known-owned `Applied`, `ProjectionOnly`, or `SafetyContained` input emits one callback;
+accepted newly correlated known-owned `Applied`, `ProjectionOnly`, or `SafetyContained` input emits
+one callback, except the pre-correlation event-identity conflict fixed above;
 an execution drain emits one for each newly applied execution in ascending cumulative endpoint
 order. Each notification names its event/trade and applied endpoint when present; every context
 query sees the same final batch-committed owner state. Exact duplicates, newly buffered gaps,
