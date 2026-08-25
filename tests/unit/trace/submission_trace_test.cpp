@@ -326,6 +326,51 @@ TEST_CASE("submission trace accepts the exact initiated sequence",
 }
 
 // --------------------------------------------------------
+// Schema one accepts only the five M3 OMS bytes even after the shared enum gains M4 lifecycle
+// values; every rejection preserves the accepted evidence prefix.
+TEST_CASE("submission trace rejects M4-only OMS lifecycle states",
+          "[trace][submission][schema][m3][m4]") {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Establish the exact accepted prefix immediately before the M3 OMS-admission evidence row.
+  trace::SubmissionTraceSink sink{provenance(), 12U};
+  auto fields = attempt_fields();
+  REQUIRE(sink.append(trace::SubmissionTraceEventKind::Attempt, fields));
+  fields.authorized_projection = projection();
+  REQUIRE(sink.append(trace::SubmissionTraceEventKind::RouteAuthorized, fields));
+  REQUIRE(sink.append(trace::SubmissionTraceEventKind::CanonicalValidated, fields));
+  fields.order_id = order_id();
+  REQUIRE(sink.append(trace::SubmissionTraceEventKind::IdentityGenerated, fields));
+  fields.reservation_id = identity<model::ReservationId>(1U);
+  fields.approved_exposure =
+      risk::OrderExposure{fields.context.request.quantity, decimal<model::Notional>(100U, 0U)};
+  REQUIRE(sink.append(trace::SubmissionTraceEventKind::RiskReserved, fields));
+  REQUIRE(sink.size() == 5U);
+  const auto accepted_prefix_bytes = sink.canonical_bytes();
+  REQUIRE(accepted_prefix_bytes);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Each appended M4 assignment is meaningful to the OMS but absent from AEGISSTS schema one.
+  constexpr std::array m4_states{
+      oms::OutboundOrderState::Working,   oms::OutboundOrderState::PartiallyFilled,
+      oms::OutboundOrderState::Filled,    oms::OutboundOrderState::ExchangeRejected,
+      oms::OutboundOrderState::Cancelled, oms::OutboundOrderState::ReconciledAbsent};
+  for (const auto state : m4_states) {
+    fields.oms_state = state;
+    const auto rejected = sink.append(trace::SubmissionTraceEventKind::OmsAdmitted, fields);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == model::DomainErrorCode::InvalidValue);
+    CHECK(rejected.error().context.field == "submission_trace.fields");
+    CHECK(sink.size() == 5U);
+    const auto retained_prefix_bytes = sink.canonical_bytes();
+    REQUIRE(retained_prefix_bytes);
+    CHECK(retained_prefix_bytes.value() == accepted_prefix_bytes.value());
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 // Definitive failures release once while uncertain acceptance retains conservative exposure.
 TEST_CASE("submission trace distinguishes release and uncertainty branches",
           "[trace][submission][outcomes][m3]") {

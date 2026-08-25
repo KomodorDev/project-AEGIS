@@ -78,6 +78,13 @@ price, quantity, instrument, timing, or a client-looking byte string. Local inte
 a contradictory complete authoritative order, execution, or position fact. A disagreement enters
 the account-safety state defined by ADR-0011 and remains visible in audit evidence.
 
+A venue cancellation result may carry an existing AEGIS-owned `CancelAttemptId` only as causal echo
+evidence when the trusted adapter retained the exact request/response binding before transmission or
+received a lossless authenticated native echo. The venue does not mint that identity, the identity
+does not establish local order ownership, and reconciliation never invents or attaches one. Recovery
+retains its exact presence and bytes as part of the normalized event and independently validates the
+resolved order and retained attempt before it can close anything.
+
 ### Safe fixed-point convergence
 
 M4 accepts exactly three convergence classes:
@@ -363,18 +370,19 @@ requires quarantine. A `Conflict` batch retains its raw bounded evidence and end
 
 Open-order absence alone is never a complete negative. An uncertain known order may transition to
 `ReconciledAbsent` and release its residual reservation only when all relevant coverage above is
-complete, no order/execution/position fact supports remaining exposure, and live catch-up closes the
-cut without a gap.
+complete, no order/execution/position fact or retained terminal-cumulative cancellation fact
+supports remaining exposure, and live catch-up closes the cut without a gap.
 
 Specifically, the complete-negative plan requires one `Absent` known-order row for the exact local
 identity under an exact-client-lookup or complete-history proof; no authoritative open-order row
 correlated by local bytes, exchange identity, or retained mapping; complete trade coverage beginning
 no later than the row's earliest possible acceptance and ending exactly at the batch cut; no
-unprocessed or pending execution interval; authoritative position equal to known inventory after
-covered executions; compatible permission/margin/instrument scope; and the completed catch-up
-certificate. A retained historical local/exchange mapping is AEGIS-owned correlation evidence, not
-an authoritative open order, and does not by itself block the negative proof. The plan preflights
-the residual release and commits through the same OMS plan. No subset is release authority.
+unprocessed or pending execution interval; no retained authoritative terminal cumulative quantity;
+authoritative position equal to known inventory after covered executions; compatible
+permission/margin/instrument scope; and the completed catch-up certificate. A retained historical
+local/exchange mapping is AEGIS-owned correlation evidence, not an authoritative open order, and
+does not by itself block the negative proof. The plan preflights the residual release and commits
+through the same OMS plan. No subset is release authority.
 
 ### Closed live-catch-up fence
 

@@ -332,8 +332,24 @@ PrivateOrderEventFactory::create_venue_cancellation_result_attempt(
   return model::Result<oms::PrivateOrderIngressAttempt>::success(
       create_authoritative_private_order_ingress_attempt(
           std::move(origin), account, venue, std::nullopt,
-          oms::CancellationResultPayload{std::move(locator), result,
+          oms::CancellationResultPayload{std::move(locator), result, std::nullopt,
                                          terminal_cumulative_quantity}));
+}
+
+// --------------------------------------------------------
+// Retain an exact venue request/response causal identity without treating it as order authority.
+model::Result<oms::PrivateOrderIngressAttempt>
+PrivateOrderEventFactory::create_venue_cancel_rejection_attempt_with_causal_id(
+    oms::VenuePrivateIngressOrigin origin, oms::PrivateOrderLocator locator,
+    oms::CancelAttemptId causal_cancel_attempt_id) const {
+  const auto account = origin.event_key.logical_account_id;
+  const auto venue = origin.event_key.venue_id;
+  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+      create_authoritative_private_order_ingress_attempt(
+          std::move(origin), account, venue, std::nullopt,
+          oms::CancellationResultPayload{std::move(locator),
+                                         oms::CancellationResult::CancelRejected,
+                                         std::move(causal_cancel_attempt_id), std::nullopt}));
 }
 
 // --------------------------------------------------------
@@ -347,6 +363,23 @@ PrivateOrderEventFactory::normalize_venue_cancellation_result(
   auto attempt = create_venue_cancellation_result_attempt(
       oms::VenuePrivateIngressOrigin{std::move(origin.event_key), origin.source_time},
       std::move(locator), result, terminal_cumulative_quantity);
+  if (!attempt) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+  }
+  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+      normalize_private_order_ingress_attempt(attempt.value(), received_at));
+}
+
+// --------------------------------------------------------
+// Attach one supplied receive observation to a causally bound venue cancel rejection.
+model::Result<oms::NormalizedPrivateOrderInput>
+PrivateOrderEventFactory::normalize_venue_cancel_rejection_with_causal_id(
+    oms::VenuePrivateEventOrigin origin, oms::PrivateOrderLocator locator,
+    oms::CancelAttemptId causal_cancel_attempt_id) const {
+  const auto received_at = origin.receive_time;
+  auto attempt = create_venue_cancel_rejection_attempt_with_causal_id(
+      oms::VenuePrivateIngressOrigin{std::move(origin.event_key), origin.source_time},
+      std::move(locator), std::move(causal_cancel_attempt_id));
   if (!attempt) {
     return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
   }
@@ -373,7 +406,8 @@ PrivateOrderEventFactory::normalize_reconciliation_cancellation_result(
                                               std::move(origin.authoritative_cut_id),
                                               origin.row_ordinal, origin.cut_time},
       std::move(logical_account_id), std::move(venue_id), std::nullopt,
-      oms::CancellationResultPayload{std::move(locator), result, terminal_cumulative_quantity});
+      oms::CancellationResultPayload{std::move(locator), result, std::nullopt,
+                                     terminal_cumulative_quantity});
   return model::Result<oms::NormalizedPrivateOrderInput>::success(
       normalize_private_order_ingress_attempt(attempt, received_at));
 }

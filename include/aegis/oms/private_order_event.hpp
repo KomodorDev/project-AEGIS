@@ -414,14 +414,16 @@ struct CancelWriteOutcomePayload {
 // ########################################################################
 
 // ########################################################################
-// An authoritative cancellation carries terminal cumulative quantity exactly for Cancelled.
+// An authoritative cancellation carries terminal cumulative quantity exactly for Cancelled and
+// optional trusted-adapter-bound attempt evidence exactly for a correlated CancelRejected result.
 struct CancellationResultPayload {
   PrivateOrderLocator locator;
   CancellationResult result;
+  std::optional<CancelAttemptId> causal_cancel_attempt_id;
   std::optional<model::Quantity> terminal_cumulative_quantity;
 
   // --------------------------------------------------------
-  // Structural equality compares the locator, result, and terminal-quantity presence profile.
+  // Structural equality compares the locator, result, causal-attempt evidence, and terminal value.
   friend bool operator==(const CancellationResultPayload&,
                          const CancellationResultPayload&) = default;
 

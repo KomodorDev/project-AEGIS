@@ -1,5 +1,5 @@
-// Purpose: implement collision-safe fixed-capacity outbound admission and the complete terminal M3
-// OMS transition table without releasing risk state or performing external work.
+// Purpose: implement collision-safe fixed-capacity outbound admission and initialize the complete
+// M3-to-M4 OMS projection without releasing risk state or performing external work.
 
 #include "aegis/oms/outbound_oms.hpp"
 
@@ -13,8 +13,14 @@ namespace aegis::oms {
 namespace {
 
 // --------------------------------------------------------
+// Construct the representation-independent zero used before any execution has been applied.
+[[nodiscard]] model::Quantity create_zero_quantity() {
+  return model::Quantity::from_scaled(0, 0).value();
+}
+
+// --------------------------------------------------------
 // Report every impossible admission or transition through the one stable OMS invariant code.
-[[nodiscard]] model::DomainError invalid_oms_state(std::string field) {
+[[nodiscard]] model::DomainError create_invalid_oms_state_error(std::string field) {
   return model::DomainError::at_field(model::DomainErrorCode::InvalidOmsState, std::move(field));
 }
 
@@ -31,9 +37,10 @@ namespace {
 } // namespace
 
 // --------------------------------------------------------
-// New rows always start at the sole pre-encoding state fixed by ADR-0009.
+// New rows retain the admitted economics and start with the exact pristine pre-execution M4
+// projection; the known zero construction cannot fail for its fixed literal.
 OutboundOrderRecord::OutboundOrderRecord(OutboundOrderAdmission admission)
-    : admission_{std::move(admission)} {}
+    : admission_{std::move(admission)}, cumulative_filled_quantity_{create_zero_quantity()} {}
 
 // --------------------------------------------------------
 
@@ -174,7 +181,8 @@ model::Result<OmsAdmissionResult> OutboundOms::admit(OutboundOrderAdmission admi
   // ++++++++++++++++++++++++++++++++++++++++
   // Treat contradictory risk/identity evidence as an invariant failure, not ordinary non-admission.
   if (!is_consistent(admission)) {
-    return model::Result<OmsAdmissionResult>::failure(invalid_oms_state("outbound_oms.admission"));
+    return model::Result<OmsAdmissionResult>::failure(
+        create_invalid_oms_state_error("outbound_oms.admission"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -197,7 +205,7 @@ model::Result<void> OutboundOms::transition(const model::OrderId& order_id,
                                             OutboundOrderState target) {
   auto* record = find_mutable(order_id);
   if (record == nullptr || record->state_ != expected) {
-    return model::Result<void>::failure(invalid_oms_state("outbound_oms.state"));
+    return model::Result<void>::failure(create_invalid_oms_state_error("outbound_oms.state"));
   }
   record->state_ = target;
   return model::Result<void>::success();
@@ -234,8 +242,21 @@ model::Result<void> OutboundOms::mark_write_initiated(const model::OrderId& orde
 // --------------------------------------------------------
 // Lost post-copy certainty retains the reservation-owning row as SubmissionUnknown.
 model::Result<void> OutboundOms::mark_submission_unknown(const model::OrderId& order_id) {
-  return transition(order_id, OutboundOrderState::PendingInitiation,
-                    OutboundOrderState::SubmissionUnknown);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve the M3 state transition's exact failure behavior before adding its M4 uncertainty.
+  auto result = transition(order_id, OutboundOrderState::PendingInitiation,
+                           OutboundOrderState::SubmissionUnknown);
+  if (!result) {
+    return result;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The successful transition guarantees the retained row still exists at its stable address.
+  find_mutable(order_id)->reconciliation_required_ = true;
+  return model::Result<void>::success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
@@ -243,8 +264,21 @@ model::Result<void> OutboundOms::mark_submission_unknown(const model::OrderId& o
 // accepted copy; conservatively require reconciliation while retaining the same order and risk.
 model::Result<void>
 OutboundOms::mark_submission_unknown_after_internal_fault(const model::OrderId& order_id) {
-  return transition(order_id, OutboundOrderState::WriteInitiated,
-                    OutboundOrderState::SubmissionUnknown);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Apply only the already-accepted conservative M3 downgrade before changing its M4 projection.
+  auto result = transition(order_id, OutboundOrderState::WriteInitiated,
+                           OutboundOrderState::SubmissionUnknown);
+  if (!result) {
+    return result;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A post-acceptance internal fault also creates an explicit later reconciliation obligation.
+  find_mutable(order_id)->reconciliation_required_ = true;
+  return model::Result<void>::success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------

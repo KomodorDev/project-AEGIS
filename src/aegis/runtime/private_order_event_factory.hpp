@@ -113,11 +113,26 @@ public:
       std::optional<model::Quantity> terminal_cumulative_quantity) const;
 
   // --------------------------------------------------------
+  // Create a venue CancelRejected attempt with an exact causal CancelAttemptId retained by the
+  // caller's request/response closure; this raw evidence grants no local-order authority.
+  [[nodiscard]] model::Result<oms::PrivateOrderIngressAttempt>
+  create_venue_cancel_rejection_attempt_with_causal_id(
+      oms::VenuePrivateIngressOrigin origin, oms::PrivateOrderLocator locator,
+      oms::CancelAttemptId causal_cancel_attempt_id) const;
+
+  // --------------------------------------------------------
   // Normalize an ordinary venue cancellation result with exact result-dependent cumulative shape.
   [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput> normalize_venue_cancellation_result(
       oms::VenuePrivateEventOrigin origin, oms::PrivateOrderLocator locator,
       oms::CancellationResult result,
       std::optional<model::Quantity> terminal_cumulative_quantity) const;
+
+  // --------------------------------------------------------
+  // Attach receive time to one causally bound venue rejection without inferring order ownership.
+  [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
+  normalize_venue_cancel_rejection_with_causal_id(
+      oms::VenuePrivateEventOrigin origin, oms::PrivateOrderLocator locator,
+      oms::CancelAttemptId causal_cancel_attempt_id) const;
 
   // --------------------------------------------------------
   // Normalize the same terminal/nonterminal cancellation result from reconciliation authority.
