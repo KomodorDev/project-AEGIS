@@ -54,6 +54,8 @@ add_executable(
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
   unit/runtime/runtime_policy_test.cpp
+  # M4 policy tests independently pin all 26 bounds, exact bytes, fingerprint, and root authority.
+  unit/runtime/m4_policy_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
   unit/runtime/submission_coordinator_test.cpp

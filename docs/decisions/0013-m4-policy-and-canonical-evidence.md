@@ -139,8 +139,28 @@ Generic `M4Policy` creation additionally requires:
 - namespace registrations are at least recovery epochs plus one;
 - checked `drain_width = 1 + max_pending_fill_intervals_per_order` is representable;
 - transition effects and callbacks are each at least `drain_width`;
-- per-turn audit scratch is at least `2 + drain_width`; and
+- per-turn audit scratch is at least `2 + drain_width`;
+- retained primary-audit backing
+  `max_private_audit_records * max_transition_effects_per_turn` is u32-representable;
+- initialization-preallocated Planned-callback backing
+  `floor(max_private_audit_records / 3) * max_order_callbacks_per_turn` is
+  u32-representable; and
 - every checked product used to preallocate reconciliation or recovery vectors is representable.
+
+The primary-audit product is checked before the Planned-callback product. Failure names
+`max_transition_effects_per_turn` or `max_order_callbacks_per_turn`, respectively, so a policy that
+overflows both products has one deterministic error precedence.
+
+An append-only store must retain one initialization-preallocated full-capacity effect buffer for
+every possible primary row. Let `p` be the positive number of primary rows in one callback-bearing
+span. Before that prefix is published, preflight reserves the full `p + 2` physical-slot span: the
+primary rows, one `Planned` row, and one terminal row. A fatal stop may leave only primary plus
+`Planned` records visible, but that sole active span's terminal slot and ordinal remain reserved and
+unusable, and the incarnation ends before either can be reused. Therefore every consumed `Planned`
+buffer corresponds to at least three reserved audit slots even when only two records become visible,
+and the maximum pool count is exactly `floor(max_private_audit_records / 3)`. Those two
+topology-derived maxima are the audit backing products checked above; owner turns never allocate
+either nested sequence.
 
 Reference-fixture capacity is validated separately, by the trusted component that owns each closed
 fixture rather than by generic policy creation. The longitudinal reference-intent driver requires
