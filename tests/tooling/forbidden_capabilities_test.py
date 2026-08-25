@@ -705,10 +705,13 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "include/aegis/model/m4_provenance.hpp",
             "include/aegis/oms/private_order_event.hpp",
             "include/aegis/oms/private_order_identity.hpp",
+            "include/aegis/oms/private_order_resolution.hpp",
             "include/aegis/recovery/recovery_identity.hpp",
+            "include/aegis/risk/account_safety.hpp",
             "include/aegis/runtime/m4_policy.hpp",
             "src/aegis/configuration/startup_configuration.cpp",
             "src/aegis/oms/private_order_event.cpp",
+            "src/aegis/oms/private_order_resolution.cpp",
             "src/aegis/runtime/m4_policy.cpp",
             "src/aegis/runtime/m4_provenance_resolver.cpp",
             "src/aegis/runtime/m4_provenance_resolver.hpp",
@@ -716,6 +719,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/runtime/private_order_event_factory.hpp",
             "tests/unit/model/m4_identity_test.cpp",
             "tests/unit/oms/private_order_event_test.cpp",
+            "tests/unit/oms/private_order_resolution_test.cpp",
             "tests/unit/runtime/m4_policy_test.cpp",
             "tests/unit/runtime/m4_provenance_resolver_test.cpp",
         }
@@ -726,10 +730,13 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "include/aegis/model/m4_provenance.hpp",
             "include/aegis/oms/private_order_event.hpp",
             "include/aegis/oms/private_order_identity.hpp",
+            "include/aegis/oms/private_order_resolution.hpp",
             "include/aegis/recovery/recovery_identity.hpp",
+            "include/aegis/risk/account_safety.hpp",
             "include/aegis/runtime/m4_policy.hpp",
             "src/aegis/configuration/startup_configuration.cpp",
             "src/aegis/oms/private_order_event.cpp",
+            "src/aegis/oms/private_order_resolution.cpp",
             "src/aegis/runtime/m4_policy.cpp",
             "src/aegis/runtime/m4_provenance_resolver.cpp",
             "src/aegis/runtime/m4_provenance_resolver.hpp",
@@ -752,7 +759,10 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             for path in (
                 "include/aegis/market_data/subscription.hpp",
                 "include/aegis/model/bounded_identity.hpp",
+                "include/aegis/oms/private_order_resolution.hpp",
+                "include/aegis/risk/account_safety.hpp",
                 "src/aegis/configuration/startup_configuration.cpp",
+                "src/aegis/oms/private_order_resolution.cpp",
             ):
                 with self.subTest(path=path):
                     source = self.write(
