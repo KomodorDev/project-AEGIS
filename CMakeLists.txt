@@ -71,10 +71,11 @@ add_library(
   src/aegis/model/sha256.cpp
   # Time implementation owns checked cross-clock arithmetic and deterministic clock advancement.
   src/aegis/model/time.cpp
-  # OMS retains local admission/state/provenance and the closed source-normalized private-event
-  # vocabulary, but owns no risk release or communication.
+  # OMS retains local admission/state/provenance plus the closed normalized-ingress and immutable
+  # resolution vocabularies, but owns no correlation storage, risk release, or communication.
   src/aegis/oms/outbound_oms.cpp
   src/aegis/oms/private_order_event.cpp
+  src/aegis/oms/private_order_resolution.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
   # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.

@@ -51,6 +51,8 @@ add_executable(
   unit/oms/outbound_oms_test.cpp
   # M4 private-event tests pin every source shape, bounded field, and ingress equality rule.
   unit/oms/private_order_event_test.cpp
+  # Resolution tests pin stable outcomes, origin-tagged registry keys, and sealed construction.
+  unit/oms/private_order_resolution_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
   # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.
