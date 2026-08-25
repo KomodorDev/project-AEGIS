@@ -149,8 +149,8 @@ void require_ingress_semantic_oracles_agree(const oms::NormalizedPrivateOrderInp
 } // namespace
 
 // --------------------------------------------------------
-// All ten source-normalization rows available before owner-bound OMS reconciliation produce their
-// exact assigned normalized vocabulary; four local-order rows remain later owner-local
+// All eleven source-normalization profiles available before owner-bound OMS reconciliation produce
+// their exact assigned normalized vocabulary; four local-order rows remain later owner-local
 // construction.
 TEST_CASE("normalized private event factory covers every accepted source shape", "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
@@ -197,6 +197,11 @@ TEST_CASE("normalized private event factory covers every accepted source shape",
       fixture.create_reconciliation_private_event_origin_or_throw(4U), fixture.account_id(),
       fixture.venue_id(), create_both_identity_locator_or_throw(fixture),
       oms::CancellationResult::CancelRejected, std::nullopt);
+  const auto causal_cancel_attempt_id = fixture.create_cancel_attempt_id_or_throw();
+  const auto correlated_venue_cancel_reject =
+      factory.normalize_venue_cancel_rejection_with_causal_id(
+          fixture.create_venue_private_event_origin_or_throw(5U),
+          create_both_identity_locator_or_throw(fixture), causal_cancel_attempt_id);
 
   REQUIRE(venue_ack);
   REQUIRE(reconciliation_ack);
@@ -206,6 +211,7 @@ TEST_CASE("normalized private event factory covers every accepted source shape",
   REQUIRE(reconciliation_fill);
   REQUIRE(venue_cancel);
   REQUIRE(reconciliation_cancel);
+  REQUIRE(correlated_venue_cancel_reject);
   REQUIRE(venue_ack.value().kind() == oms::PrivateOrderEventKind::ExchangeAcknowledged);
   REQUIRE(reconciliation_ack.value().origin() == oms::PrivateEventOrigin::Reconciliation);
   REQUIRE(reconciliation_ack.value().provenance().subject()->instrument().has_value());
@@ -215,6 +221,12 @@ TEST_CASE("normalized private event factory covers every accepted source shape",
   REQUIRE(reconciliation_fill.value().kind() == oms::PrivateOrderEventKind::Execution);
   REQUIRE(venue_cancel.value().kind() == oms::PrivateOrderEventKind::CancellationResult);
   REQUIRE(reconciliation_cancel.value().kind() == oms::PrivateOrderEventKind::CancellationResult);
+  const auto& correlated_cancel_payload =
+      std::get<oms::CancellationResultPayload>(correlated_venue_cancel_reject.value().payload());
+  REQUIRE(correlated_cancel_payload.causal_cancel_attempt_id == causal_cancel_attempt_id);
+  const auto& reconciliation_cancel_payload =
+      std::get<oms::CancellationResultPayload>(reconciliation_cancel.value().payload());
+  REQUIRE_FALSE(reconciliation_cancel_payload.causal_cancel_attempt_id);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Configured account and source facts cover the two non-order-scoped local rows.
@@ -258,6 +270,8 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   const auto execution_origin = fixture.create_venue_private_event_origin_or_throw(23U, 103U, 203U);
   const auto cancellation_origin =
       fixture.create_venue_private_event_origin_or_throw(24U, 104U, 204U);
+  const auto correlated_cancellation_origin =
+      fixture.create_venue_private_event_origin_or_throw(27U, 107U, 207U);
   const auto timeout_origin = fixture.create_local_private_event_origin_or_throw(25U, 105U, 205U);
   const auto disconnect_origin =
       fixture.create_local_private_event_origin_or_throw(26U, 106U, 206U);
@@ -291,6 +305,15 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   const auto cancellation = factory.normalize_venue_cancellation_result(
       cancellation_origin, create_both_identity_locator_or_throw(fixture),
       oms::CancellationResult::Cancelled, two);
+  const auto causal_cancel_attempt_id = fixture.create_cancel_attempt_id_or_throw();
+  const auto correlated_cancellation_attempt =
+      factory.create_venue_cancel_rejection_attempt_with_causal_id(
+          oms::VenuePrivateIngressOrigin{correlated_cancellation_origin.event_key,
+                                         correlated_cancellation_origin.source_time},
+          create_both_identity_locator_or_throw(fixture), causal_cancel_attempt_id);
+  const auto correlated_cancellation = factory.normalize_venue_cancel_rejection_with_causal_id(
+      correlated_cancellation_origin, create_both_identity_locator_or_throw(fixture),
+      causal_cancel_attempt_id);
   const auto timeout_attempt = factory.create_account_timeout_attempt(
       oms::LocalPrivateIngressOrigin{timeout_origin.event_id, timeout_origin.source_time},
       fixture.account_id(), fixture.venue_id());
@@ -310,6 +333,8 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   REQUIRE(execution);
   REQUIRE(cancellation_attempt);
   REQUIRE(cancellation);
+  REQUIRE(correlated_cancellation_attempt);
+  REQUIRE(correlated_cancellation);
   REQUIRE(timeout_attempt);
   REQUIRE(timeout);
   REQUIRE(disconnect_attempt);
@@ -325,6 +350,9 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
         oms::PrivateEventIngressSemanticValue::from_normalized_input(execution.value()));
   CHECK(cancellation_attempt.value().semantic_value() ==
         oms::PrivateEventIngressSemanticValue::from_normalized_input(cancellation.value()));
+  CHECK(correlated_cancellation_attempt.value().semantic_value() ==
+        oms::PrivateEventIngressSemanticValue::from_normalized_input(
+            correlated_cancellation.value()));
   CHECK(timeout_attempt.value().semantic_value() ==
         oms::PrivateEventIngressSemanticValue::from_normalized_input(timeout.value()));
   CHECK(disconnect_attempt.value().semantic_value() ==
@@ -643,7 +671,8 @@ TEST_CASE("normalized private event factory rejects every malformed dependent bo
                                             execution::OrderSide::Sell));
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Cancellation terminal cumulative is present iff Cancelled and cannot be negative.
+  // Cancellation terminal cumulative is present iff Cancelled; only a venue rejection may carry
+  // exact causal cancel-attempt evidence.
   REQUIRE_FALSE(factory.normalize_venue_cancellation_result(
       fixture.create_venue_private_event_origin_or_throw(),
       create_both_identity_locator_or_throw(fixture), oms::CancellationResult::Cancelled,
@@ -664,14 +693,38 @@ TEST_CASE("normalized private event factory rejects every malformed dependent bo
       fixture.create_venue_private_event_origin_or_throw(),
       create_both_identity_locator_or_throw(fixture), oms::CancellationResult::Cancelled,
       zero_quantity));
-  REQUIRE(factory.normalize_venue_cancellation_result(
+  const auto uncorrelated_venue_rejection = factory.normalize_venue_cancellation_result(
       fixture.create_venue_private_event_origin_or_throw(),
       create_both_identity_locator_or_throw(fixture), oms::CancellationResult::CancelRejected,
-      std::nullopt));
+      std::nullopt);
+  REQUIRE(uncorrelated_venue_rejection);
+  const auto& uncorrelated_venue_rejection_payload =
+      std::get<oms::CancellationResultPayload>(uncorrelated_venue_rejection.value().payload());
+  CHECK_FALSE(uncorrelated_venue_rejection_payload.causal_cancel_attempt_id);
+  CHECK_FALSE(uncorrelated_venue_rejection_payload.terminal_cumulative_quantity);
+  const auto causal_cancel_attempt_id = fixture.create_cancel_attempt_id_or_throw();
+  const auto correlated_rejection = factory.normalize_venue_cancel_rejection_with_causal_id(
+      fixture.create_venue_private_event_origin_or_throw(),
+      create_both_identity_locator_or_throw(fixture), causal_cancel_attempt_id);
+  REQUIRE(correlated_rejection);
+  const auto& correlated_rejection_payload =
+      std::get<oms::CancellationResultPayload>(correlated_rejection.value().payload());
+  CHECK(correlated_rejection_payload.result == oms::CancellationResult::CancelRejected);
+  CHECK(correlated_rejection_payload.causal_cancel_attempt_id == causal_cancel_attempt_id);
+  CHECK_FALSE(correlated_rejection_payload.terminal_cumulative_quantity);
   REQUIRE_FALSE(factory.normalize_reconciliation_cancellation_result(
       fixture.create_reconciliation_private_event_origin_or_throw(), fixture.account_id(),
       fixture.venue_id(), create_both_identity_locator_or_throw(fixture),
       oms::CancellationResult::Cancelled, std::nullopt));
+  const auto uncorrelated_reconciliation_rejection =
+      factory.normalize_reconciliation_cancellation_result(
+          fixture.create_reconciliation_private_event_origin_or_throw(), fixture.account_id(),
+          fixture.venue_id(), create_both_identity_locator_or_throw(fixture),
+          oms::CancellationResult::CancelRejected, std::nullopt);
+  REQUIRE(uncorrelated_reconciliation_rejection);
+  CHECK_FALSE(std::get<oms::CancellationResultPayload>(
+                  uncorrelated_reconciliation_rejection.value().payload())
+                  .causal_cancel_attempt_id);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Local account/source facts require an exact configured venue binding.
@@ -976,7 +1029,8 @@ TEST_CASE("normalized private event equality covers every source payload family"
   REQUIRE_FALSE(acknowledgement.is_ingress_semantically_equal_to(both_reject));
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Cancellation result and terminal cumulative presence/value remain exact semantic fields.
+  // Cancellation result, terminal cumulative, and causal-attempt presence/value remain exact
+  // semantic fields; receive time remains excluded.
   const auto cancelled =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_cancellation_result(
           fixture.create_venue_private_event_origin_or_throw(), both,
@@ -987,12 +1041,33 @@ TEST_CASE("normalized private event equality covers every source payload family"
           fixture.create_venue_private_event_origin_or_throw(), both,
           oms::CancellationResult::Cancelled,
           test_support::create_m4_decimal_or_throw<model::Quantity>(2)));
+  const auto cancellation_rejection_origin =
+      fixture.create_venue_private_event_origin_or_throw(61U, 161U, 261U);
   const auto rejected =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_cancellation_result(
-          fixture.create_venue_private_event_origin_or_throw(), both,
-          oms::CancellationResult::CancelRejected, std::nullopt));
+          cancellation_rejection_origin, both, oms::CancellationResult::CancelRejected,
+          std::nullopt));
+  const auto first_causal_id = fixture.create_cancel_attempt_id_or_throw(1U);
+  const auto second_causal_id = fixture.create_cancel_attempt_id_or_throw(2U);
+  const auto correlated_rejected = take_normalized_private_order_input_or_throw(
+      factory.normalize_venue_cancel_rejection_with_causal_id(cancellation_rejection_origin, both,
+                                                              first_causal_id));
+  const auto changed_causal_id = take_normalized_private_order_input_or_throw(
+      factory.normalize_venue_cancel_rejection_with_causal_id(cancellation_rejection_origin, both,
+                                                              second_causal_id));
+  const auto changed_receive_time = take_normalized_private_order_input_or_throw(
+      factory.normalize_venue_cancel_rejection_with_causal_id(
+          fixture.create_venue_private_event_origin_or_throw(61U, 161U, 262U), both,
+          first_causal_id));
   REQUIRE_FALSE(cancelled.is_ingress_semantically_equal_to(changed_cumulative));
   REQUIRE_FALSE(cancelled.is_ingress_semantically_equal_to(rejected));
+  REQUIRE_FALSE(rejected.is_ingress_semantically_equal_to(correlated_rejected));
+  REQUIRE_FALSE(correlated_rejected.is_ingress_semantically_equal_to(changed_causal_id));
+  REQUIRE(correlated_rejected.is_ingress_semantically_equal_to(changed_receive_time));
+  REQUIRE_FALSE(correlated_rejected == changed_receive_time);
+  require_ingress_semantic_oracles_agree(rejected, correlated_rejected);
+  require_ingress_semantic_oracles_agree(correlated_rejected, changed_causal_id);
+  require_ingress_semantic_oracles_agree(correlated_rejected, changed_receive_time);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

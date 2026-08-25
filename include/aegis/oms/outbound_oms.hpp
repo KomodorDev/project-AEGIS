@@ -57,8 +57,10 @@ enum class CancellationState : std::uint8_t {
 
 // ########################################################################
 // A complete detached copy of one row's mutable M4 projection supports recovery and atomic tests
-// without exposing a mutable record alias. Values returned by OutboundOrderRecord are coherent
-// snapshots; a caller-authored or modified copy grants no authority over the retained row.
+// without exposing a mutable record alias. The execution-evidence and execution-established-mapping
+// facts are monotonic; the latter implies the former and a retained exchange identity. Values
+// returned by OutboundOrderRecord are coherent snapshots, and a caller-authored or modified copy
+// grants no authority over the retained row.
 struct PrivateOrderProjection {
   OutboundOrderState state;
   bool exchange_acknowledged;
