@@ -202,20 +202,27 @@ scenarios inject the lineage and a distinct namespace at every restart.
 
 ### Journal ordering
 
-The fake journal is an append-only bounded sequence of immutable canonical recovery records.
+The fake journal is an append-only bounded sequence of immutable canonical typed recovery records.
+Until ADR-0014 exists, canonical here means one complete validated semantic value, not an
+`AEGISJRN` byte schema, encoder, digest, or real durable-media representation.
 
-1. Side-effect-free planning validates the typed payload, derives its semantic digest, reserves the
-   complete record, and assigns the next sequence only after all headroom succeeds.
+1. Side-effect-free planning validates and retains the complete typed semantic payload, reserves
+   the complete record, and assigns the next sequence only after all headroom succeeds. ADR-0014
+   later derives and validates the canonical semantic digest from that same value.
 2. The no-fail commit publishes the prepared record in causal owner-turn order before the business
    projection that it drives.
 3. A record includes lineage, predecessor sequence, runtime/reconciliation epoch when applicable,
-   complete replay provenance, semantic payload digest, and canonical audit linkage.
+   complete replay provenance, the complete typed semantic value, and applicable typed audit
+   linkage. Its digest is absent until the accepted ADR-0014 encoder exists. A
+   `NamespaceRegistered` record is root-scoped and has no runtime/reconciliation epoch, subject,
+   replay provenance, or audit link.
 4. A pre-commit failure releases the reservation and consumes no sequence; a published sequence is
    immutable within the incarnation, while an unacknowledged discarded sequence may be allocated
    again after restart from durable watermark plus one.
 5. Durability acknowledgement advances only across one contiguous published prefix.
-6. Acknowledgement beyond a gap, conflicting duplicate sequence, digest mismatch, overflow, or
-   incompatible lineage/provenance is a recovery fault.
+6. Acknowledgement beyond a gap, conflicting duplicate sequence, typed-value mismatch, overflow,
+   or incompatible lineage/provenance is a recovery fault. ADR-0014 additionally makes canonical
+   digest mismatch a recovery fault.
 
 The closed `JournalRecordKind` assignments and semantic payloads are in ADR-0013. `PrivateEventInput`
 replays through the normal event reconciler, which must derive the same complete tagged correlation
