@@ -163,6 +163,8 @@ M4_GENERAL_FILE_PATTERNS = (
     "src/aegis/runtime/m4_provenance_resolver.hpp",
     "src/aegis/runtime/private_order_event_factory.cpp",
     "src/aegis/runtime/private_order_event_factory.hpp",
+    "src/aegis/runtime/private_order_reconciler.cpp",
+    "src/aegis/runtime/private_order_reconciler.hpp",
     "tests/support/m4_private_event_fixture.hpp",
     "tests/support/m4_test_authority.cpp",
     "tests/support/m4_test_authority.hpp",
@@ -171,9 +173,10 @@ M4_GENERAL_FILE_PATTERNS = (
     "tests/unit/oms/private_order_resolution_test.cpp",
     "tests/unit/runtime/m4_policy_test.cpp",
     "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+    "tests/unit/runtime/private_order_reconciler_test.cpp",
 )
 
-# These current M4 production files can execute during private owner admission/normalization and
+# These current M4 production files can execute during private owner construction/normalization and
 # therefore inherit the M3 direct path's no-file, no-handoff, no-blocking rule set.
 M4_OWNER_PATH_FILE_PATTERNS = (
     "include/aegis/configuration/startup_configuration.hpp",
@@ -194,6 +197,8 @@ M4_OWNER_PATH_FILE_PATTERNS = (
     "src/aegis/runtime/m4_provenance_resolver.hpp",
     "src/aegis/runtime/private_order_event_factory.cpp",
     "src/aegis/runtime/private_order_event_factory.hpp",
+    "src/aegis/runtime/private_order_reconciler.cpp",
+    "src/aegis/runtime/private_order_reconciler.hpp",
 )
 BUILD_FILES = (
     Path("CMakeLists.txt"),

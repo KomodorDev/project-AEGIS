@@ -1,5 +1,5 @@
-// Purpose: compose deterministic fake-only M3 authorities and derive the sealed M4 unit-test root
-// through the same public factories used by production startup.
+// Purpose: compose deterministic fake-only M3 authorities and derive sealed M4 value or owner
+// fixtures through the same public factories used by production startup.
 
 #include "m4_test_authority.hpp"
 
@@ -149,6 +149,47 @@ M4TestAuthority create_m4_test_authority_or_throw(runtime::M4PolicyCapacities ca
 // std::logic_error without returning a partial value.
 M4TestAuthority create_m4_test_authority_or_throw() {
   return create_m4_test_authority_or_throw(create_ordinary_m4_policy_capacities());
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Retain the sole M3 owner beside the M4 policy derived from authored sealed authorities; invalid
+// fixture authority throws std::logic_error without returning a partial owner.
+M4OwnerTestAuthority
+create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParams params) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Seal the authored M3-enabled startup and its matching runtime policy.
+  auto configured = configuration::StartupConfiguration::create(std::move(params));
+  if (!configured) {
+    throw std::logic_error{"invalid startup configuration in M4 owner fixture"};
+  }
+  auto configuration = std::move(configured).value();
+  auto runtime = create_runtime_policy_or_throw(configuration);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Build the one coordinator before deriving M4 authority from its retained policies.
+  auto submission = create_submission_coordinator_or_throw(configuration, runtime);
+  auto policy =
+      runtime::M4Policy::create(configuration, runtime, submission->reservations().policy(),
+                                submission->policy(), create_ordinary_m4_policy_capacities());
+  if (!policy) {
+    throw std::logic_error{"invalid M4 policy in M4 owner fixture"};
+  }
+  return M4OwnerTestAuthority{std::move(configuration), std::move(runtime), std::move(submission),
+                              std::move(policy).value()};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Build the unchanged reference owner through the authored owner fixture; invalid authority throws
+// std::logic_error without returning a partial owner.
+M4OwnerTestAuthority create_m4_owner_test_authority_or_throw() {
+  return create_m4_owner_test_authority_or_throw(m3_enabled_two_firm_configuration_params());
 }
 
 // --------------------------------------------------------
