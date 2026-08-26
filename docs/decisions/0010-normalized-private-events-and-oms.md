@@ -252,9 +252,11 @@ cumulative quantity, execution price, canonical economic side, and one resolutio
 either `Known(OrderId)` or `Unknown(raw local locator presence/value, raw exchange locator
 presence/value)`. Known canonical side comes from the retained OMS row after any supplied source
 side has been checked for equality; unknown canonical side is the supplied side or typed absence. A
-known source-side mismatch is safety-contained before trade lookup. Account, venue, and trade ID
-belong to the `TradeKey`, not the value. Ordinary event identity, source time, root/source
-provenance, receive time, evidence ordinals, and known source-side presence are excluded.
+known source-side mismatch is safety-contained as `AuthoritativeContradiction` before trade lookup.
+It retains the first-seen `Known` event resolution but publishes no candidate mapping. Account,
+venue, and trade ID belong to the `TradeKey`, not the value. Ordinary event identity, source time,
+root/source provenance, receive time, evidence ordinals, and known source-side presence are
+excluded.
 
 The same trade key and equal complete tuple is an exact trade duplicate; any included field or
 resolution difference is a trade conflict. A formerly unknown trade that appears under a distinct
@@ -275,6 +277,35 @@ Correlation uses complete identity equality and this precedence:
 5. One exchange identity cannot bind two local orders.
 6. Side, price, quantity, instrument, timestamps, and visual similarity are never ownership proof.
 7. A syntactically valid but unknown client identity remains unknown.
+
+Every local row resolved by either locator must have retained `LogicalAccountId` and `VenueId`
+exactly equal to the normalized source. This guard applies before every row in the table below; a
+source mismatch is `Conflict(CorrelationConflict)` with no candidate mapping or trade lookup. It
+prevents a globally valid `OrderId` or a corrupted exchange mapping from crossing account, venue,
+or firm ownership.
+
+The complete raw-locator truth table is finite. `Bound same` means the exchange key already maps to
+the local row named by the local locator; `bound other` means it maps to a different retained row.
+An unbound exchange locator is not itself a contradiction, and two unproved locators cannot prove
+each other:
+
+| Local locator | Exchange locator | Resolution |
+|---|---|---|
+| absent | bound | `Known` using the permanent mapping |
+| absent | unbound | `Unknown` |
+| known | absent | `Known` |
+| unknown | absent | `Unknown` |
+| known | bound same | `Known` |
+| known, no existing reverse mapping | unbound | `Known` plus a candidate mapping |
+| known, already reverse-bound to another exchange key | unbound | `Conflict(CorrelationConflict)` |
+| known | bound other | `Conflict(CorrelationConflict)` |
+| unknown | bound | `Conflict(CorrelationConflict)` |
+| unknown | unbound | `Unknown` |
+
+The empty-locator combination is rejected by shape validation before this table. A candidate mapping
+is only a prepared effect: an exact event/trade duplicate, source-side mismatch, trade conflict,
+forbidden local transition, or any later safety-only classification suppresses it. Only a fully
+accepted first-seen economic/projection transition may publish the candidate mapping.
 
 An execution before acknowledgement is valid when these rules uniquely identify a retained local
 order. It may establish the exchange-order mapping without setting the acknowledgement flag.
@@ -545,7 +576,9 @@ resolution, and, for an execution that reaches trade classification, its trade i
 commits a candidate new exchange-order mapping; an already committed mapping remains unchanged.
 Event-identity conflict retains the existing event-registry row, and trade-identity conflict retains
 the existing trade-registry row. The contradictory fact remains explicit evidence without becoming
-new correlation authority.
+new correlation authority. Its complete prepared journal input carries the retained first-admission
+resolution only as replay-comparison evidence; the event-identity-conflict branch, not that
+resolution, selects containment and cannot select an order mutation or callback.
 
 Reusing a local `LocalOrderEventId` with changed ingress semantics is the same
 `SafetyContained`/`EventIdentityConflict` fault as changing an authoritative event key; it is not
