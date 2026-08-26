@@ -9,6 +9,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -23,8 +24,8 @@ using namespace aegis;
 
 // ########################################################################
 // Interesting syntax: requires-expression concepts prove forbidden public capabilities remain
-// absent without needing a callable test backdoor. The fake stays concrete, single-owner, and
-// offline.
+// absent and the checked audit-span factory rejects ambiguous count types without invoking either
+// interface. The fake stays concrete, single-owner, and offline.
 template <typename Value>
 concept HasPublicEndpoint = requires(Value& value) { value.endpoint(); };
 
@@ -48,6 +49,12 @@ template <typename Value>
 concept HasPublicOrderIdProviderExtraction =
     requires(Value& value) { value.take_order_id_provider(); };
 
+template <typename Count>
+concept AcceptsAuditSpanRecordCount =
+    requires(recovery::AuditOrdinal first_audit_ordinal, Count audit_record_count) {
+      recovery::AuditSpan::create_audit_span(first_audit_ordinal, audit_record_count);
+    };
+
 static_assert(std::is_final_v<recovery::DeterministicFakeRecoveryMedium>);
 static_assert(!std::is_copy_constructible_v<recovery::DeterministicFakeRecoveryMedium>);
 static_assert(!std::is_move_constructible_v<recovery::DeterministicFakeRecoveryMedium>);
@@ -60,6 +67,15 @@ static_assert(!HasPublicRetryOperation<recovery::DeterministicFakeRecoveryMedium
 static_assert(!HasPublicJournalAccessor<recovery::RecoveryBootstrap>);
 static_assert(!HasPublicJournalAcknowledgementOperation<recovery::RecoveryBootstrap>);
 static_assert(!HasPublicOrderIdProviderExtraction<recovery::RecoveryBootstrap>);
+static_assert(std::is_final_v<recovery::AuditSpan>);
+static_assert(!std::is_default_constructible_v<recovery::AuditSpan>);
+static_assert(!std::is_constructible_v<recovery::AuditSpan, recovery::AuditOrdinal, std::uint32_t,
+                                       recovery::AuditOrdinal>);
+static_assert(AcceptsAuditSpanRecordCount<std::uint32_t>);
+static_assert(!AcceptsAuditSpanRecordCount<bool>);
+static_assert(!AcceptsAuditSpanRecordCount<double>);
+static_assert(!AcceptsAuditSpanRecordCount<char>);
+static_assert(!AcceptsAuditSpanRecordCount<recovery::JournalRecordKind>);
 static_assert(static_cast<std::uint8_t>(recovery::JournalRecordKind::NamespaceRegistered) == 1U);
 static_assert(static_cast<std::uint8_t>(recovery::JournalRecordKind::SubmissionProjection) == 2U);
 static_assert(static_cast<std::uint8_t>(recovery::JournalRecordKind::PrivateEventInput) == 3U);
@@ -121,6 +137,61 @@ create_deterministic_recovery_medium_from_authority_or_throw(const Authority& au
       recovery::DeterministicFakeRecoveryMedium::
           create_deterministic_fake_recovery_medium_from_policy(construct_recovery_lineage(),
                                                                 authority.m4_policy));
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Checked audit spans retain exactly one nonempty contiguous range and reject narrowing or ordinal
+// wrap before a journal record can own the result.
+TEST_CASE("M4 audit spans retain one exact nonwrapping ordinal range",
+          "[recovery][m4][journal][value]") {
+  const auto first_audit_ordinal =
+      take_recovery_result_value_or_throw(recovery::AuditOrdinal::from_value(7U));
+  const auto signed_count_span = take_recovery_result_value_or_throw(
+      recovery::AuditSpan::create_audit_span(first_audit_ordinal, 3));
+  CHECK(signed_count_span.first_audit_ordinal().value() == 7U);
+  CHECK(signed_count_span.audit_record_count() == 3U);
+  CHECK(signed_count_span.last_audit_ordinal().value() == 9U);
+  CHECK(signed_count_span ==
+        take_recovery_result_value_or_throw(
+            recovery::AuditSpan::create_audit_span(first_audit_ordinal, std::uint64_t{3U})));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Empty, negative, and too-wide authored counts fail identically instead of converting.
+  const auto zero_count = recovery::AuditSpan::create_audit_span(first_audit_ordinal, 0);
+  REQUIRE_FALSE(zero_count);
+  CHECK(zero_count.error().code == model::DomainErrorCode::InvalidRecoveryPolicy);
+  CHECK(zero_count.error().context.field == "audit_span.count");
+
+  const auto negative_count = recovery::AuditSpan::create_audit_span(first_audit_ordinal, -1);
+  REQUIRE_FALSE(negative_count);
+  CHECK(negative_count.error().code == model::DomainErrorCode::InvalidRecoveryPolicy);
+  CHECK(negative_count.error().context.field == "audit_span.count");
+
+  const auto too_wide_count = recovery::AuditSpan::create_audit_span(
+      first_audit_ordinal,
+      static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1U);
+  REQUIRE_FALSE(too_wide_count);
+  CHECK(too_wide_count.error().code == model::DomainErrorCode::InvalidRecoveryPolicy);
+  CHECK(too_wide_count.error().context.field == "audit_span.count");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The terminal ordinal accepts one row, while a second row would wrap the inclusive last value.
+  const auto terminal_audit_ordinal = take_recovery_result_value_or_throw(
+      recovery::AuditOrdinal::from_value(std::numeric_limits<std::uint64_t>::max()));
+  const auto terminal_span = take_recovery_result_value_or_throw(
+      recovery::AuditSpan::create_audit_span(terminal_audit_ordinal, 1U));
+  CHECK(terminal_span.first_audit_ordinal() == terminal_audit_ordinal);
+  CHECK(terminal_span.audit_record_count() == 1U);
+  CHECK(terminal_span.last_audit_ordinal() == terminal_audit_ordinal);
+
+  const auto wrapped_span = recovery::AuditSpan::create_audit_span(terminal_audit_ordinal, 2U);
+  REQUIRE_FALSE(wrapped_span);
+  CHECK(wrapped_span.error().code == model::DomainErrorCode::RecoveryCounterExhausted);
+  CHECK(wrapped_span.error().context.field == "audit_span.last");
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
@@ -192,7 +263,7 @@ TEST_CASE("M4 fake recovery bootstrap acknowledges the first typed namespace rec
   CHECK(record.root_provenance() == authority.m4_policy.root_provenance());
   CHECK_FALSE(record.subject_provenance());
   CHECK_FALSE(record.replay_provenance());
-  CHECK_FALSE(record.audit_link());
+  CHECK_FALSE(record.audit_span());
   const auto* const payload =
       std::get_if<recovery::NamespaceRegisteredJournalPayload>(&record.payload());
   REQUIRE(payload != nullptr);

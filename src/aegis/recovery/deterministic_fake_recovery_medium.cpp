@@ -178,7 +178,7 @@ validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
   if (record.kind() == JournalRecordKind::NamespaceRegistered) {
     if (!std::holds_alternative<NamespaceRegisteredJournalPayload>(record.payload()) ||
         record.runtime_epoch_id() || record.subject_provenance() || record.replay_provenance() ||
-        record.audit_link()) {
+        record.audit_span()) {
       return model::Result<void>::failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.namespace_record"));
     }
