@@ -76,6 +76,9 @@ add_library(
   src/aegis/oms/outbound_oms.cpp
   src/aegis/oms/private_order_event.cpp
   src/aegis/oms/private_order_resolution.cpp
+  # Recovery owns the bounded external-lifetime typed fake journal and acknowledged namespace
+  # bootstrap; no canonical evidence bytes, filesystem, network, or native venue behavior exists.
+  src/aegis/recovery/deterministic_fake_recovery_medium.cpp
   # Organization is the canonical source of Firm -> Desk -> Bot attribution used by permissions.
   src/aegis/organization/organization.cpp
   # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
@@ -85,7 +88,7 @@ add_library(
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
   # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain; trusted
-  # runtime composition may install dormant owner-bound identity storage before any M3 activity.
+  # runtime composition may install read-only owner-bound identity storage before any M3 activity.
   src/aegis/runtime/m4_policy.cpp
   src/aegis/runtime/m4_provenance_resolver.cpp
   src/aegis/runtime/private_order_event_factory.cpp
