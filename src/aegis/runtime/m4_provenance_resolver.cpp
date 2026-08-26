@@ -1,7 +1,9 @@
-// Purpose: validate root/configuration agreement and derive source-normalization provenance without
-// trusting caller-supplied organization, route, or metadata attribution.
+// Purpose: validate root/configuration agreement and derive source or retained-order provenance
+// without trusting caller-supplied organization, route, or metadata attribution.
 
 #include "m4_provenance_resolver.hpp"
+
+#include "aegis/oms/outbound_oms.hpp"
 
 #include <new>
 #include <optional>
@@ -157,6 +159,97 @@ model::M4Provenance M4ProvenanceResolver::derive_authoritative_source_provenance
       logical_account_id, venue_id,     std::move(firm_id), std::nullopt,
       std::nullopt,       std::nullopt, std::nullopt,       std::move(instrument_subject)};
   return model::M4Provenance{root_, std::move(subject)};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Return whether sealed configuration proves the exact logical-account and venue binding.
+bool M4ProvenanceResolver::has_configured_account_venue_binding(
+    const model::LogicalAccountId& logical_account_id,
+    const model::VenueId& venue_id) const noexcept {
+  const auto* const binding = configuration_.find_logical_account(logical_account_id);
+  return binding != nullptr && binding->venue_id == venue_id;
+}
+
+// --------------------------------------------------------
+// Validate the complete immutable admission authority, then copy its full known-order provenance.
+model::Result<model::M4Provenance> M4ProvenanceResolver::derive_retained_order_provenance(
+    const oms::OutboundOrderRecord& retained_order) const {
+  const auto& provenance = retained_order.provenance();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Require every retained root projection to agree with this exact sealed configuration and M4
+  // policy root before any subject lookup can enrich the row.
+  if (provenance.configuration_fingerprint != configuration_.fingerprint().bytes() ||
+      provenance.configuration_revision != configuration_.revision() ||
+      provenance.organization_revision != configuration_.organization().revision() ||
+      provenance.runtime_policy_fingerprint != root_.runtime_policy_fingerprint() ||
+      provenance.risk_policy_fingerprint != root_.risk_policy_fingerprint() ||
+      provenance.risk_policy_revision != root_.risk_policy_revision() ||
+      provenance.submission_policy_fingerprint != root_.submission_policy_fingerprint()) {
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.retained_order_root");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Resolve the retained account only from sealed configuration and require its exact owner and
+  // venue fields to match the immutable row.
+  const auto* const binding = configuration_.find_logical_account(provenance.logical_account_id);
+  if (binding == nullptr || binding->venue_id != provenance.venue_id ||
+      binding->firm_id != provenance.firm_id) {
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.retained_order_account");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Resolve the exact route under its sealed revision and require every route-owned subject field
+  // to agree with the retained row.
+  const auto* const route = configuration_.routes().find(provenance.route_id);
+  if (configuration_.routes().revision() != provenance.route_revision || route == nullptr ||
+      route->logical_account_id != provenance.logical_account_id ||
+      route->venue_id != provenance.venue_id || route->instrument_id != provenance.instrument_id ||
+      route->bot_id != provenance.bot_id) {
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.retained_order_route");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Re-derive the complete bot attribution instead of treating the retained desk, firm, or
+  // strategy fields as construction authority.
+  const auto* const attribution = configuration_.organization().find_bot(provenance.bot_id);
+  if (attribution == nullptr || attribution->firm_id != provenance.firm_id ||
+      attribution->desk_id != provenance.desk_id ||
+      attribution->strategy_id != provenance.strategy_id) {
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.retained_order_attribution");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Re-derive the venue-native instrument and revision from sealed metadata before publishing the
+  // known-order instrument subject.
+  const auto* const metadata =
+      configuration_.find_instrument_metadata(provenance.venue_id, provenance.instrument_id);
+  if (metadata == nullptr || metadata->venue_instrument_id() != provenance.venue_instrument_id ||
+      metadata->revision() != provenance.metadata_revision) {
+    return provenance_resolution_failure_from_field<model::M4Provenance>(
+        "m4_provenance.retained_order_instrument");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Publish all and only the complete owner-derived subject fields paired with this resolver's
+  // independently validated seven-field root.
+  auto subject = model::M4SubjectProvenance{
+      provenance.logical_account_id,
+      provenance.venue_id,
+      provenance.firm_id,
+      provenance.desk_id,
+      provenance.bot_id,
+      provenance.strategy_id,
+      model::M4RouteSubject{provenance.route_id, provenance.route_revision},
+      model::M4InstrumentSubject{provenance.instrument_id, provenance.metadata_revision}};
+  return model::Result<model::M4Provenance>::success(
+      model::M4Provenance{root_, std::move(subject)});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

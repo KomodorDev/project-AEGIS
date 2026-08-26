@@ -1,5 +1,5 @@
-// Purpose: derive correlation-independent M4 source provenance only from an owned sealed
-// configuration and validated M4 root without caller-authored organizational attribution.
+// Purpose: derive source and retained-order M4 provenance only from an owned sealed configuration,
+// a validated M4 root, and one genuine immutable OMS owner row.
 
 #pragma once
 
@@ -11,7 +11,23 @@
 #include <optional>
 #include <utility>
 
+namespace aegis::oms {
+
+// ########################################################################
+// A retained OMS row supplies immutable admission provenance without granting mutation authority.
+class OutboundOrderRecord;
+
+// ########################################################################
+
+} // namespace aegis::oms
+
 namespace aegis::runtime {
+
+// ########################################################################
+// The source factory privately mediates the resolver for the exact owner-bound reconciler.
+class PrivateOrderEventFactory;
+
+// ########################################################################
 
 // ########################################################################
 // The resolver is the single composition-root authority for subject presence. It owns one sealed
@@ -60,6 +76,18 @@ public:
 private:
 
   // --------------------------------------------------------
+  // Return whether sealed configuration proves the exact logical-account and venue binding.
+  [[nodiscard]] bool
+  has_configured_account_venue_binding(const model::LogicalAccountId& logical_account_id,
+                                       const model::VenueId& venue_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Validate every retained admission authority against the sealed configuration and M4 root,
+  // then copy the complete known-order subject; mismatch returns InvalidPrivateEvent.
+  [[nodiscard]] model::Result<model::M4Provenance>
+  derive_retained_order_provenance(const oms::OutboundOrderRecord& retained_order) const;
+
+  // --------------------------------------------------------
   // Own the immutable configuration and copy the matching small root value.
   M4ProvenanceResolver(configuration::StartupConfiguration configuration,
                        model::M4RootProvenance root) noexcept
@@ -69,6 +97,12 @@ private:
   // Retain the sealed configuration authority and its exact matching root copy.
   configuration::StartupConfiguration configuration_;
   model::M4RootProvenance root_;
+
+  // ########################################################################
+  // Only the trusted source factory may delegate these owner-planning authority checks.
+  friend class PrivateOrderEventFactory;
+
+  // ########################################################################
 };
 
 // ########################################################################

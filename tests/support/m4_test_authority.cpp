@@ -1,17 +1,24 @@
-// Purpose: compose deterministic fake-only M3 authorities and derive sealed M4 value or owner
-// fixtures through the same public factories used by production startup.
+// Purpose: compose deterministic fake-only M3 authorities, derive sealed M4 value or owner
+// fixtures, and submit test orders through the same active BotContext used by production runtime.
 
 #include "m4_test_authority.hpp"
 
 #include "aegis/execution/fake_order_encoder.hpp"
 #include "aegis/execution/fake_transport_initiator.hpp"
 #include "aegis/execution/submission_measurement_clock.hpp"
+#include "aegis/market_data/market_state_machine.hpp"
+#include "aegis/model/fixed_point.hpp"
 #include "aegis/model/order_id.hpp"
+#include "aegis/model/time.hpp"
+#include "aegis/runtime/bot_runtime.hpp"
+#include "aegis/runtime/runtime_diagnostics.hpp"
 #include "aegis/runtime/runtime_policy.hpp"
 #include "aegis/runtime/submission_coordinator.hpp"
+#include "aegis/trace/runtime_trace.hpp"
 #include "reference_configuration.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -56,19 +63,33 @@ create_runtime_policy_or_throw(const configuration::StartupConfiguration& config
 }
 
 // --------------------------------------------------------
-// Create the deterministic M3 fake coordinator used to obtain sealed risk/submission policy, or
-// throw std::logic_error when any dependency or composition step fails.
+// Create a deterministic M3 fake coordinator with either the inherited failure overrides or an
+// all-success lifecycle script; throw std::logic_error when any dependency or composition fails.
 [[nodiscard]] std::unique_ptr<runtime::SubmissionCoordinator>
 create_submission_coordinator_or_throw(const configuration::StartupConfiguration& configuration,
-                                       const runtime::RuntimePolicy& policy) {
+                                       const runtime::RuntimePolicy& policy,
+                                       bool include_reference_failure_overrides) {
   constexpr std::uint64_t maximum_attempts = 10U;
-  auto encoder =
-      execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, maximum_attempts,
-                                           {{1U, execution::FakeEncodingAction::Fail}});
-  auto initiator = execution::FakeInitiatorScript::create(
-      execution::FakeInitiationOutcome::AcceptedAndInitiated, maximum_attempts,
-      {{1U, execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance},
-       {2U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}});
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve the original policy-only failure fixture while owner lifecycle tests receive ordinary
+  // successful encoding and fake initiation from their first genuine submission.
+  std::vector<execution::FakeEncodingOverride> encoder_overrides;
+  std::vector<execution::FakeInitiationOverride> initiator_overrides;
+  if (include_reference_failure_overrides) {
+    encoder_overrides.push_back({1U, execution::FakeEncodingAction::Fail});
+    initiator_overrides.push_back(
+        {1U, execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance});
+    initiator_overrides.push_back({2U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost});
+  }
+  auto encoder = execution::FakeEncoderScript::create(
+      execution::FakeEncodingAction::Encode, maximum_attempts, std::move(encoder_overrides));
+  auto initiator =
+      execution::FakeInitiatorScript::create(execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                             maximum_attempts, std::move(initiator_overrides));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Give the coordinator one deterministic identity stream and a finite measurement sequence.
   model::OrderNamespace::Bytes namespace_bytes{};
   namespace_bytes.fill(0x42U);
   auto order_ids =
@@ -82,6 +103,9 @@ create_submission_coordinator_or_throw(const configuration::StartupConfiguration
   for (std::uint64_t index = 0U; index < maximum_attempts * 2U; ++index) {
     clock_readings.emplace_back(10'000U + index);
   }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Compose the fake submission owner only after every authored dependency validates.
   auto created = runtime::SubmissionCoordinator::create(
       configuration, policy,
       runtime::FakeSubmissionRuntimeParams{
@@ -95,6 +119,90 @@ create_submission_coordinator_or_throw(const configuration::StartupConfiguration
     throw std::logic_error{"invalid submission coordinator in M4 authority fixture"};
   }
   return std::move(created).value();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+
+// ########################################################################
+// One probe strategy invokes exactly one public submission while canonical BotRuntime dispatch
+// owns the callback-local capability; the result pointer outlives the temporary strategy.
+class M4SubmissionProbeStrategy final : public runtime::Strategy {
+public:
+
+  // --------------------------------------------------------
+  // Retain one immutable request and a borrowed result slot owned by the synchronous test helper.
+  M4SubmissionProbeStrategy(execution::OrderRequest request,
+                            std::optional<execution::SubmitResult>& result) noexcept
+      : request_{std::move(request)}, result_{&result} {}
+
+  // --------------------------------------------------------
+  // Submit from the first Ready market-data callback selected by the test dispatch.
+  void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
+                      runtime::BotContext& context) noexcept override {
+    submit_request_once(context);
+  }
+
+  // --------------------------------------------------------
+  // Submit from the first readiness-state callback selected by the test dispatch.
+  void on_market_state(const market_data::MarketStateEvent&,
+                       runtime::BotContext& context) noexcept override {
+    submit_request_once(context);
+  }
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Consume the request at most once even if a future initialization emits multiple callbacks.
+  void submit_request_once(runtime::BotContext& context) noexcept {
+    if (!has_submitted_) {
+      has_submitted_ = true;
+      result_->emplace(context.submit(request_));
+    }
+  }
+
+  // --------------------------------------------------------
+  // Retain the fixed request, synchronous result destination, and one-shot guard.
+  execution::OrderRequest request_;
+  std::optional<execution::SubmitResult>* result_;
+  bool has_submitted_{false};
+};
+
+// ########################################################################
+
+// ########################################################################
+// Peer bots remain registered but deliberately inert so exactly the configured route owner can
+// submit during the synthetic initialization dispatch.
+class M4IdleStrategy final : public runtime::Strategy {
+public:
+
+  // --------------------------------------------------------
+  // Observe peer market-data callbacks without causing a submission or other side effect.
+  void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
+                      runtime::BotContext&) noexcept override {}
+
+  // --------------------------------------------------------
+  // Observe peer readiness callbacks without causing a submission or other side effect.
+  void on_market_state(const market_data::MarketStateEvent&,
+                       runtime::BotContext&) noexcept override {}
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// Construct one exact decimal fixture value or throw std::logic_error when its scaled value is
+// outside the nominal fixed-point domain.
+template <typename Decimal>
+[[nodiscard]] Decimal create_decimal_or_throw(std::int64_t coefficient, std::uint8_t scale = 0U) {
+  auto created = Decimal::from_scaled(coefficient, scale);
+  if (!created) {
+    throw std::logic_error{"invalid decimal in M4 owner fixture"};
+  }
+  return created.value();
 }
 
 // --------------------------------------------------------
@@ -127,7 +235,7 @@ M4TestAuthority create_m4_test_authority_or_throw(runtime::M4PolicyCapacities ca
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive risk/submission authority from the deterministic offline M3 composition.
-  auto submission = create_submission_coordinator_or_throw(configuration, runtime);
+  auto submission = create_submission_coordinator_or_throw(configuration, runtime, true);
   auto policy =
       runtime::M4Policy::create(configuration, runtime, submission->reservations().policy(),
                                 submission->policy(), capacities);
@@ -170,15 +278,17 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Build the one coordinator before deriving M4 authority from its retained policies.
-  auto submission = create_submission_coordinator_or_throw(configuration, runtime);
+  auto submission = create_submission_coordinator_or_throw(configuration, runtime, false);
   auto policy =
       runtime::M4Policy::create(configuration, runtime, submission->reservations().policy(),
                                 submission->policy(), create_ordinary_m4_policy_capacities());
   if (!policy) {
     throw std::logic_error{"invalid M4 policy in M4 owner fixture"};
   }
-  return M4OwnerTestAuthority{std::move(configuration), std::move(runtime), std::move(submission),
-                              std::move(policy).value()};
+  return M4OwnerTestAuthority{
+      std::move(configuration),      std::move(runtime), std::move(submission),
+      std::move(policy).value(),     std::nullopt,       0U,
+      model::TurnOrdinal::initial(), 1'234'567U};
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -190,6 +300,104 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
 // std::logic_error without returning a partial owner.
 M4OwnerTestAuthority create_m4_owner_test_authority_or_throw() {
   return create_m4_owner_test_authority_or_throw(m3_enabled_two_firm_configuration_params());
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Build the fixed limit/GTC request without exposing runtime-derived attribution fields.
+execution::OrderRequest create_m4_reference_order_request_or_throw() {
+  return execution::OrderRequest{
+      parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      execution::OrderSide::Buy,
+      execution::OrderType::Limit,
+      execution::TimeInForce::GoodTilCancelled,
+      create_decimal_or_throw<model::Price>(100),
+      create_decimal_or_throw<model::Quantity>(2)};
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Execute one synchronous submission from the configured route owner's genuine active BotContext;
+// invalid composition, exhausted identities, or a missing submission result throws.
+execution::SubmitResult submit_m4_order_or_throw(M4OwnerTestAuthority& authority,
+                                                 const execution::OrderRequest& request) {
+  const auto* const route = authority.configuration.routes().find(request.route_id);
+  if (route == nullptr) {
+    throw std::logic_error{"missing route in M4 submission harness"};
+  }
+  auto next_turn = authority.next_owner_turn.next();
+  if (!next_turn || authority.next_processing_timestamp_nanoseconds ==
+                        std::numeric_limits<std::uint64_t>::max()) {
+    throw std::logic_error{"exhausted longitudinal M4 submission harness"};
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Install the submitting strategy only for the configured route owner and cover every peer bot.
+  std::optional<execution::SubmitResult> result;
+  std::vector<runtime::BotStrategyRegistration> registrations;
+  registrations.reserve(authority.configuration.organization().bot_attributions().size());
+  for (const auto& attribution : authority.configuration.organization().bot_attributions()) {
+    std::unique_ptr<runtime::Strategy> strategy;
+    if (attribution.bot_id == route->bot_id) {
+      strategy = std::make_unique<M4SubmissionProbeStrategy>(request, result);
+    } else {
+      strategy = std::make_unique<M4IdleStrategy>();
+    }
+    registrations.push_back(
+        runtime::BotStrategyRegistration{attribution.bot_id, std::move(strategy)});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Build one normal source state and dispatcher against the coordinator's exact authorities.
+  trace::RuntimeTraceSink trace_sink{authority.runtime_policy};
+  runtime::RuntimeDiagnosticSink diagnostics{authority.runtime_policy};
+  model::DeterministicClockProvider callback_clock{50U};
+  const auto& source = authority.runtime_policy.sources().front();
+  const auto& definition = source.definition();
+  const auto* const metadata = authority.configuration.find_instrument_metadata(
+      definition.venue_id, definition.instrument_id);
+  if (metadata == nullptr) {
+    throw std::logic_error{"missing metadata in M4 submission harness"};
+  }
+  auto state = market_data::MarketStateMachine::create(authority.runtime_policy, source, *metadata);
+  auto bots = runtime::BotRuntime::create(
+      authority.configuration, authority.runtime_policy, callback_clock, trace_sink, diagnostics,
+      std::move(registrations),
+      runtime::BotRuntimeCounterSeed{authority.last_callback_ordinal,
+                                     authority.completed_dispatch_count},
+      authority.submission.get());
+  if (!state || !bots) {
+    throw std::logic_error{"invalid M4 submission harness"};
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // One initializing state callback activates the route owner's context for exactly one call.
+  auto plan = bots.value().preflight(source.ordinal(), authority.next_owner_turn, 1U);
+  auto outcome = state.value().initialize(
+      market_data::OwnerMarketTurnContext{
+          authority.next_owner_turn,
+          model::ProcessingTimestamp{authority.next_processing_timestamp_nanoseconds}},
+      trace_sink);
+  if (!plan || !outcome) {
+    throw std::logic_error{"failed M4 submission harness preflight"};
+  }
+  auto dispatched = bots.value().dispatch(plan.value(), outcome.value());
+  if (!dispatched || !result) {
+    throw std::logic_error{"failed M4 submission harness dispatch"};
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Advance predecessors only after canonical dispatch returned with one synchronous result.
+  authority.last_callback_ordinal = bots.value().last_callback_ordinal();
+  authority.completed_dispatch_count = bots.value().completed_dispatch_count();
+  authority.next_owner_turn = std::move(next_turn).value();
+  ++authority.next_processing_timestamp_nanoseconds;
+  return std::move(*result);
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------

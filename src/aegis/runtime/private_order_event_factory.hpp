@@ -1,5 +1,5 @@
 // Purpose: create receive-time-free M4 private-order attempts, privately attach receipt
-// observations, and keep all organizational and metadata attribution caller-unforgeable.
+// observations, and mediate sealed provenance checks for one owner-bound read-only planner.
 
 #pragma once
 
@@ -16,6 +16,12 @@
 #include <utility>
 
 namespace aegis::runtime {
+
+// ########################################################################
+// The owner-bound reconciler alone may use the factory's private provenance-planning delegates.
+class PrivateOrderReconciler;
+
+// ########################################################################
 
 // ########################################################################
 // The factory derives provenance and closed scope from one validated resolver; its public inputs
@@ -174,6 +180,23 @@ public:
 private:
 
   // --------------------------------------------------------
+  // Return whether sealed configuration proves the exact logical-account and venue binding.
+  [[nodiscard]] bool
+  has_configured_account_venue_binding(const model::LogicalAccountId& logical_account_id,
+                                       const model::VenueId& venue_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Derive maximal correlation-independent source provenance from sealed configuration only.
+  [[nodiscard]] model::M4Provenance derive_authoritative_source_provenance(
+      const model::LogicalAccountId& logical_account_id, const model::VenueId& venue_id,
+      const std::optional<model::InstrumentId>& instrument_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Validate one genuine immutable OMS row and derive its complete known-order provenance.
+  [[nodiscard]] model::Result<model::M4Provenance>
+  derive_retained_order_provenance(const oms::OutboundOrderRecord& retained_order) const;
+
+  // --------------------------------------------------------
   // Attach maximal independently proved source provenance to one receive-time-free attempt.
   [[nodiscard]] oms::PrivateOrderIngressAttempt create_authoritative_private_order_ingress_attempt(
       oms::PrivateIngressOriginValue origin, model::LogicalAccountId logical_account_id,
@@ -189,6 +212,12 @@ private:
   // --------------------------------------------------------
   // Retain the complete self-owned normalization authority.
   M4ProvenanceResolver resolver_;
+
+  // ########################################################################
+  // Narrow friendship exposes only sealed provenance derivation to the bound read-only planner.
+  friend class PrivateOrderReconciler;
+
+  // ########################################################################
 };
 
 // ########################################################################

@@ -1,5 +1,5 @@
 // Purpose: validate receive-time-free private-order attempts, attach trusted source provenance,
-// and privately add local receipt observations without correlation or OMS mutation.
+// privately add receipt observations, and mediate read-only retained-order provenance checks.
 
 #include "private_order_event_factory.hpp"
 
@@ -73,6 +73,30 @@ is_exchange_rejection_category_assigned(oms::ExchangeRejectionCategory category)
 // --------------------------------------------------------
 
 } // namespace
+
+// --------------------------------------------------------
+// Return whether sealed configuration proves the exact logical-account and venue binding.
+bool PrivateOrderEventFactory::has_configured_account_venue_binding(
+    const model::LogicalAccountId& logical_account_id,
+    const model::VenueId& venue_id) const noexcept {
+  return resolver_.has_configured_account_venue_binding(logical_account_id, venue_id);
+}
+
+// --------------------------------------------------------
+// Derive maximal correlation-independent source provenance from sealed configuration only.
+model::M4Provenance PrivateOrderEventFactory::derive_authoritative_source_provenance(
+    const model::LogicalAccountId& logical_account_id, const model::VenueId& venue_id,
+    const std::optional<model::InstrumentId>& instrument_id) const noexcept {
+  return resolver_.derive_authoritative_source_provenance(logical_account_id, venue_id,
+                                                          instrument_id);
+}
+
+// --------------------------------------------------------
+// Validate one genuine immutable OMS row and derive its complete known-order provenance.
+model::Result<model::M4Provenance> PrivateOrderEventFactory::derive_retained_order_provenance(
+    const oms::OutboundOrderRecord& retained_order) const {
+  return resolver_.derive_retained_order_provenance(retained_order);
+}
 
 // --------------------------------------------------------
 // Attach maximal independently proved source provenance to one receive-time-free attempt.

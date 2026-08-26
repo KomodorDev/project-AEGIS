@@ -16,6 +16,16 @@
 #include <utility>
 #include <variant>
 
+namespace aegis::runtime {
+
+// ########################################################################
+// The owner-bound reconciler is the sole runtime authority allowed to seal resolutions and trades.
+class PrivateOrderReconciler;
+
+// ########################################################################
+
+} // namespace aegis::runtime
+
 namespace aegis::oms {
 
 // ########################################################################
@@ -171,8 +181,9 @@ using PrivateEventResolutionValue =
 // ########################################################################
 
 // ########################################################################
-// A retained resolution is immutable evidence. This slice grants no construction authority; the
-// later concrete bound owner must add exact access together with its implementation and tests.
+// A retained resolution is immutable evidence. Only the exact owner-bound reconciler may construct
+// one while deriving a detached first-seen identity plan; no storage or OMS caller receives that
+// authority.
 class PrivateEventResolution final {
 public:
 
@@ -219,13 +230,19 @@ private:
   [[nodiscard]] static PrivateEventResolution create_not_order_scoped_resolution();
 
   // --------------------------------------------------------
-  // Retain exactly one future-owner-selected resolution alternative without further validation.
+  // Retain exactly one reconciler-selected resolution alternative without further validation.
   explicit PrivateEventResolution(PrivateEventResolutionValue resolution_value) noexcept
       : resolution_value_{std::move(resolution_value)} {}
 
   // --------------------------------------------------------
   // Store exactly one immutable first-admission alternative.
   PrivateEventResolutionValue resolution_value_;
+
+  // ########################################################################
+  // Narrow friendship lets only the bound read-only planner select a sealed resolution shape.
+  friend class runtime::PrivateOrderReconciler;
+
+  // ########################################################################
 };
 
 // ########################################################################
@@ -270,8 +287,8 @@ using PrivateTradeResolutionValue =
 // ########################################################################
 
 // ########################################################################
-// The closed trade value contains exactly the ADR-0010 comparison tuple. This slice grants no
-// construction authority; the later concrete bound owner must add exact access with its tests.
+// The closed trade value contains exactly the ADR-0010 comparison tuple. Only the exact owner-bound
+// reconciler may construct one while deriving a detached first-seen identity plan.
 class PrivateTradeSemanticValue final {
 public:
 
@@ -346,6 +363,12 @@ private:
   model::Quantity cumulative_quantity_;
   model::Price execution_price_;
   PrivateTradeResolutionValue resolution_value_;
+
+  // ########################################################################
+  // Narrow friendship lets only the bound read-only planner seal a trade-comparison tuple.
+  friend class runtime::PrivateOrderReconciler;
+
+  // ########################################################################
 };
 
 // ########################################################################

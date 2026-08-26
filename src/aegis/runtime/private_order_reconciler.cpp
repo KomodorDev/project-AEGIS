@@ -1,16 +1,20 @@
-// Purpose: validate one pristine submission-owner/M4-policy relationship and preallocate its
-// dormant empty private-identity storage without activation, recovery, planning, or mutation.
+// Purpose: validate one submission-owner/M4-policy relationship, preallocate empty identity
+// storage, and derive detached first-seen authoritative identity plans without mutation.
 
 #include "private_order_reconciler.hpp"
 
 #include "aegis/model/domain_error.hpp"
 #include "submission_coordinator.hpp"
 
+#include <algorithm>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 namespace aegis::runtime {
 namespace {
@@ -24,7 +28,109 @@ template <typename Value>
 }
 
 // --------------------------------------------------------
-// Return whether all three dormant table capacities remain exactly representable by their u32
+// Return a planner failure in the exact requested stable domain without changing any owner state.
+template <typename Value>
+[[nodiscard]] model::Result<Value>
+private_identity_planning_failure_from_field(model::DomainErrorCode code, std::string_view field) {
+  return model::Result<Value>::failure(model::DomainError::at_field(code, std::string{field}));
+}
+
+// ########################################################################
+// Carry only locator and source-instrument facts derived from an accepted authoritative shape. The
+// optional execution pointer borrows the planner input for this one read-only call.
+struct AuthoritativeOrderEventShape {
+  std::optional<model::OrderId> local_order_id;
+  std::optional<oms::ExchangeOrderId> exchange_order_id;
+  std::optional<model::InstrumentId> source_instrument_id;
+  const oms::ExecutionPayload* execution;
+};
+
+// ########################################################################
+
+// --------------------------------------------------------
+// Validate venue/reconciliation order scope and the four currently admitted authoritative
+// payloads before deriving any key, provenance, correlation, or trade value.
+[[nodiscard]] model::Result<AuthoritativeOrderEventShape> derive_authoritative_order_event_shape(
+    const oms::PrivateEventIngressSemanticValue& ingress_semantic_value) {
+  const auto* const venue_origin =
+      std::get_if<oms::VenuePrivateIngressOrigin>(&ingress_semantic_value.origin());
+  const bool is_reconciliation_origin =
+      std::holds_alternative<oms::ReconciliationPrivateIngressOrigin>(
+          ingress_semantic_value.origin());
+  if (venue_origin == nullptr && !is_reconciliation_origin) {
+    return private_identity_planning_failure_from_field<AuthoritativeOrderEventShape>(
+        model::DomainErrorCode::InvalidPrivateEvent, "private_event.authoritative_origin");
+  }
+  if (ingress_semantic_value.subject_scope() != oms::PrivateEventSubjectScope::Order) {
+    return private_identity_planning_failure_from_field<AuthoritativeOrderEventShape>(
+        model::DomainErrorCode::InvalidPrivateEvent, "private_event.authoritative_order_scope");
+  }
+  if (venue_origin != nullptr &&
+      (venue_origin->event_key.logical_account_id != ingress_semantic_value.logical_account_id() ||
+       venue_origin->event_key.venue_id != ingress_semantic_value.venue_id())) {
+    return private_identity_planning_failure_from_field<AuthoritativeOrderEventShape>(
+        model::DomainErrorCode::InvalidPrivateEvent, "private_event.authoritative_source_scope");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Acknowledgement has a mandatory exchange identity and may carry reconciliation-only
+  // source-instrument provenance that its payload deliberately does not repeat.
+  if (const auto* const acknowledgement =
+          std::get_if<oms::ExchangeAcknowledgedPayload>(&ingress_semantic_value.payload())) {
+    std::optional<model::InstrumentId> source_instrument_id;
+    if (is_reconciliation_origin && ingress_semantic_value.provenance().subject().has_value() &&
+        ingress_semantic_value.provenance().subject()->instrument().has_value()) {
+      source_instrument_id =
+          ingress_semantic_value.provenance().subject()->instrument()->instrument_id;
+    }
+    return model::Result<AuthoritativeOrderEventShape>::success(AuthoritativeOrderEventShape{
+        acknowledgement->local_order_locator, acknowledgement->exchange_order_id,
+        std::move(source_instrument_id), nullptr});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Rejection correlation uses its complete nonempty raw locator and no instrument claim.
+  if (const auto* const rejection =
+          std::get_if<oms::ExchangeRejectedPayload>(&ingress_semantic_value.payload())) {
+    return model::Result<AuthoritativeOrderEventShape>::success(AuthoritativeOrderEventShape{
+        rejection->locator.local_order_id(), rejection->locator.exchange_order_id(), std::nullopt,
+        nullptr});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Execution retains raw locator and instrument facts; reconciliation requires an authoritative
+  // source side before owner correlation.
+  if (const auto* const execution =
+          std::get_if<oms::ExecutionPayload>(&ingress_semantic_value.payload())) {
+    if (is_reconciliation_origin && !execution->source_side.has_value()) {
+      return private_identity_planning_failure_from_field<AuthoritativeOrderEventShape>(
+          model::DomainErrorCode::InvalidPrivateEvent,
+          "private_event.authoritative_execution_side");
+    }
+    return model::Result<AuthoritativeOrderEventShape>::success(AuthoritativeOrderEventShape{
+        execution->locator.local_order_id(), execution->locator.exchange_order_id(),
+        execution->instrument_id, execution});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Cancellation-result correlation uses its complete nonempty locator and no trade semantics.
+  if (const auto* const cancellation =
+          std::get_if<oms::CancellationResultPayload>(&ingress_semantic_value.payload())) {
+    return model::Result<AuthoritativeOrderEventShape>::success(AuthoritativeOrderEventShape{
+        cancellation->locator.local_order_id(), cancellation->locator.exchange_order_id(),
+        std::nullopt, nullptr});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Local commands/failures and observation payloads are outside this first authoritative slice.
+  return private_identity_planning_failure_from_field<AuthoritativeOrderEventShape>(
+      model::DomainErrorCode::InvalidPrivateEvent, "private_event.authoritative_payload");
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Return whether all three fixed table capacities remain exactly representable by their u32
 // inspection surface, even if a future policy construction path regresses its accepted bound.
 [[nodiscard]] bool are_private_identity_storage_capacities_implementable(
     const M4PolicyCapacities& capacities) noexcept {
@@ -42,14 +148,14 @@ template <typename Value>
 // publication; any mismatch or allocation failure returns InvalidM4Policy and leaves the owner
 // unchanged.
 model::Result<std::unique_ptr<PrivateOrderReconciler>>
-PrivateOrderReconciler::create_dormant_private_order_reconciler(
+PrivateOrderReconciler::create_private_order_reconciler(
     const SubmissionCoordinator& owner, const configuration::StartupConfiguration& configuration,
     const M4Policy& policy) try {
   const auto& root = policy.root_provenance();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Bind to exact risk, submission, runtime, and configuration identities using immutable public
-  // owner views; this dormant child receives no direct mutation friendship from the coordinator.
+  // owner views; this read-only child receives no mutation friendship from the coordinator.
   if (root.risk_policy_fingerprint() != owner.reservations().policy().fingerprint().bytes() ||
       root.risk_policy_revision() != owner.reservations().policy().revision() ||
       root.submission_policy_fingerprint() != owner.policy().fingerprint().bytes() ||
@@ -61,7 +167,7 @@ PrivateOrderReconciler::create_dormant_private_order_reconciler(
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Require the trusted resolver to prove configuration/organization agreement before copying its
-  // dormant source-normalization authority into the child. Preserve allocation as the earlier
+  // source-normalization and planning authority into the child. Preserve allocation as the earlier
   // capacity failure class instead of misreporting it as provenance disagreement.
   auto resolver = M4ProvenanceResolver::create(configuration, policy);
   if (!resolver) {
@@ -118,6 +224,211 @@ PrivateOrderReconciler::create_dormant_private_order_reconciler(
 } catch (const std::length_error&) {
   return private_order_reconciler_failure_from_field<std::unique_ptr<PrivateOrderReconciler>>(
       "private_order_reconciler.capacity_allocation");
+}
+
+// --------------------------------------------------------
+// Derive one detached first-seen identity plan after proving this slice's identity storage remains
+// wholly pristine. No branch changes the bound owner, OMS, risk, evidence, counts, or fixed slots.
+model::Result<FirstSeenAuthoritativePrivateIdentityPlan>
+PrivateOrderReconciler::derive_first_seen_authoritative_identity_plan(
+    const oms::PrivateEventIngressSemanticValue& ingress_semantic_value) const {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Inspect every count and every fixed slot before deriving input shape or event identity. The
+  // ordered fields give a deterministic internal-state failure precedence.
+  const bool event_identity_slots_are_empty =
+      std::all_of(event_identity_records_.begin(), event_identity_records_.end(),
+                  [](const auto& slot) { return !slot.has_value(); });
+  const bool trade_identity_slots_are_empty =
+      std::all_of(trade_identity_records_.begin(), trade_identity_records_.end(),
+                  [](const auto& slot) { return !slot.has_value(); });
+  const bool exchange_mapping_slots_are_empty =
+      std::all_of(exchange_order_mappings_.begin(), exchange_order_mappings_.end(),
+                  [](const auto& slot) { return !slot.has_value(); });
+  if (event_identity_record_count_ != 0U) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_event_identity_count");
+  }
+  if (trade_identity_record_count_ != 0U) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_trade_identity_count");
+  }
+  if (exchange_order_mapping_count_ != 0U) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_exchange_mapping_count");
+  }
+  if (!event_identity_slots_are_empty) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_event_identity_slots");
+  }
+  if (!trade_identity_slots_are_empty) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_trade_identity_slots");
+  }
+  if (!exchange_mapping_slots_are_empty) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_exchange_mapping_slots");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Accept only the authoritative order-scoped source and payload vocabulary in this slice.
+  auto shape_result = derive_authoritative_order_event_shape(ingress_semantic_value);
+  if (!shape_result) {
+    return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::failure(
+        std::move(shape_result).error());
+  }
+  auto shape = std::move(shape_result).value();
+  auto event_key =
+      oms::PrivateEventRegistryKey::from_ingress_semantic_value(ingress_semantic_value);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Prove exact configured account/venue ownership independently before comparing a recomputed
+  // source provenance. Unknown accounts and wrong venues must not pass by recomputing themselves.
+  if (!event_factory_.has_configured_account_venue_binding(
+          ingress_semantic_value.logical_account_id(), ingress_semantic_value.venue_id())) {
+    auto resolution = oms::PrivateEventResolution::create_provenance_conflict_resolution();
+    return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+        FirstSeenAuthoritativePrivateIdentityPlan{
+            std::move(event_key), ingress_semantic_value,
+            ConflictFirstSeenPrivateCorrelationPlan{std::move(resolution)},
+            FirstSeenPrivateTradeNotReachedPlan{}, risk::AccountSafetyReason::ProvenanceMismatch});
+  }
+  const auto expected_source_provenance = event_factory_.derive_authoritative_source_provenance(
+      ingress_semantic_value.logical_account_id(), ingress_semantic_value.venue_id(),
+      shape.source_instrument_id);
+  if (expected_source_provenance != ingress_semantic_value.provenance()) {
+    auto resolution = oms::PrivateEventResolution::create_provenance_conflict_resolution();
+    return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+        FirstSeenAuthoritativePrivateIdentityPlan{
+            std::move(event_key), ingress_semantic_value,
+            ConflictFirstSeenPrivateCorrelationPlan{std::move(resolution)},
+            FirstSeenPrivateTradeNotReachedPlan{}, risk::AccountSafetyReason::ProvenanceMismatch});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Empty mapping storage makes only the unbound truth-table rows reachable. A known local locator
+  // derives from the genuine owner OMS; an absent or syntactically valid unknown locator stays
+  // unknown even when an unbound exchange identity is present.
+  const oms::OutboundOrderRecord* retained_order = nullptr;
+  if (shape.local_order_id.has_value()) {
+    retained_order = owner_->outbound_oms().find(*shape.local_order_id);
+  }
+  if (retained_order == nullptr) {
+    auto resolution = oms::PrivateEventResolution::create_unknown_resolution();
+    if (shape.execution != nullptr) {
+      auto trade_semantic_value =
+          oms::PrivateTradeSemanticValue::create_unknown_trade_semantic_value(*shape.execution);
+      auto trade_key =
+          oms::TradeKey{ingress_semantic_value.venue_id(),
+                        ingress_semantic_value.logical_account_id(), shape.execution->trade_id};
+      return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+          FirstSeenAuthoritativePrivateIdentityPlan{
+              std::move(event_key), ingress_semantic_value,
+              UnknownFirstSeenPrivateCorrelationPlan{std::move(resolution)},
+              FirstSeenPrivateTradeIdentityPlan{std::move(trade_key),
+                                                std::move(trade_semantic_value)},
+              risk::AccountSafetyReason::UnknownTrade});
+    }
+    return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+        FirstSeenAuthoritativePrivateIdentityPlan{
+            std::move(event_key), ingress_semantic_value,
+            UnknownFirstSeenPrivateCorrelationPlan{std::move(resolution)},
+            FirstSeenPrivateTradeNotReachedPlan{}, risk::AccountSafetyReason::UnknownOrder});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A globally valid local identity cannot cross the event's configured account or venue. This is
+  // a successful safety conflict and stops before retained-provenance and trade derivation.
+  const auto& retained_provenance = retained_order->provenance();
+  if (retained_provenance.logical_account_id != ingress_semantic_value.logical_account_id() ||
+      retained_provenance.venue_id != ingress_semantic_value.venue_id()) {
+    auto resolution = oms::PrivateEventResolution::create_correlation_conflict_resolution();
+    return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+        FirstSeenAuthoritativePrivateIdentityPlan{
+            std::move(event_key), ingress_semantic_value,
+            ConflictFirstSeenPrivateCorrelationPlan{std::move(resolution)},
+            FirstSeenPrivateTradeNotReachedPlan{}, risk::AccountSafetyReason::CorrelationConflict});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject an impossible pre-existing OMS exchange projection because this planner implements only
+  // the currently reachable unbound mapping rows and owns no recovery or activation authority.
+  const auto private_projection = retained_order->private_projection();
+  if (private_projection.exchange_acknowledged ||
+      private_projection.exchange_order_id.has_value() ||
+      private_projection.exchange_mapping_established_by_execution) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_owner_exchange_projection");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Revalidate every retained admission authority from the real owner row before sealing the full
+  // known-order subject. Any disagreement is an internal correlation failure, not source conflict.
+  auto known_provenance = event_factory_.derive_retained_order_provenance(*retained_order);
+  if (!known_provenance) {
+    return private_identity_planning_failure_from_field<FirstSeenAuthoritativePrivateIdentityPlan>(
+        model::DomainErrorCode::PrivateCorrelationFailed,
+        "private_order_reconciler.first_seen_retained_order_provenance");
+  }
+  auto resolution = oms::PrivateEventResolution::create_known_order_resolution(
+      retained_order->order_id(), std::move(known_provenance).value());
+  std::optional<PrivateExchangeOrderMapping> candidate_mapping;
+  if (shape.exchange_order_id.has_value()) {
+    candidate_mapping = PrivateExchangeOrderMapping{
+        oms::ExchangeOrderKey{ingress_semantic_value.venue_id(),
+                              ingress_semantic_value.logical_account_id(),
+                              *shape.exchange_order_id},
+        retained_order->order_id()};
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Known execution economics derive canonical side only from the retained admission. A supplied
+  // contradiction suppresses the uncommitted mapping candidate and produces no trade tuple.
+  if (shape.execution != nullptr) {
+    const auto canonical_side = retained_order->economics().side;
+    if (shape.execution->source_side.has_value() &&
+        *shape.execution->source_side != canonical_side) {
+      candidate_mapping.reset();
+      return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+          FirstSeenAuthoritativePrivateIdentityPlan{
+              std::move(event_key), ingress_semantic_value,
+              KnownFirstSeenPrivateCorrelationPlan{std::move(resolution),
+                                                   std::move(candidate_mapping)},
+              FirstSeenPrivateTradeSourceSideConflictPlan{},
+              risk::AccountSafetyReason::AuthoritativeContradiction});
+    }
+    auto trade_semantic_value = oms::PrivateTradeSemanticValue::create_known_trade_semantic_value(
+        *shape.execution, retained_order->order_id(), canonical_side);
+    auto trade_key =
+        oms::TradeKey{ingress_semantic_value.venue_id(),
+                      ingress_semantic_value.logical_account_id(), shape.execution->trade_id};
+    return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+        FirstSeenAuthoritativePrivateIdentityPlan{
+            std::move(event_key), ingress_semantic_value,
+            KnownFirstSeenPrivateCorrelationPlan{std::move(resolution),
+                                                 std::move(candidate_mapping)},
+            FirstSeenPrivateTradeIdentityPlan{std::move(trade_key),
+                                              std::move(trade_semantic_value)},
+            std::nullopt});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A known non-execution reaches correlation only; later admission owns all transition and mapping
+  // publication decisions.
+  return model::Result<FirstSeenAuthoritativePrivateIdentityPlan>::success(
+      FirstSeenAuthoritativePrivateIdentityPlan{
+          std::move(event_key), ingress_semantic_value,
+          KnownFirstSeenPrivateCorrelationPlan{std::move(resolution), std::move(candidate_mapping)},
+          FirstSeenPrivateTradeNotReachedPlan{}, std::nullopt});
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------

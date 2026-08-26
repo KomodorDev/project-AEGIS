@@ -1,5 +1,5 @@
-// Purpose: construct the credential-free M3 submission stack, optionally install one dormant M4
-// child while pristine, and preserve the unchanged synchronous path and bounded evidence.
+// Purpose: construct the credential-free M3 submission stack, optionally install one read-only M4
+// planning child while pristine, and preserve the unchanged synchronous path and bounded evidence.
 
 #include "submission_coordinator.hpp"
 
@@ -331,18 +331,18 @@ SubmissionCoordinator::SubmissionCoordinator(
                    policy_.capacities().submission_diagnostic_capacity} {}
 
 // --------------------------------------------------------
-// Destroy the last-declared dormant child before the M3 components it may inspect unwind.
+// Destroy the last-declared planning child before the M3 components it may inspect unwind.
 SubmissionCoordinator::~SubmissionCoordinator() = default;
 
 // --------------------------------------------------------
-// Install one fully validated dormant child only on a wholly pristine coordinator; every failure
+// Install one fully validated read-only child only on a wholly pristine coordinator; every failure
 // returns InvalidM4Policy with all M3 business, evidence, fault, and probe state unchanged.
-model::Result<void> SubmissionCoordinator::install_dormant_private_order_reconciler(
+model::Result<void> SubmissionCoordinator::install_private_order_reconciler(
     const configuration::StartupConfiguration& configuration, const M4Policy& policy) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject reinstallation and every prior, active, faulted, evidenced, or instrumented M3 state
-  // before inspecting authority or allocating the dormant child.
+  // before inspecting authority or allocating the planning child.
   if (private_order_reconciler_ || submit_active_ || attempts_consumed_ != 0U || reentry_traced_ ||
       runtime_faulted_ || terminal_error_.has_value() || active_trace_context_.has_value() ||
       reentry_probe_.has_value() || trace_append_fault_for_test_.has_value() ||
@@ -357,7 +357,7 @@ model::Result<void> SubmissionCoordinator::install_dormant_private_order_reconci
   // ++++++++++++++++++++++++++++++++++++++++
   // Construct into a temporary so authority or allocation failure leaves this owner untouched.
   auto created =
-      PrivateOrderReconciler::create_dormant_private_order_reconciler(*this, configuration, policy);
+      PrivateOrderReconciler::create_private_order_reconciler(*this, configuration, policy);
   if (!created) {
     return model::Result<void>::failure(std::move(created).error());
   }
