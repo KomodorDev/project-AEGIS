@@ -1,5 +1,5 @@
-// Purpose: define dormant fixed-capacity private-identity storage bound to one pristine submission
-// owner and expose only immutable policy, capacity, and empty-count inspection.
+// Purpose: define fixed-capacity private-identity storage bound to one pristine submission owner
+// and derive detached first-seen authoritative identity plans without mutating any owner state.
 
 #pragma once
 
@@ -15,13 +15,15 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace aegis::runtime {
 
 // ########################################################################
-// The pristine coordinator owns and destroys the dormant child while remaining at one stable
-// address.
+// The coordinator installs the child only while pristine, then owns and destroys it at one stable
+// address while later M3 submissions remain independently mutable.
 class SubmissionCoordinator;
 
 // ########################################################################
@@ -85,10 +87,192 @@ struct PrivateExchangeOrderMapping {
 // ########################################################################
 
 // ########################################################################
-// The dormant pre-activation child is permanently bound to one nonmoving coordinator and owns fully
-// preallocated empty identity tables. Its invariant is that every slot stays empty and every count
-// stays zero; it exposes no activation, planning, insertion, recovery, consumption, or
-// event-application operation.
+// A known correlation retains the immutable owner-derived resolution and at most one uncommitted
+// exchange mapping candidate. The candidate has no insertion authority.
+struct KnownFirstSeenPrivateCorrelationPlan {
+  oms::PrivateEventResolution resolution;
+  std::optional<PrivateExchangeOrderMapping> candidate_mapping;
+
+  // --------------------------------------------------------
+  // Structural equality proves repeated read-only derivation selects the same detached values.
+  friend bool operator==(const KnownFirstSeenPrivateCorrelationPlan&,
+                         const KnownFirstSeenPrivateCorrelationPlan&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// An unknown correlation retains the sealed unknown resolution without inventing local ownership.
+struct UnknownFirstSeenPrivateCorrelationPlan {
+  oms::PrivateEventResolution resolution;
+
+  // --------------------------------------------------------
+  // Structural equality proves repeated read-only derivation preserves unknown classification.
+  friend bool operator==(const UnknownFirstSeenPrivateCorrelationPlan&,
+                         const UnknownFirstSeenPrivateCorrelationPlan&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// A conflict correlation retains the sealed provenance or locator-conflict resolution and no
+// mapping candidate.
+struct ConflictFirstSeenPrivateCorrelationPlan {
+  oms::PrivateEventResolution resolution;
+
+  // --------------------------------------------------------
+  // Structural equality compares the exact successful safety-contained conflict classification.
+  friend bool operator==(const ConflictFirstSeenPrivateCorrelationPlan&,
+                         const ConflictFirstSeenPrivateCorrelationPlan&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// Exactly one known, unknown, or conflict first-seen correlation outcome is active.
+using FirstSeenPrivateCorrelationPlan =
+    std::variant<KnownFirstSeenPrivateCorrelationPlan, UnknownFirstSeenPrivateCorrelationPlan,
+                 ConflictFirstSeenPrivateCorrelationPlan>;
+
+// ########################################################################
+
+// ########################################################################
+// A derived trade identity retains the exact account-scoped key and sealed comparison tuple.
+struct FirstSeenPrivateTradeIdentityPlan {
+  oms::TradeKey key;
+  oms::PrivateTradeSemanticValue semantic_value;
+
+  // --------------------------------------------------------
+  // Structural equality is the complete detached first-seen trade-plan oracle.
+  friend bool operator==(const FirstSeenPrivateTradeIdentityPlan&,
+                         const FirstSeenPrivateTradeIdentityPlan&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// This marker states that correlation or a non-execution payload stopped before trade derivation.
+struct FirstSeenPrivateTradeNotReachedPlan {
+
+  // --------------------------------------------------------
+  // All not-reached markers carry the same deliberate absence of a trade identity.
+  friend bool operator==(const FirstSeenPrivateTradeNotReachedPlan&,
+                         const FirstSeenPrivateTradeNotReachedPlan&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// This marker preserves the distinct known-execution source-side contradiction outcome.
+struct FirstSeenPrivateTradeSourceSideConflictPlan {
+
+  // --------------------------------------------------------
+  // All source-side markers carry the same pre-trade authoritative contradiction outcome.
+  friend bool operator==(const FirstSeenPrivateTradeSourceSideConflictPlan&,
+                         const FirstSeenPrivateTradeSourceSideConflictPlan&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+
+// ########################################################################
+// Exactly one trade tuple, ordinary not-reached marker, or source-side-conflict marker is active.
+using FirstSeenPrivateTradePlan =
+    std::variant<FirstSeenPrivateTradeIdentityPlan, FirstSeenPrivateTradeNotReachedPlan,
+                 FirstSeenPrivateTradeSourceSideConflictPlan>;
+
+// ########################################################################
+
+// ########################################################################
+// The sealed plan owns detached copies of every first-seen identity decision and grants no
+// insertion, transition, safety-mutation, or recovery authority.
+class FirstSeenAuthoritativePrivateIdentityPlan final {
+public:
+
+  // --------------------------------------------------------
+  // Borrow the receive-time-free event key derived from the exact retained ingress semantics.
+  [[nodiscard]] const oms::PrivateEventRegistryKey& event_key() const noexcept {
+    return event_key_;
+  }
+
+  // --------------------------------------------------------
+  // Borrow the exact correlation-independent ingress semantics copied into this detached plan.
+  [[nodiscard]] const oms::PrivateEventIngressSemanticValue&
+  ingress_semantic_value() const noexcept {
+    return ingress_semantic_value_;
+  }
+
+  // --------------------------------------------------------
+  // Borrow the mutually exclusive known, unknown, or conflict correlation outcome.
+  [[nodiscard]] const FirstSeenPrivateCorrelationPlan& correlation_plan() const noexcept {
+    return correlation_plan_;
+  }
+
+  // --------------------------------------------------------
+  // Borrow the derived trade tuple or exact marker explaining why no tuple was produced.
+  [[nodiscard]] const FirstSeenPrivateTradePlan& trade_plan() const noexcept { return trade_plan_; }
+
+  // --------------------------------------------------------
+  // Return the preliminary safety reason selected by correlation or execution semantics, if any.
+  [[nodiscard]] const std::optional<risk::AccountSafetyReason>&
+  preliminary_safety_reason() const noexcept {
+    return preliminary_safety_reason_;
+  }
+
+  // --------------------------------------------------------
+  // Structural equality proves repeated calls over unchanged authority return identical plans.
+  friend bool operator==(const FirstSeenAuthoritativePrivateIdentityPlan&,
+                         const FirstSeenAuthoritativePrivateIdentityPlan&) = default;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Seal one fully derived detached value after every shape and authority check has completed.
+  FirstSeenAuthoritativePrivateIdentityPlan(
+      oms::PrivateEventRegistryKey event_key,
+      oms::PrivateEventIngressSemanticValue ingress_semantic_value,
+      FirstSeenPrivateCorrelationPlan correlation_plan, FirstSeenPrivateTradePlan trade_plan,
+      std::optional<risk::AccountSafetyReason> preliminary_safety_reason) noexcept
+      : event_key_{std::move(event_key)},
+        ingress_semantic_value_{std::move(ingress_semantic_value)},
+        correlation_plan_{std::move(correlation_plan)}, trade_plan_{std::move(trade_plan)},
+        preliminary_safety_reason_{preliminary_safety_reason} {}
+
+  // --------------------------------------------------------
+  // Retain complete detached values; none is a pointer, mutable alias, or commit capability.
+  oms::PrivateEventRegistryKey event_key_;
+  oms::PrivateEventIngressSemanticValue ingress_semantic_value_;
+  FirstSeenPrivateCorrelationPlan correlation_plan_;
+  FirstSeenPrivateTradePlan trade_plan_;
+  std::optional<risk::AccountSafetyReason> preliminary_safety_reason_;
+
+  // ########################################################################
+  // Only the exact owner-bound reconciler may seal a fully checked first-seen plan.
+  friend class PrivateOrderReconciler;
+
+  // ########################################################################
+};
+
+// ########################################################################
+
+// ########################################################################
+// The pre-application child is permanently bound to one nonmoving coordinator and owns fully
+// preallocated empty identity tables. Every slot remains empty and every count remains zero; its
+// sole semantic operation derives detached read-only first-seen plans from genuine owner state.
+// Planning performs no synchronization and therefore requires either the coordinator's serialized
+// owner context or externally guaranteed quiescence for the complete call.
 class PrivateOrderReconciler final {
 public:
 
@@ -118,19 +302,19 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return zero because this dormant boundary cannot populate an event-identity slot.
+  // Return zero because this read-only planning boundary cannot populate an event-identity slot.
   [[nodiscard]] std::uint32_t event_identity_record_count() const noexcept {
     return event_identity_record_count_;
   }
 
   // --------------------------------------------------------
-  // Return zero because this dormant boundary cannot populate a trade-identity slot.
+  // Return zero because this read-only planning boundary cannot populate a trade-identity slot.
   [[nodiscard]] std::uint32_t trade_identity_record_count() const noexcept {
     return trade_identity_record_count_;
   }
 
   // --------------------------------------------------------
-  // Return zero because this dormant boundary cannot populate an exchange-order mapping slot.
+  // Return zero because this read-only planning boundary cannot populate an exchange-order slot.
   [[nodiscard]] std::uint32_t exchange_order_mapping_count() const noexcept {
     return exchange_order_mapping_count_;
   }
@@ -140,15 +324,26 @@ public:
   [[nodiscard]] const M4Policy& m4_policy() const noexcept { return m4_policy_; }
 
   // --------------------------------------------------------
+  // Derive the authoritative identity plan only from a venue/reconciliation order event and this
+  // bound pristine identity state. State inconsistency returns PrivateCorrelationFailed before
+  // input validation; invalid source/payload shape returns InvalidPrivateEvent. Successful safety
+  // conflicts remain detached results. This operation changes no owner, OMS, risk, evidence,
+  // count, or slot state, so equal repeated inputs return equal values. The caller must prevent a
+  // concurrent submission or other coordinator mutation until the call returns.
+  [[nodiscard]] model::Result<FirstSeenAuthoritativePrivateIdentityPlan>
+  derive_first_seen_authoritative_identity_plan(
+      const oms::PrivateEventIngressSemanticValue& ingress_semantic_value) const;
+
+  // --------------------------------------------------------
 private:
 
   // --------------------------------------------------------
   // Validate exact owner/configuration/policy agreement and allocate every empty slot before
   // returning a child; InvalidM4Policy or allocation failure returns an error without publication.
   [[nodiscard]] static model::Result<std::unique_ptr<PrivateOrderReconciler>>
-  create_dormant_private_order_reconciler(const SubmissionCoordinator& owner,
-                                          const configuration::StartupConfiguration& configuration,
-                                          const M4Policy& policy);
+  create_private_order_reconciler(const SubmissionCoordinator& owner,
+                                  const configuration::StartupConfiguration& configuration,
+                                  const M4Policy& policy);
 
   // --------------------------------------------------------
   // Retain only a const view of the already stable owner and fully allocated empty tables; the
@@ -161,7 +356,7 @@ private:
       std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings) noexcept;
 
   // --------------------------------------------------------
-  // Retain dormant authority and fixed storage; no operation in this slice changes these members.
+  // Retain one-way read authority and fixed storage; no operation in this slice changes members.
   const SubmissionCoordinator* owner_;
   M4Policy m4_policy_;
   PrivateOrderEventFactory event_factory_;

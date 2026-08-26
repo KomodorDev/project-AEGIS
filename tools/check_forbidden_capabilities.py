@@ -143,7 +143,7 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
 )
 
 # M4 paths remain an explicit credential-free/offline manifest so later connectivity milestones
-# cannot silently make the OMS, inventory, recovery foundation, tests, or evidence helpers live.
+# cannot silently make identity planning, OMS, inventory, recovery, tests, or evidence helpers live.
 M4_GENERAL_FILE_PATTERNS = (
     "include/aegis/configuration/startup_configuration.hpp",
     "include/aegis/market_data/subscription.hpp",
@@ -173,11 +173,12 @@ M4_GENERAL_FILE_PATTERNS = (
     "tests/unit/oms/private_order_resolution_test.cpp",
     "tests/unit/runtime/m4_policy_test.cpp",
     "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+    "tests/unit/runtime/private_order_correlation_planner_test.cpp",
     "tests/unit/runtime/private_order_reconciler_test.cpp",
 )
 
-# These current M4 production files can execute during private owner construction/normalization and
-# therefore inherit the M3 direct path's no-file, no-handoff, no-blocking rule set.
+# These current M4 production files can execute during private owner construction, normalization,
+# and read-only planning and therefore inherit the M3 direct path's direct-path restrictions.
 M4_OWNER_PATH_FILE_PATTERNS = (
     "include/aegis/configuration/startup_configuration.hpp",
     "include/aegis/market_data/subscription.hpp",

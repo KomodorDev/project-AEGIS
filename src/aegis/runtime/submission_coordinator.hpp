@@ -1,5 +1,5 @@
-// Purpose: compose the deterministic M3 submission stack, optionally install one dormant M4
-// pre-activation child while pristine, and execute the unchanged synchronous submission path.
+// Purpose: compose the deterministic M3 submission stack, optionally install one read-only M4
+// planning child while pristine, and execute the unchanged synchronous submission path.
 
 #pragma once
 
@@ -37,14 +37,14 @@ class BotContext;
 // ########################################################################
 
 // ########################################################################
-// The immutable M4 policy is borrowed only while a dormant owner-bound child validates and copies
+// The immutable M4 policy is borrowed only while an owner-bound planning child validates and copies
 // it.
 class M4Policy;
 
 // ########################################################################
 
 // ########################################################################
-// The source-private dormant identity owner remains incomplete at this public M3 boundary.
+// The source-private identity planner remains incomplete at this public M3 boundary.
 class PrivateOrderReconciler;
 
 // ########################################################################
@@ -63,8 +63,8 @@ enum class TraceAppendFaultPointForTest : std::uint8_t {
 
 // ########################################################################
 // SubmissionCoordinator owns every mutable M3 component and is the sole direct-path entry below
-// BotContext. Before any M3 activity it may install one dormant, inspection-only M4 child, which is
-// destroyed first; no public operation activates that child or gives it event-processing authority.
+// BotContext. Before any M3 activity it may install one read-only M4 planning child, which is
+// destroyed first; no public operation grants it event-application or mutation authority.
 class SubmissionCoordinator final {
 public:
 
@@ -88,16 +88,16 @@ public:
   ~SubmissionCoordinator();
 
   // --------------------------------------------------------
-  // Install one fully allocated dormant identity child only while every M3 activity, evidence,
+  // Install one fully allocated identity-planning child only while every M3 activity, evidence,
   // fault, and test-probe field remains pristine. Dirty state, authority disagreement, unavailable
   // capacity, or allocation failure returns InvalidM4Policy and leaves this owner unchanged;
-  // success publishes exactly one inspection-only child without activating private processing.
+  // success publishes exactly one read-only child without activating private processing.
   [[nodiscard]] model::Result<void>
-  install_dormant_private_order_reconciler(const configuration::StartupConfiguration& configuration,
-                                           const M4Policy& policy);
+  install_private_order_reconciler(const configuration::StartupConfiguration& configuration,
+                                   const M4Policy& policy);
 
   // --------------------------------------------------------
-  // Borrow the installed dormant child, or return null before successful installation.
+  // Borrow the installed read-only planning child, or return null before successful installation.
   [[nodiscard]] const PrivateOrderReconciler* private_order_reconciler() const noexcept {
     return private_order_reconciler_.get();
   }
@@ -327,7 +327,7 @@ private:
       const std::optional<std::uint64_t>* captured_measurement_finished = nullptr) noexcept;
 
   // --------------------------------------------------------
-  // Retain every M3 owner component, activity/fault latch, and the last-declared dormant M4 child;
+  // Retain every M3 owner component, activity/fault latch, and the last-declared M4 planning child;
   // all mutable fields remain source-private to the serialized submission path.
   execution::OwnerLocalRouteCatalog routes_;
   risk::ReservationLedger ledger_;

@@ -694,7 +694,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
     # --------------------------------------------------------
     # The explicit M4 manifest covers every current foundation file and applies owner-hop rules to
-    # production owner construction/normalization without widening them to test drivers.
+    # production owner construction, normalization, and planning without widening them to tests.
     def test_m4_manifest_covers_foundation_and_owner_paths(self) -> None:
         """Pin current offline files and prove M4 owner production receives direct-path checks."""
 
@@ -727,6 +727,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/oms/private_order_resolution_test.cpp",
             "tests/unit/runtime/m4_policy_test.cpp",
             "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+            "tests/unit/runtime/private_order_correlation_planner_test.cpp",
             "tests/unit/runtime/private_order_reconciler_test.cpp",
         }
         required_owner = {

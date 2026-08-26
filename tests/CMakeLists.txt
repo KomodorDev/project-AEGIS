@@ -65,7 +65,9 @@ add_executable(
   unit/runtime/m4_policy_test.cpp
   # M4 provenance tests prove source subjects are self-owned and configuration-derived only.
   unit/runtime/m4_provenance_resolver_test.cpp
-  # Dormant reconciler tests pin exact owner binding and empty identity-table capacities.
+  # First-seen planner tests pin detached correlation values and public owner non-mutation.
+  unit/runtime/private_order_correlation_planner_test.cpp
+  # Reconciler tests pin exact owner binding, empty identity tables, and longitudinal submissions.
   unit/runtime/private_order_reconciler_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
