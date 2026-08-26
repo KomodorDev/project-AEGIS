@@ -118,33 +118,37 @@ inventory, mapping, ownership, safety, intent, notification decision, or identit
 
 ### M4 durability boundary
 
-M4 models four distinct states for a journalled owner turn:
+M4 models five distinct states for a journalled private or reconciliation owner turn:
 
 1. **planned:** validation, correlation, idempotency, arithmetic, and every capacity preflight have
    produced a complete immutable typed recovery input and assigned sequence in reserved storage;
 2. **published input:** the no-fail owner commit has copied that prepared input into the bounded fake
    journal before business mutation;
 3. **owner-local projection:** the same non-preemptible commit has applied OMS, reservation,
-   inventory, safety, and audit;
-4. **durable acknowledgement:** a later fake-persistence action has advanced one contiguous durable
-   watermark through the published input.
+   inventory, safety, primary audit rows, and an aggregate callback `Planned` row when applicable;
+4. **callback terminal:** after a synchronous callback fan-out, one pre-reserved aggregate
+   `Delivered` or `Faulted` row has completed the linked audit span; callback-free turns enter this
+   state when their primary span is complete; and
+5. **durable acknowledgement:** a later fake-persistence action has atomically retained the input
+   and complete audit span and advanced one contiguous durable watermark through the published
+   input.
 
-The published record is explicitly a replayable input, not a statement that the owner-local
-projection completed. Recovery may therefore apply it whether a crash occurred before or after the
-volatile projection. Publication cannot fail inside commit because the plan already reserved the
-complete record and sequence. A failure before commit consumes neither. Within one incarnation a
-published sequence is immutable and not reused. If it was never acknowledged and is discarded by a
-crash, it never entered recovery history; the next incarnation starts at durable watermark plus one
-and may reuse that numeric sequence. Client identity non-reuse is separately guaranteed by the
-acknowledged namespace fence.
+Publication cannot fail inside commit because the plan already reserved the complete record,
+sequence, and audit span. A failure before commit consumes neither. Within one incarnation a
+published sequence is immutable and not reused. A private or reconciliation record becomes a
+replayable recovery input only when the later atomic acknowledgement retains it together with its
+complete audit span. If a crash discards an unacknowledged input, recovery neither applies nor
+infers that lost input. The next incarnation starts at durable watermark plus one and may reuse that
+numeric sequence. Client identity non-reuse is separately guaranteed by the acknowledged namespace
+fence.
 
 Publication is not durability. The owner and submission paths never block on a filesystem,
 database, remote service, or operating-system durability call. On crash the fake medium retains
-only acknowledged journal inputs, committed snapshots, and the retained projection of acknowledged
-namespace-registration records. Complete authoritative facts reconstruct a lost published-only/local projection when
-possible; otherwise recovery selects the exact safe class above with an audit gap. M4 makes no real
-process, host, operating-system, or power-loss durability claim; M9 must implement this abstract
-protocol.
+only acknowledged journal inputs together with their complete linked semantic audit spans,
+committed snapshots, and the retained projection of acknowledged namespace-registration records.
+Complete authoritative facts reconstruct a lost published-only/local projection when possible;
+otherwise recovery selects the exact safe class above with an audit gap. M4 makes no real process,
+host, operating-system, or power-loss durability claim; M9 must implement this abstract protocol.
 
 M4 does not add journal or persistence work to either named M3 submit benchmark interval. Local OMS
 provenance already retained by M3 may be published or snapshotted on a later owner turn. A crash
@@ -211,15 +215,18 @@ Until ADR-0014 exists, canonical here means one complete validated semantic valu
    later derives and validates the canonical semantic digest from that same value.
 2. The no-fail commit publishes the prepared record in causal owner-turn order before the business
    projection that it drives.
-3. A record includes lineage, predecessor sequence, runtime/reconciliation epoch when applicable,
-   complete replay provenance, the complete typed semantic value, and applicable typed audit
-   linkage. Its digest is absent until the accepted ADR-0014 encoder exists. A
-   `NamespaceRegistered` record is root-scoped and has no runtime/reconciliation epoch, subject,
-   replay provenance, or audit link.
+3. A private or reconciliation record includes lineage, predecessor sequence, its applicable epoch,
+   complete replay provenance, the complete typed semantic value, and the mandatory preassigned
+   contiguous `AuditSpan` fixed by ADR-0013. Its digest is absent until the accepted ADR-0014 encoder
+   exists. A `NamespaceRegistered` record is root-scoped and has no runtime/reconciliation epoch,
+   subject, replay provenance, or audit span.
 4. A pre-commit failure releases the reservation and consumes no sequence; a published sequence is
    immutable within the incarnation, while an unacknowledged discarded sequence may be allocated
    again after restart from durable watermark plus one.
-5. Durability acknowledgement advances only across one contiguous published prefix.
+5. Durability acknowledgement advances only across one contiguous published prefix and atomically
+   retains each private or reconciliation input with the exact complete semantic rows in its linked
+   audit span. An input with a missing, unordered, mismatched, or callback-nonterminal span is not
+   acknowledgeable.
 6. Acknowledgement beyond a gap, conflicting duplicate sequence, typed-value mismatch, overflow,
    or incompatible lineage/provenance is a recovery fault. ADR-0014 additionally makes canonical
    digest mismatch a recovery fault.
@@ -432,9 +439,12 @@ absence, or an ordinary callback never clears either state.
 ### Callback crash semantics
 
 Normal newly applied private facts invoke the originating bot only after complete owner-local state
-and audit commit. Recovery replay does not redispatch historical order-event callbacks because a
-crash after delivery but before durable acknowledgement could otherwise duplicate bot economic
-action.
+and the pre-callback audit rows commit. All audit rows linked from one journal record occupy one
+contiguous semantic `AuditSpan`. A later fake owner/control turn may acknowledge the input only after
+the span is complete and its aggregate terminal `Delivered` or `Faulted` row exists when callbacks
+were planned. Acknowledgement atomically retains the input and exact span. Recovery replay does not
+redispatch historical order-event callbacks because a crash after delivery but before durable
+acknowledgement could otherwise duplicate bot economic action.
 
 After convergence, notification identity is `(ReconciliationEpochId, BotId)`. Bots are ordered by
 canonical encoded `BotId`. The recovery plan appends `Planned = 1` before invoking each callback and
@@ -443,12 +453,15 @@ new reconciliation epoch may publish one new state notification. It reports the 
 projection and epoch rather than pretending to recreate missed order callbacks. Unknown/unowned
 activity has no originating bot.
 
-A crash after state commit but before ordinary callback completion/delivery is recorded as an
-explicit callback audit gap. A durably acknowledged `Planned` or `Delivered` notification decision
-is not retried; an unacknowledged decision is absent after restart and a new reconciliation epoch may
-notify again. For a fixed crash point and durability script the callback vector and gap evidence are
-deterministic, but callback history across cuts is not promised identical to uninterrupted history.
-Exactly-once external delivery requires durable bot state/acknowledgement and remains deferred.
+An incomplete or unacknowledged ordinary private/reconciliation input and its span are discarded
+together after a crash and cannot themselves prove callback delivery. When independently retained
+authoritative state proves that a callback-eligible transition is missing its durable input,
+recovery records an explicit callback audit gap and never retries the ordinary callback. A durably
+acknowledged `Planned` or `Delivered` notification decision is not retried; an unacknowledged
+decision is absent after restart and a new reconciliation epoch may notify again. For a fixed crash
+point and durability script the callback vector and gap evidence are deterministic, but callback
+history across cuts is not promised identical to uninterrupted history. Exactly-once external
+delivery requires durable bot state/acknowledgement and remains deferred.
 
 ### Longitudinal `SubmitReferenceIntent`
 
@@ -588,6 +601,13 @@ there; the prepared input is necessarily published-only and is discarded on cras
 can occur only on a later explicit fake owner/control turn after the complete business/audit commit,
 which is cut by point 30. Recovery never assumes a published-only record survived.
 
+Point 21 occurs after every primary audit row and the aggregate `Planned` row but before callback
+one. Point 22 cuts after each returned callback prefix, including the complete range, and before the
+aggregate terminal row. Point 29 occurs after that terminal row completes the audit span but before
+fake durability acknowledgement, and point 30 occurs after the input and exact complete span are
+acknowledged atomically. Callback-free turns omit the `Planned` and terminal rows and reach point 29
+after their primary span is complete; points 21 and 22 are inapplicable to those turns.
+
 The generic private points 13 through 22 apply to acknowledgement, rejection, contiguous fill, gap
 insertion, multi-fill gap drain, exact duplicate, projection-only late event, account-wide timeout/
 disconnect, safety-only contradiction, and unknown activity. Cell writes inside one no-fail phase
@@ -601,8 +621,8 @@ The normative lifecycle mapping is:
 |---|---|
 | intent | 1-4 plus generic journal 29-30 |
 | M3 submission projection and ambiguous initiation | 5-12 plus 29-30 |
-| every private/projection/safety transition | 13-22 plus 29-30 |
-| cancellation and replace overlap | 13-30 with the applicable named 23-28 point |
+| every private/projection/safety transition | 13-20, applicable 21-22, plus 29-30 |
+| cancellation and replace overlap | 13-20, applicable 21-22, applicable named 23-28, plus 29-30 |
 | snapshot | 31-34 |
 | one runtime-global cold validation, typed replay, namespace durability, and owner publication | 35-40 |
 | each account's complete, incomplete, and conflicting reconciliation in canonical account order | 41-45 |

@@ -394,9 +394,9 @@ When the missing prefix arrives, all newly contiguous intervals drain in ascendi
 endpoint order. Each buffered registry row changes exactly once to `AppliedFromBuffer`, and audit
 retains both its earlier buffer disposition and later application disposition. One callback is
 planned per newly applied execution in the same ascending order, but the complete drain batch,
-economics, and audit commit before the first callback. Distinct overlapping intervals, a cumulative
-decrease, zero or negative values, overfill, competing intervals with the same start, or
-inconsistent provenance are conflicts.
+economics, primary application audit rows, and aggregate `Planned` row commit before the first
+callback. Distinct overlapping intervals, a cumulative decrease, zero or negative values, overfill,
+competing intervals with the same start, or inconsistent provenance are conflicts.
 
 A retained authoritative terminal target bounds the pending set: every existing and new interval
 must end at or below that target. Any interval beyond it is an authoritative contradiction. Reaching
@@ -586,11 +586,16 @@ the forbidden local state remainder. It changes no economics or mapping and emit
 because the conflicting local input cannot select a trusted originating order. A field-for-field
 equal local replay remains `ExactEventDuplicate` and likewise emits no callback.
 
-Every remaining shape-valid order-scoped local source/state combination is forbidden and returns the stable
-error without OMS, reservation, inventory, mapping, dedupe, safety, or callback mutation. Invalid
-shape fails earlier. These three partitions—economic/projection, safety-only, and forbidden local
-remainder—cover every shape-valid order-scoped `AllStates × PrivateOrderEventKind` combination
-exactly once; the separate account/source table exhausts the other two scopes.
+Every remaining shape-valid order-scoped local source/state combination is forbidden and returns the
+stable error. A first-seen forbidden input still publishes its prepared journal and private-event
+evidence and commits its event-identity row with immutable first-admission resolution and original
+`ForbiddenRejected` disposition. That retained ingress value makes a field-for-field replay
+`ExactEventDuplicate` and a changed reuse of its `LocalOrderEventId` `EventIdentityConflict` without
+re-correlating either observation. The forbidden disposition changes no OMS, reservation, inventory,
+mapping, safety, or callback state. Invalid shape fails earlier. These three partitions—economic or
+projection, safety-only, and forbidden local remainder—cover every shape-valid order-scoped
+`AllStates × PrivateOrderEventKind` combination exactly once; the separate account/source table
+exhausts the other two scopes.
 
 ### Cancel request result
 
@@ -637,8 +642,11 @@ performs all checked arithmetic and preflights OMS,
 mapping, pending-fill, reservation, inventory, audit, journal, diagnostic, and callback capacity.
 The complete prepared `PrivateEventInput` journal record retains the unchanged source-normalized
 event and its complete immutable tagged first-admission resolution. The record and its sequence are
-part of the plan. Only after every fallible step succeeds may one no-fail owner-local commit publish
-that prepared input, then update OMS, reservation, exposure, inventory, account safety, and audit.
+part of the plan together with the mandatory preassigned contiguous `AuditSpan` fixed by ADR-0013.
+Only after every fallible step succeeds may one no-fail owner-local commit publish that prepared
+input, then update OMS, reservation, exposure, inventory, account safety, and the pre-callback audit
+rows. A callback-bearing span becomes complete only when its aggregate terminal row is appended
+after the synchronous callback fan-out.
 
 Within the commit, the OMS transition is applied before its reservation and inventory effects. No
 other owner turn can observe the intermediate writes. A failure before commit changes no business
@@ -661,8 +669,11 @@ invoke an order callback. Account/source observations use their explicit canonic
 Historical callbacks are not redispatched during recovery; ADR-0012 defines the recovery-state
 notification.
 
-The existing global callback ordinal, wrong-owner checks, and re-entry protection apply. Callback
-failure occurs after state commit, cannot roll it back, and produces bounded fault evidence.
+The existing global callback ordinal, wrong-owner checks, and re-entry protection apply. After the
+synchronous fan-out returns, exactly one aggregate `Delivered` or `Faulted` terminal row completes
+the callback-bearing audit span. Callback failure occurs after state commit, cannot roll it back,
+and produces bounded fault evidence. A fatal stop before that terminal row leaves the span
+incomplete and therefore ineligible for fake durability acknowledgement.
 
 ### Critical admission and canonical evidence
 

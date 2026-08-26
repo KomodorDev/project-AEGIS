@@ -340,13 +340,13 @@ Every configured logical account owns one preallocated safety-fence slot. If a p
 be accepted:
 
 1. the source receives an explicit non-acceptance result and retains the unconsumed fact;
-2. the account fence records the event identity, semantic digest, attempted admission ordinal, and
-   `CriticalAdmissionLoss`;
+2. the account fence records the event identity, complete bounded receive-time-free semantic value,
+   attempted admission ordinal, and `CriticalAdmissionLoss`;
 3. later exposure-increasing submissions for that account fail closed; and
 4. the account becomes `Quarantined` and authoritative reconciliation is required before normal
    processing resumes.
 
-If the fence is already active, its checked loss count increments and its earliest ordinal/digest
+If the fence is already active, its checked loss count increments and its earliest ordinal/value
 remain canonical. Loss-counter exhaustion fails the runtime closed. An unconfigured or
 unattributable failed input cannot fence an arbitrary account; its source receives failure and the
 runtime globally refuses later private consumption until restart/reconciliation resolves the source.
