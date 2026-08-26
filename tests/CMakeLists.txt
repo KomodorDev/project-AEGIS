@@ -53,6 +53,9 @@ add_executable(
   unit/oms/private_order_event_test.cpp
   # Resolution tests pin stable outcomes, origin-tagged registry keys, and sealed construction.
   unit/oms/private_order_resolution_test.cpp
+  # Recovery tests prove typed namespace publication and fake acknowledgement precede exposure of
+  # sealed identity authority without inventing an ADR-0014 byte schema.
+  unit/recovery/deterministic_fake_recovery_medium_test.cpp
   # These tests lock canonical multi-firm hierarchy validation and transitive bot attribution.
   unit/organization/organization_test.cpp
   # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.
