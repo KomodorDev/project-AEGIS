@@ -151,16 +151,30 @@ The primary-audit product is checked before the Planned-callback product. Failur
 `max_transition_effects_per_turn` or `max_order_callbacks_per_turn`, respectively, so a policy that
 overflows both products has one deterministic error precedence.
 
+`AuditSpan` is `{first AuditOrdinal, nonzero u32 count}`. Its inclusive last `AuditOrdinal` is checked
+as `first + count - 1` without wrapping the ordinal domain. The value names every ordinal from first
+through last in order. Appended rows in that reserved range are contiguous and immutable, and no
+reserved ordinal is reused within the runtime epoch. A span is complete only when every named row is
+present.
+
+For a journal-backed private or reconciliation owner turn, let `a` be the count of buffered gaps that
+become newly contiguous and applied, and let `p = 1 + a`. The first primary audit row owns the
+incoming input's complete nonempty effect group; each of the next `a` rows owns one buffered
+application in ascending cumulative-endpoint order. Account/source fan-out remains one primary
+effect-group row whose canonical affected-order vector is bounded separately by
+`max_transition_effects_per_turn`; its callback count is bounded separately by
+`max_order_callbacks_per_turn`. Therefore `p <= drain_width`. A callback-free span contains exactly
+those `p` rows. A callback-bearing span contains exactly `p + 2` rows: the primary rows, one aggregate
+`Planned` row before callback entry, and one aggregate terminal `Delivered` or `Faulted` row after
+the synchronous fan-out returns. The reserved terminal ordinal remains part of an incomplete span
+after a fatal stop and is never reused in that incarnation.
+
 An append-only store must retain one initialization-preallocated full-capacity effect buffer for
-every possible primary row. Let `p` be the positive number of primary rows in one callback-bearing
-span. Before that prefix is published, preflight reserves the full `p + 2` physical-slot span: the
-primary rows, one `Planned` row, and one terminal row. A fatal stop may leave only primary plus
-`Planned` records visible, but that sole active span's terminal slot and ordinal remain reserved and
-unusable, and the incarnation ends before either can be reused. Therefore every consumed `Planned`
-buffer corresponds to at least three reserved audit slots even when only two records become visible,
-and the maximum pool count is exactly `floor(max_private_audit_records / 3)`. Those two
-topology-derived maxima are the audit backing products checked above; owner turns never allocate
-either nested sequence.
+every possible primary row. Before a callback-bearing prefix is published, preflight reserves the
+full `p + 2` physical-slot span. Therefore every consumed `Planned` buffer corresponds to at least
+three reserved audit slots even when only two records become visible, and the maximum pool count is
+exactly `floor(max_private_audit_records / 3)`. Those two topology-derived maxima are the audit
+backing products checked above; owner turns never allocate either nested sequence.
 
 Reference-fixture capacity is validated separately, by the trusted component that owns each closed
 fixture rather than by generic policy creation. The longitudinal reference-intent driver requires
@@ -202,9 +216,9 @@ needs. Failure uses the dedicated account fence and never partially mutates econ
 
 One semantic `PrivateEventEvidence` owns root provenance, the source-normalized subject, the
 complete immutable tagged first-admission resolution fixed by ADR-0010, runtime epoch, admission
-ordinal, receive time, the complete normalized ingress event, both field-by-field equality
-projections from ADR-0010, disposition, optional reconciliation epoch/journal sequence, and
-diagnostic linkage. One semantic
+ordinal, `ReceiveSequence`, receive time, the complete normalized ingress event, both field-by-field
+equality projections from ADR-0010, disposition, optional reconciliation epoch/journal sequence,
+and diagnostic linkage. One semantic
 `OrderAuditRecord` owns runtime epoch/audit ordinal/kind, tagged origin, root/subject provenance,
 all present order/exchange/trade/cancel identities, exact OMS before/after, exact reservation
 before/after including closure cause, canonical inventory effect rows, account-safety before/after,
@@ -241,8 +255,12 @@ compares both complete bounded typed values directly and must not invent a priva
 `ReferenceIntent = 13`, `AdmissionAttempt = 14`, and `ReceiveSequence = 15`.
 
 Every journal record semantically owns lineage, sequence/predecessor, runtime epoch, kind, root and
-applicable subject provenance, complete typed payload, semantic equality value, and optional audit
-link. Its closed payload is:
+applicable subject provenance, complete typed payload, semantic equality value, and its optional
+`AuditSpan`. `NamespaceRegistered` requires the span to be absent. A published `PrivateEventInput`
+or `ReconciliationInput` requires the complete preassigned span value even while some reserved rows
+are not yet present. Durability acknowledgement rejects either record unless every row in ordinal
+order is present and a callback-bearing span ends in its aggregate `Delivered` or `Faulted` terminal
+row. Its closed payload is:
 
 | Kind | Complete semantic payload |
 |---|---|
@@ -392,7 +410,7 @@ row shape.
 
 One reconciliation record semantically owns lineage/epoch/cut/batch identity, completion, root and
 account subject provenance, the complete `ReconciliationCoverage`, canonical typed rows, the exact
-live-catch-up certificate, decision, convergence, active reasons, and journal/audit links.
+live-catch-up certificate, decision, convergence, active reasons, journal sequence, and audit span.
 
 `M4DiagnosticStage : u8` assigns `Admission = 1`, `Shape = 2`, `Provenance = 3`,
 `Identity = 4`, `Correlation = 5`, `Oms = 6`, `Economics = 7`, `Evidence = 8`,
@@ -401,8 +419,9 @@ live-catch-up certificate, decision, convergence, active reasons, and journal/au
 `Quarantined = 2`, and `RuntimeFaulted = 3`.
 
 A diagnostic owns runtime epoch/ordinal, optional tagged source identity and full semantic value,
-root/subject provenance, domain error, stage, safety action, and optional audit link. Diagnostics
-never become an alternative business ledger.
+root/subject provenance, domain error, stage, safety action, and an optional link to one implicated
+`AuditOrdinal`. Diagnostics never become an alternative business ledger; this diagnostic cross-
+reference is not a journal record's `AuditSpan`.
 
 ### Bounded evidence and required schema ADR
 
