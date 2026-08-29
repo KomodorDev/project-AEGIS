@@ -107,6 +107,8 @@ add_library(
   src/aegis/runtime/dedicated_executor_driver.cpp
   # Trace owns bounded in-memory provenance and its canonical stream encoding without external I/O.
   src/aegis/trace/trace.cpp
+  # M4 semantic trace vocabulary remains typed and storage-free until ADR-0014 assigns bytes.
+  src/aegis/trace/m4_semantic_evidence.cpp
   # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
   src/aegis/trace/runtime_trace.cpp
   # Submission trace owns separate bounded AEGISSTS evidence so M2 callback preflight is unchanged.

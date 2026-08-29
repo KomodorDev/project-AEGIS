@@ -157,6 +157,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "include/aegis/recovery/recovery_identity.hpp",
     "include/aegis/risk/account_safety.hpp",
     "include/aegis/runtime/m4_policy.hpp",
+    "include/aegis/trace/m4_semantic_evidence.hpp",
     "src/aegis/configuration/startup_configuration.cpp",
     "src/aegis/oms/private_order_event.cpp",
     "src/aegis/oms/private_order_resolution.cpp",
@@ -168,6 +169,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "src/aegis/runtime/private_order_event_factory.hpp",
     "src/aegis/runtime/private_order_reconciler.cpp",
     "src/aegis/runtime/private_order_reconciler.hpp",
+    "src/aegis/trace/m4_semantic_evidence.cpp",
     "tests/support/m4_private_event_fixture.hpp",
     "tests/support/m4_test_authority.cpp",
     "tests/support/m4_test_authority.hpp",
@@ -179,6 +181,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "tests/unit/runtime/m4_provenance_resolver_test.cpp",
     "tests/unit/runtime/private_order_correlation_planner_test.cpp",
     "tests/unit/runtime/private_order_reconciler_test.cpp",
+    "tests/unit/trace/m4_semantic_evidence_test.cpp",
 )
 
 # These current M4 production files can execute during private owner construction, normalization,
@@ -196,6 +199,7 @@ M4_OWNER_PATH_FILE_PATTERNS = (
     "include/aegis/recovery/recovery_identity.hpp",
     "include/aegis/risk/account_safety.hpp",
     "include/aegis/runtime/m4_policy.hpp",
+    "include/aegis/trace/m4_semantic_evidence.hpp",
     "src/aegis/configuration/startup_configuration.cpp",
     "src/aegis/oms/private_order_event.cpp",
     "src/aegis/oms/private_order_resolution.cpp",
@@ -207,6 +211,7 @@ M4_OWNER_PATH_FILE_PATTERNS = (
     "src/aegis/runtime/private_order_event_factory.hpp",
     "src/aegis/runtime/private_order_reconciler.cpp",
     "src/aegis/runtime/private_order_reconciler.hpp",
+    "src/aegis/trace/m4_semantic_evidence.cpp",
 )
 BUILD_FILES = (
     Path("CMakeLists.txt"),

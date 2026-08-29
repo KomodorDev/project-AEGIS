@@ -81,7 +81,9 @@ add_executable(
   unit/runtime/market_runtime_test.cpp
   # Executor tests pin bounded admission, fence ordering, owner turns, and driver equivalence.
   unit/runtime/serialized_executor_test.cpp
-  # Trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
+  # M4 trace tests pin stable semantic enums, closed origin identities, and checked ordinal ranges.
+  unit/trace/m4_semantic_evidence_test.cpp
+  # Earlier trace units pin bounded append failure, exact event schemas, and canonical byte vectors.
   unit/trace/trace_test.cpp
   unit/trace/runtime_trace_test.cpp
   unit/trace/submission_trace_test.cpp
