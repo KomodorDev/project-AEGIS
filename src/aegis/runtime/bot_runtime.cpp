@@ -1,5 +1,6 @@
-// Purpose: validate bot-strategy ownership, maintain persistent bot-bound contexts, and perform
-// synchronous canonical subscription dispatch with callback trace, re-entry, and duration evidence.
+// Purpose: validate bot-strategy ownership, close recovery installation before callback authority
+// publication, and perform synchronous canonical dispatch with trace, re-entry, and duration
+// evidence.
 
 #include "aegis/runtime/bot_runtime.hpp"
 
@@ -12,6 +13,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace aegis::runtime {
@@ -247,6 +249,18 @@ model::Result<BotRuntime> BotRuntime::create(
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Reject a coordinator from another sealed runtime before allocating contexts or closing its
+  // recovery-install seam.
+  if (submission_coordinator != nullptr &&
+      (submission_coordinator->policy().configuration_fingerprint() !=
+           configuration.fingerprint().bytes() ||
+       submission_coordinator->policy().runtime_policy_fingerprint() !=
+           policy.fingerprint().bytes())) {
+    return failure<BotRuntime>(DomainErrorCode::InvalidRelationship,
+                               "bot_runtime.submission_coordinator_provenance");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Canonical bot-ID order fixes duplicate positions and makes exact configured coverage cheap.
   std::sort(registrations.begin(), registrations.end(),
             [](const BotStrategyRegistration& lhs, const BotStrategyRegistration& rhs) {
@@ -329,10 +343,18 @@ model::Result<BotRuntime> BotRuntime::create(
     source_offsets[source_index + 1U] = grants.size();
   }
 
-  return model::Result<BotRuntime>::success(BotRuntime{
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Finish every fallible BotRuntime allocation before permanently closing recovery retrofit on
+  // the borrowed coordinator; after closure only a statically proven no-throw return remains.
+  auto created = model::Result<BotRuntime>::success(BotRuntime{
       configuration.fingerprint(), policy.fingerprint(), policy.limits().maximum_callbacks_per_turn,
       policy.limits().callback_budget_nanoseconds, measurement_clock, trace_sink, diagnostics,
       std::move(strategies), std::move(grants), std::move(source_offsets), counter_seed});
+  static_assert(std::is_nothrow_move_constructible_v<model::Result<BotRuntime>>);
+  if (submission_coordinator != nullptr) {
+    submission_coordinator->close_recovery_installation_before_callback_authority();
+  }
+  return created;
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

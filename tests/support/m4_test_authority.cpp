@@ -1,5 +1,5 @@
-// Purpose: compose deterministic fake-only M3 authorities, derive sealed M4 value or owner
-// fixtures, and submit test orders through the same active BotContext used by production runtime.
+// Purpose: compose deterministic fake-only M3/M4 and recovery-bootstrap authorities, then submit
+// test orders through the same active BotContext used by production runtime.
 
 #include "m4_test_authority.hpp"
 
@@ -207,6 +207,31 @@ template <typename Decimal>
 
 // --------------------------------------------------------
 
+// --------------------------------------------------------
+// Construct one deterministic fake-medium lineage from a visible byte seed.
+[[nodiscard]] recovery::RecoveryLineageId
+create_recovery_lineage_from_seed(std::uint8_t seed) noexcept {
+  recovery::RecoveryLineageId::Bytes bytes{};
+  for (std::size_t index = 0U; index < bytes.size(); ++index) {
+    bytes[index] = static_cast<std::uint8_t>(seed + index);
+  }
+  return recovery::RecoveryLineageId{bytes};
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Construct one deterministic restart namespace from a distinct visible byte seed.
+[[nodiscard]] model::OrderNamespace create_order_namespace_from_seed(std::uint8_t seed) noexcept {
+  model::OrderNamespace::Bytes bytes{};
+  for (std::size_t index = 0U; index < bytes.size(); ++index) {
+    bytes[index] = static_cast<std::uint8_t>(seed + index);
+  }
+  return model::OrderNamespace{bytes};
+}
+
+// --------------------------------------------------------
+
 } // namespace
 
 // --------------------------------------------------------
@@ -300,6 +325,54 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
 // std::logic_error without returning a partial owner.
 M4OwnerTestAuthority create_m4_owner_test_authority_or_throw() {
   return create_m4_owner_test_authority_or_throw(m3_enabled_two_firm_configuration_params());
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Create one exact fake medium, publish and acknowledge the seeded namespace, and retain both
+// lifetime owners; any recovery error becomes one fixture-construction failure.
+M4RecoveryBootstrapTestAuthority
+create_m4_recovery_bootstrap_test_authority_or_throw(const runtime::M4Policy& policy,
+                                                     std::uint8_t recovery_lineage_seed,
+                                                     std::uint8_t order_namespace_seed) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Allocate the external medium against the exact policy before acquiring its live lease.
+  auto created_medium = recovery::DeterministicFakeRecoveryMedium::
+      create_deterministic_fake_recovery_medium_from_policy(
+          create_recovery_lineage_from_seed(recovery_lineage_seed), policy);
+  if (!created_medium) {
+    throw std::logic_error{"invalid deterministic recovery medium in M4 authority fixture"};
+  }
+  auto medium = std::move(created_medium).value();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Publish and fake-acknowledge the namespace before exposing the move-only bootstrap fixture.
+  auto created_bootstrap = medium->bootstrap_recovery_from_namespace(
+      policy, create_order_namespace_from_seed(order_namespace_seed));
+  if (!created_bootstrap) {
+    throw std::logic_error{"invalid deterministic recovery bootstrap in M4 authority fixture"};
+  }
+  return M4RecoveryBootstrapTestAuthority{std::move(medium), std::move(created_bootstrap).value()};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Compose and consume one seeded recovery authority at the exact production install boundary.
+void install_recovery_bound_private_order_reconciler_or_throw(M4OwnerTestAuthority& authority,
+                                                              std::uint8_t recovery_lineage_seed,
+                                                              std::uint8_t order_namespace_seed) {
+  auto recovery = create_m4_recovery_bootstrap_test_authority_or_throw(
+      authority.m4_policy, recovery_lineage_seed, order_namespace_seed);
+  auto installed = authority.submission->install_recovery_bound_private_order_reconciler(
+      authority.configuration, authority.m4_policy, std::move(recovery.bootstrap));
+  if (!installed) {
+    throw std::logic_error{"failed recovery-bound M4 reconciler installation"};
+  }
 }
 
 // --------------------------------------------------------

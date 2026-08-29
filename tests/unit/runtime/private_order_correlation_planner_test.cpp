@@ -331,11 +331,7 @@ public:
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the owner-bound child before any callback, submission, or evidence can dirty it.
-    const auto installed = authority_.submission->install_private_order_reconciler(
-        authority_.configuration, authority_.m4_policy);
-    if (!installed) {
-      throw std::logic_error{"failed M4 first-seen planner installation"};
-    }
+    test_support::install_recovery_bound_private_order_reconciler_or_throw(authority_);
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Admit exactly one caller-unforgeable row through the genuine active BotContext seam.

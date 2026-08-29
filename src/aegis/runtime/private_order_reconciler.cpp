@@ -1,5 +1,5 @@
-// Purpose: validate one submission-owner/M4-policy relationship, preallocate empty identity
-// storage, and derive detached first-seen authoritative identity plans without mutation.
+// Purpose: validate one submission-owner/M4-policy/recovery relationship, preallocate empty
+// identity storage, and derive detached first-seen plans without mutation.
 
 #include "private_order_reconciler.hpp"
 
@@ -7,6 +7,7 @@
 #include "submission_coordinator.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <new>
 #include <optional>
 #include <stdexcept>
@@ -144,13 +145,13 @@ struct AuthoritativeOrderEventShape {
 } // namespace
 
 // --------------------------------------------------------
-// Validate every inherited authority and allocate all empty identity slots before owner
-// publication; any mismatch or allocation failure returns InvalidM4Policy and leaves the owner
-// unchanged.
-model::Result<std::unique_ptr<PrivateOrderReconciler>>
-PrivateOrderReconciler::create_private_order_reconciler(
+// Validate inherited and recovery authority, allocate all empty identity slots, and wrap the child
+// while the bootstrap remains intact for the coordinator's later no-fail consumption.
+model::Result<PrivateOrderReconciler::PreparedRecoveryBoundPrivateOrderReconciler>
+PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
     const SubmissionCoordinator& owner, const configuration::StartupConfiguration& configuration,
-    const M4Policy& policy) try {
+    const M4Policy& policy, const recovery::RecoveryBootstrap& recovery_bootstrap) try {
+  using PreparedReconciler = PreparedRecoveryBoundPrivateOrderReconciler;
   const auto& root = policy.root_provenance();
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -161,8 +162,25 @@ PrivateOrderReconciler::create_private_order_reconciler(
       root.submission_policy_fingerprint() != owner.policy().fingerprint().bytes() ||
       root.runtime_policy_fingerprint() != owner.policy().runtime_policy_fingerprint() ||
       root.configuration_fingerprint() != owner.policy().configuration_fingerprint()) {
-    return private_order_reconciler_failure_from_field<std::unique_ptr<PrivateOrderReconciler>>(
+    return private_order_reconciler_failure_from_field<PreparedReconciler>(
         "private_order_reconciler.owner_provenance");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Full root equality binds the fake recovery medium to this exact owner and every M4 capacity.
+  if (recovery_bootstrap.root_provenance_ != root) {
+    return model::Result<PreparedReconciler>::failure(
+        model::DomainError::at_field(model::DomainErrorCode::RecoveryProvenanceMismatch,
+                                     "private_order_reconciler.recovery_root_provenance"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject a moved or internally incoherent bootstrap before deriving configuration state.
+  if (!recovery_bootstrap.lease_ || recovery_bootstrap.runtime_epoch_id_.order_namespace() !=
+                                        recovery_bootstrap.registered_order_namespace_) {
+    return model::Result<PreparedReconciler>::failure(
+        model::DomainError::at_field(model::DomainErrorCode::InvalidJournalState,
+                                     "private_order_reconciler.recovery_bootstrap_state"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -175,8 +193,7 @@ PrivateOrderReconciler::create_private_order_reconciler(
         resolver.error().context.field == "m4_provenance.capacity_allocation"
             ? "private_order_reconciler.capacity_allocation"
             : "private_order_reconciler.configuration_provenance";
-    return private_order_reconciler_failure_from_field<std::unique_ptr<PrivateOrderReconciler>>(
-        failure_field);
+    return private_order_reconciler_failure_from_field<PreparedReconciler>(failure_field);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -185,7 +202,7 @@ PrivateOrderReconciler::create_private_order_reconciler(
   const auto& capacities = policy.capacities();
   if (!are_private_identity_storage_capacities_implementable(capacities) ||
       capacities.max_exchange_order_mappings < owner.outbound_oms().capacity()) {
-    return private_order_reconciler_failure_from_field<std::unique_ptr<PrivateOrderReconciler>>(
+    return private_order_reconciler_failure_from_field<PreparedReconciler>(
         "private_order_reconciler.capacities");
   }
 
@@ -200,30 +217,64 @@ PrivateOrderReconciler::create_private_order_reconciler(
       static_cast<std::size_t>(capacities.max_exchange_order_mappings));
   auto event_factory = PrivateOrderEventFactory{std::move(resolver).value()};
   auto owned_m4_policy = policy;
+  const auto recovery_lineage_id = recovery_bootstrap.lineage_id_;
+  const auto runtime_epoch_id = recovery_bootstrap.runtime_epoch_id_;
+  const auto registered_order_namespace = recovery_bootstrap.registered_order_namespace_;
+  auto recovery_identity_lease = recovery_bootstrap.lease_;
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Interesting syntax: these traits prove every already-allocated member transfers without
-  // throwing; only the final `new` allocation remains fallible and is translated by the function
-  // try block. The coordinator still decides whether to publish the temporary result.
+  // Interesting syntax: a new-expression obtains storage before evaluating constructor arguments.
+  // Allocation failure therefore cannot affect bootstrap authority; the child receives only the
+  // copied lease share while the caller-owned bootstrap remains completely intact.
+  static_assert(std::is_nothrow_move_constructible_v<model::DeterministicOrderIdProvider>);
   static_assert(std::is_nothrow_move_constructible_v<M4Policy>);
   static_assert(std::is_nothrow_move_constructible_v<PrivateOrderEventFactory>);
   static_assert(std::is_nothrow_move_constructible_v<decltype(event_identity_records)>);
   static_assert(std::is_nothrow_move_constructible_v<decltype(trade_identity_records)>);
   static_assert(std::is_nothrow_move_constructible_v<decltype(exchange_order_mappings)>);
+  static_assert(std::is_nothrow_move_constructible_v<
+                std::shared_ptr<recovery::detail::FakeJournalLeaseControl>>);
   static_assert(std::is_nothrow_destructible_v<PrivateOrderReconciler>);
   auto reconciler = std::unique_ptr<PrivateOrderReconciler>{new PrivateOrderReconciler{
-      owner, std::move(owned_m4_policy), std::move(event_factory),
-      std::move(event_identity_records), std::move(trade_identity_records),
-      std::move(exchange_order_mappings)}};
-  return model::Result<std::unique_ptr<PrivateOrderReconciler>>::success(std::move(reconciler));
+      owner, std::move(owned_m4_policy), recovery_lineage_id, runtime_epoch_id,
+      registered_order_namespace, std::move(event_factory), std::move(event_identity_records),
+      std::move(trade_identity_records), std::move(exchange_order_mappings),
+      std::move(recovery_identity_lease)}};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Wrap the fully allocated child before consuming either bootstrap authority. The returned
+  // transaction moves without failure into the coordinator's final publication phase.
+  static_assert(
+      std::is_nothrow_constructible_v<PreparedReconciler, std::unique_ptr<PrivateOrderReconciler>>);
+  static_assert(std::is_nothrow_move_constructible_v<PreparedReconciler>);
+  static_assert(std::is_nothrow_move_constructible_v<model::Result<PreparedReconciler>>);
+  return model::Result<PreparedReconciler>::success(PreparedReconciler{std::move(reconciler)});
 
   // ++++++++++++++++++++++++++++++++++++++++
 } catch (const std::bad_alloc&) {
-  return private_order_reconciler_failure_from_field<std::unique_ptr<PrivateOrderReconciler>>(
+  return private_order_reconciler_failure_from_field<
+      PrivateOrderReconciler::PreparedRecoveryBoundPrivateOrderReconciler>(
       "private_order_reconciler.capacity_allocation");
 } catch (const std::length_error&) {
-  return private_order_reconciler_failure_from_field<std::unique_ptr<PrivateOrderReconciler>>(
+  return private_order_reconciler_failure_from_field<
+      PrivateOrderReconciler::PreparedRecoveryBoundPrivateOrderReconciler>(
       "private_order_reconciler.capacity_allocation");
+}
+
+// --------------------------------------------------------
+// Consume the previously validated bootstrap through one no-throw transfer after the prepared
+// child and its Result wrapper already exist.
+PrivateOrderReconciler::ConsumedRecoveryIdentityAuthority
+PrivateOrderReconciler::consume_recovery_identity_authority(
+    recovery::RecoveryBootstrap&& recovery_bootstrap) noexcept {
+  using ConsumedAuthority = ConsumedRecoveryIdentityAuthority;
+  static_assert(
+      std::is_nothrow_constructible_v<ConsumedAuthority,
+                                      std::shared_ptr<recovery::detail::FakeJournalLeaseControl>,
+                                      model::DeterministicOrderIdProvider>);
+  static_assert(std::is_nothrow_move_constructible_v<ConsumedAuthority>);
+  return ConsumedAuthority{std::move(recovery_bootstrap.lease_),
+                           std::move(recovery_bootstrap.order_ids_)};
 }
 
 // --------------------------------------------------------
@@ -432,17 +483,27 @@ PrivateOrderReconciler::derive_first_seen_authoritative_identity_plan(
 }
 
 // --------------------------------------------------------
-// Retain the stable owner pointer and fully allocated empty tables; unique ownership guarantees the
-// child is destroyed before the coordinator address or any inspected M3 component becomes invalid.
+// Retain the stable owner, recovery identities, empty tables, and live lease; unique ownership
+// destroys the lease-bearing child before the coordinator or any inspected M3 component.
 PrivateOrderReconciler::PrivateOrderReconciler(
-    const SubmissionCoordinator& owner, M4Policy m4_policy, PrivateOrderEventFactory event_factory,
+    const SubmissionCoordinator& owner, M4Policy m4_policy,
+    recovery::RecoveryLineageId recovery_lineage_id, recovery::RuntimeEpochId runtime_epoch_id,
+    model::OrderNamespace registered_order_namespace, PrivateOrderEventFactory event_factory,
     std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
     std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
-    std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings) noexcept
-    : owner_{&owner}, m4_policy_{std::move(m4_policy)}, event_factory_{std::move(event_factory)},
+    std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
+    std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease) noexcept
+    : owner_{&owner}, m4_policy_{std::move(m4_policy)}, recovery_lineage_id_{recovery_lineage_id},
+      runtime_epoch_id_{runtime_epoch_id}, registered_order_namespace_{registered_order_namespace},
+      event_factory_{std::move(event_factory)},
       event_identity_records_{std::move(event_identity_records)},
       trade_identity_records_{std::move(trade_identity_records)},
-      exchange_order_mappings_{std::move(exchange_order_mappings)} {}
+      exchange_order_mappings_{std::move(exchange_order_mappings)},
+      recovery_lease_{std::move(recovery_lease)} {
+  if (!recovery_lease_) {
+    std::terminate();
+  }
+}
 
 // --------------------------------------------------------
 

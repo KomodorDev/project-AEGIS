@@ -80,7 +80,8 @@ struct FakeRecoveryBacking {
 // ########################################################################
 
 // ########################################################################
-// Shared startup-only control keeps backing alive and releases the exclusive writer at final use.
+// Shared startup-and-runtime control keeps backing alive and releases the exclusive incarnation
+// only after the final installed identity or reconciliation owner stops using it.
 struct FakeJournalLeaseControl {
 
   // --------------------------------------------------------
@@ -90,7 +91,7 @@ struct FakeJournalLeaseControl {
       : backing{std::move(backing_value)}, generation{generation_value} {}
 
   // --------------------------------------------------------
-  // Release the incarnation flag only after the sealed bootstrap has disappeared.
+  // Release the incarnation flag only after the final bootstrap or installed-owner share expires.
   ~FakeJournalLeaseControl() noexcept {
     if (backing && backing->lease_active && backing->lease_generation == generation) {
       backing->lease_active = false;
@@ -354,7 +355,8 @@ DeterministicFakeRecoveryMedium::create_deterministic_fake_recovery_medium_from_
 // --------------------------------------------------------
 
 // --------------------------------------------------------
-// Shared backing may outlive this external handle while a live bootstrap still owns its lease.
+// Shared backing may outlive this external handle while a bootstrap or installed owner retains the
+// live incarnation lease.
 DeterministicFakeRecoveryMedium::~DeterministicFakeRecoveryMedium() = default;
 
 // --------------------------------------------------------

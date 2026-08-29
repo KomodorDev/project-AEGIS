@@ -1,4 +1,4 @@
-// Purpose: construct the credential-free M3 submission stack, optionally install one read-only M4
+// Purpose: construct the credential-free M3 submission stack, recovery-bind one read-only M4
 // planning child while pristine, and preserve the unchanged synchronous path and bounded evidence.
 
 #include "submission_coordinator.hpp"
@@ -335,16 +335,18 @@ SubmissionCoordinator::SubmissionCoordinator(
 SubmissionCoordinator::~SubmissionCoordinator() = default;
 
 // --------------------------------------------------------
-// Install one fully validated read-only child only on a wholly pristine coordinator; every failure
-// returns InvalidM4Policy with all M3 business, evidence, fault, and probe state unchanged.
-model::Result<void> SubmissionCoordinator::install_private_order_reconciler(
-    const configuration::StartupConfiguration& configuration, const M4Policy& policy) {
+// Consume one sealed recovery bootstrap only after the pristine coordinator and every child
+// allocation validate; success publishes its acknowledged identity stream before the child.
+model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_reconciler(
+    const configuration::StartupConfiguration& configuration, const M4Policy& policy,
+    recovery::RecoveryBootstrap&& recovery_bootstrap) {
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Reject reinstallation and every prior, active, faulted, evidenced, or instrumented M3 state
-  // before inspecting authority or allocating the planning child.
-  if (private_order_reconciler_ || submit_active_ || attempts_consumed_ != 0U || reentry_traced_ ||
-      runtime_faulted_ || terminal_error_.has_value() || active_trace_context_.has_value() ||
+  // Reject callback attachment, reinstallation, and every prior, active, faulted, evidenced, or
+  // instrumented M3 state before inspecting authority or allocating the planning child.
+  if (recovery_installation_closed_ || private_order_reconciler_ || submit_active_ ||
+      attempts_consumed_ != 0U || reentry_traced_ || runtime_faulted_ ||
+      terminal_error_.has_value() || active_trace_context_.has_value() ||
       reentry_probe_.has_value() || trace_append_fault_for_test_.has_value() ||
       outbound_oms_.size() != 0U || ledger_.held_reservation_count() != 0U ||
       encoder_.invocations_consumed() != 0U || initiator_.invocations_consumed() != 0U ||
@@ -355,18 +357,37 @@ model::Result<void> SubmissionCoordinator::install_private_order_reconciler(
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Construct into a temporary so authority or allocation failure leaves this owner untouched.
-  auto created =
-      PrivateOrderReconciler::create_private_order_reconciler(*this, configuration, policy);
-  if (!created) {
-    return model::Result<void>::failure(std::move(created).error());
+  // Build one private transaction so every reported authority or allocation failure leaves both
+  // coordinator and bootstrap identity streams untouched and reusable.
+  auto prepared = PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
+      *this, configuration, policy, recovery_bootstrap);
+  if (!prepared) {
+    return model::Result<void>::failure(std::move(prepared).error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Interesting syntax: the default-deleter unique_ptr is statically no-throw move-assignable, so
-  // sole publication cannot add a failure after every validation and allocation has completed.
+  // Interesting syntax: the fully allocated child is extracted from its successful Result before
+  // bootstrap consumption; every operation after consumption is statically no-throw, so the
+  // acknowledged provider replaces the unused construction stream before the child becomes
+  // visible.
+  using PreparedReconciler = PrivateOrderReconciler::PreparedRecoveryBoundPrivateOrderReconciler;
+  using ConsumedAuthority = PrivateOrderReconciler::ConsumedRecoveryIdentityAuthority;
+  static_assert(std::is_nothrow_move_constructible_v<PreparedReconciler>);
+  static_assert(std::is_nothrow_move_constructible_v<ConsumedAuthority>);
+  static_assert(noexcept(
+      PrivateOrderReconciler::consume_recovery_identity_authority(std::move(recovery_bootstrap))));
+  static_assert(std::is_nothrow_constructible_v<model::DeterministicOrderIdSource,
+                                                model::DeterministicOrderIdProvider&&>);
+  static_assert(std::is_nothrow_move_assignable_v<
+                std::shared_ptr<recovery::detail::FakeJournalLeaseControl>>);
+  static_assert(std::is_nothrow_move_assignable_v<model::DeterministicOrderIdSource>);
   static_assert(std::is_nothrow_move_assignable_v<std::unique_ptr<PrivateOrderReconciler>>);
-  private_order_reconciler_ = std::move(created).value();
+  auto prepared_reconciler = std::move(prepared).value();
+  auto identity_authority =
+      PrivateOrderReconciler::consume_recovery_identity_authority(std::move(recovery_bootstrap));
+  recovery_identity_lease_ = std::move(identity_authority.recovery_identity_lease);
+  order_ids_ = model::DeterministicOrderIdSource{std::move(identity_authority.order_ids)};
+  private_order_reconciler_ = std::move(prepared_reconciler.reconciler);
   return model::Result<void>::success();
 
   // ++++++++++++++++++++++++++++++++++++++++

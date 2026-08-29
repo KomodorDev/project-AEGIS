@@ -1,5 +1,5 @@
-// Purpose: define fixed-capacity private-identity storage bound to one pristine submission owner
-// and derive detached first-seen authoritative identity plans without mutating any owner state.
+// Purpose: define recovery-bound fixed-capacity private-identity storage for one pristine
+// submission owner and derive detached first-seen plans without mutating owner state.
 
 #pragma once
 
@@ -9,6 +9,7 @@
 #include "aegis/oms/private_order_event.hpp"
 #include "aegis/oms/private_order_identity.hpp"
 #include "aegis/oms/private_order_resolution.hpp"
+#include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 #include "aegis/runtime/m4_policy.hpp"
 #include "private_order_event_factory.hpp"
 
@@ -268,11 +269,13 @@ private:
 // ########################################################################
 
 // ########################################################################
-// The pre-application child is permanently bound to one nonmoving coordinator and owns fully
-// preallocated empty identity tables. Every slot remains empty and every count remains zero; its
-// sole semantic operation derives detached read-only first-seen plans from genuine owner state.
-// Planning performs no synchronization and therefore requires either the coordinator's serialized
-// owner context or externally guaranteed quiescence for the complete call.
+// The pre-application child is permanently bound to one nonmoving coordinator, one acknowledged
+// recovery namespace/runtime epoch, and fully preallocated empty identity tables. Every slot
+// remains empty and every count remains zero; its sole semantic operation derives detached
+// read-only first-seen plans from genuine owner state. Planning performs no synchronization and
+// therefore requires either the coordinator's serialized owner context or externally guaranteed
+// quiescence for the complete call. Its opaque lease keeps cold medium inspection fenced for the
+// child's complete lifetime but grants no journal mutation operation.
 class PrivateOrderReconciler final {
 public:
 
@@ -324,6 +327,24 @@ public:
   [[nodiscard]] const M4Policy& m4_policy() const noexcept { return m4_policy_; }
 
   // --------------------------------------------------------
+  // Return the external fake-medium lineage bound to this installed runtime incarnation.
+  [[nodiscard]] const recovery::RecoveryLineageId& recovery_lineage_id() const noexcept {
+    return recovery_lineage_id_;
+  }
+
+  // --------------------------------------------------------
+  // Return the namespace-qualified runtime incarnation established by recovery bootstrap.
+  [[nodiscard]] const recovery::RuntimeEpochId& runtime_epoch_id() const noexcept {
+    return runtime_epoch_id_;
+  }
+
+  // --------------------------------------------------------
+  // Return the fake-acknowledged namespace used for every post-install client identity.
+  [[nodiscard]] const model::OrderNamespace& registered_order_namespace() const noexcept {
+    return registered_order_namespace_;
+  }
+
+  // --------------------------------------------------------
   // Derive the authoritative identity plan only from a venue/reconciliation order event and this
   // bound pristine identity state. State inconsistency returns PrivateCorrelationFailed before
   // input validation; invalid source/payload shape returns InvalidPrivateEvent. Successful safety
@@ -337,28 +358,103 @@ public:
   // --------------------------------------------------------
 private:
 
-  // --------------------------------------------------------
-  // Validate exact owner/configuration/policy agreement and allocate every empty slot before
-  // returning a child; InvalidM4Policy or allocation failure returns an error without publication.
-  [[nodiscard]] static model::Result<std::unique_ptr<PrivateOrderReconciler>>
-  create_private_order_reconciler(const SubmissionCoordinator& owner,
-                                  const configuration::StartupConfiguration& configuration,
-                                  const M4Policy& policy);
+  // ########################################################################
+  // One private move-only transaction carries the completely allocated child while the validated
+  // bootstrap still retains its lease and provider.
+  struct PreparedRecoveryBoundPrivateOrderReconciler final {
+
+    // --------------------------------------------------------
+    // Bind the complete child without consuming the caller-owned recovery bootstrap.
+    explicit PreparedRecoveryBoundPrivateOrderReconciler(
+        std::unique_ptr<PrivateOrderReconciler> reconciler_value) noexcept
+        : reconciler{std::move(reconciler_value)} {}
+
+    // --------------------------------------------------------
+    // Preserve single-use installation authority and permit only no-throw move construction.
+    PreparedRecoveryBoundPrivateOrderReconciler(
+        const PreparedRecoveryBoundPrivateOrderReconciler&) = delete;
+    PreparedRecoveryBoundPrivateOrderReconciler&
+    operator=(const PreparedRecoveryBoundPrivateOrderReconciler&) = delete;
+    PreparedRecoveryBoundPrivateOrderReconciler(
+        PreparedRecoveryBoundPrivateOrderReconciler&&) noexcept = default;
+    PreparedRecoveryBoundPrivateOrderReconciler&
+    operator=(PreparedRecoveryBoundPrivateOrderReconciler&&) = delete;
+
+    // --------------------------------------------------------
+    // Retain the fully allocated child until the coordinator completes no-fail authority transfer.
+    std::unique_ptr<PrivateOrderReconciler> reconciler;
+
+    // --------------------------------------------------------
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // One private move-only value keeps the acknowledged provider inside its recovery lease between
+  // final bootstrap consumption and ordered coordinator publication.
+  struct ConsumedRecoveryIdentityAuthority final {
+
+    // --------------------------------------------------------
+    // Bind the transferred lease and provider after every fallible installation step has passed.
+    ConsumedRecoveryIdentityAuthority(
+        std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_identity_lease_value,
+        model::DeterministicOrderIdProvider order_ids_value) noexcept
+        : recovery_identity_lease{std::move(recovery_identity_lease_value)},
+          order_ids{std::move(order_ids_value)} {}
+
+    // --------------------------------------------------------
+    // Preserve single-use authority and permit only no-throw movement into coordinator storage.
+    ConsumedRecoveryIdentityAuthority(const ConsumedRecoveryIdentityAuthority&) = delete;
+    ConsumedRecoveryIdentityAuthority& operator=(const ConsumedRecoveryIdentityAuthority&) = delete;
+    ConsumedRecoveryIdentityAuthority(ConsumedRecoveryIdentityAuthority&&) noexcept = default;
+    ConsumedRecoveryIdentityAuthority& operator=(ConsumedRecoveryIdentityAuthority&&) = delete;
+
+    // --------------------------------------------------------
+    // Declaration order destroys the provider before releasing this temporary lease share.
+    std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_identity_lease;
+    model::DeterministicOrderIdProvider order_ids;
+
+    // --------------------------------------------------------
+  };
+
+  // ########################################################################
 
   // --------------------------------------------------------
-  // Retain only a const view of the already stable owner and fully allocated empty tables; the
-  // owner must outlive this child, which unique ownership and member destruction order guarantee.
+  // Validate owner, configuration, policy, and recovery authority; allocate every empty slot; then
+  // wrap the complete child while the bootstrap remains intact. A reported failure consumes
+  // nothing and publishes no child.
+  [[nodiscard]] static model::Result<PreparedRecoveryBoundPrivateOrderReconciler>
+  prepare_recovery_bound_private_order_reconciler(
+      const SubmissionCoordinator& owner, const configuration::StartupConfiguration& configuration,
+      const M4Policy& policy, const recovery::RecoveryBootstrap& recovery_bootstrap);
+
+  // --------------------------------------------------------
+  // Transfer the already validated bootstrap lease and provider only after every fallible step has
+  // succeeded; the returned declaration order keeps the provider inside the live incarnation.
+  [[nodiscard]] static ConsumedRecoveryIdentityAuthority
+  consume_recovery_identity_authority(recovery::RecoveryBootstrap&& recovery_bootstrap) noexcept;
+
+  // --------------------------------------------------------
+  // Retain a const owner view, copied recovery identities, fully allocated empty tables, and the
+  // opaque live lease; owner/lease lifetimes are guaranteed by unique ownership and destruction
+  // order.
   PrivateOrderReconciler(
       const SubmissionCoordinator& owner, M4Policy m4_policy,
-      PrivateOrderEventFactory event_factory,
+      recovery::RecoveryLineageId recovery_lineage_id, recovery::RuntimeEpochId runtime_epoch_id,
+      model::OrderNamespace registered_order_namespace, PrivateOrderEventFactory event_factory,
       std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
       std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
-      std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings) noexcept;
+      std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
+      std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease) noexcept;
 
   // --------------------------------------------------------
-  // Retain one-way read authority and fixed storage; no operation in this slice changes members.
+  // Retain one-way read authority, recovery identity, fixed storage, and the last-declared lease;
+  // no operation in this slice changes members or reaches journal mutation.
   const SubmissionCoordinator* owner_;
   M4Policy m4_policy_;
+  recovery::RecoveryLineageId recovery_lineage_id_;
+  recovery::RuntimeEpochId runtime_epoch_id_;
+  model::OrderNamespace registered_order_namespace_;
   PrivateOrderEventFactory event_factory_;
   std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records_;
   std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records_;
@@ -366,6 +462,7 @@ private:
   std::uint32_t event_identity_record_count_{0U};
   std::uint32_t trade_identity_record_count_{0U};
   std::uint32_t exchange_order_mapping_count_{0U};
+  std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease_;
 
   // ########################################################################
   // Interesting syntax: friendship lets only the owning coordinator invoke the private validating

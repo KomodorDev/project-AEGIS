@@ -1,5 +1,5 @@
 // Purpose: retain bounded typed journal history across deterministic M4 runtime incarnations and
-// expose a move-only namespace-acknowledged bootstrap without filesystem or network capability.
+// supply one move-only namespace-acknowledged bootstrap to the exact private runtime owner.
 
 #pragma once
 
@@ -21,6 +21,12 @@ class M4Policy;
 
 // ########################################################################
 
+// ########################################################################
+// The source-private reconciler alone may consume a completed bootstrap during owner installation.
+class PrivateOrderReconciler;
+
+// ########################################################################
+
 } // namespace aegis::runtime
 
 namespace aegis::recovery {
@@ -33,7 +39,8 @@ struct FakeRecoveryBacking;
 // ########################################################################
 
 // ########################################################################
-// Shared lease control releases the single-incarnation flag when the sealed bootstrap is destroyed.
+// Shared lease control releases the single-incarnation flag after every installed authority that
+// depends on the acknowledged namespace has been destroyed.
 struct FakeJournalLeaseControl;
 
 // ########################################################################
@@ -43,8 +50,9 @@ struct FakeJournalLeaseControl;
 // ########################################################################
 // A successful bootstrap proves one namespace record is published and fake-acknowledged, owns the
 // exclusive live-incarnation lease, and keeps its deterministic client-identity provider sealed.
-// The moved-to value remains valid until destruction; no public API exposes append,
-// acknowledgement, provider extraction, replay, or business-state authority.
+// It may be consumed only by the exact private-owner installation transaction after all fallible
+// work succeeds. No public API exposes append, acknowledgement, provider extraction, replay, or
+// business-state authority.
 class RecoveryBootstrap final {
 public:
 
@@ -111,6 +119,12 @@ private:
   friend class DeterministicFakeRecoveryMedium;
 
   // ########################################################################
+
+  // ########################################################################
+  // The exact source-private owner consumes lease and provider together after complete validation.
+  friend class runtime::PrivateOrderReconciler;
+
+  // ########################################################################
 };
 
 // ########################################################################
@@ -119,10 +133,10 @@ private:
 // The concrete fake medium owns one fixed-capacity in-memory typed journal and namespace registry.
 // It models fake acknowledgement but makes no filesystem, process-crash, power-loss, AEGISJRN byte,
 // digest, or real-durability claim. Every operation requires caller-provided external
-// serialization; concurrent access is unsupported. At most one live RecoveryBootstrap lease exists,
-// cold queries require no live lease, and acknowledged namespace rows always form one contiguous
-// journal prefix. The public surface has no path, endpoint, credential, callback, retry, thread, or
-// background work.
+// serialization; concurrent access is unsupported. At most one live incarnation lease exists across
+// either its bootstrap or installed owners, cold queries require no live lease, and acknowledged
+// namespace rows always form one contiguous journal prefix. The public surface has no path,
+// endpoint, credential, callback, retry, thread, or background work.
 class DeterministicFakeRecoveryMedium final {
 public:
 
@@ -135,7 +149,7 @@ public:
                                                         const runtime::M4Policy& policy);
 
   // --------------------------------------------------------
-  // Keep one stable external owner address while bootstraps may share the opaque backing lifetime.
+  // Keep one stable external owner address while a bootstrap or installed owner may share backing.
   DeterministicFakeRecoveryMedium(const DeterministicFakeRecoveryMedium&) = delete;
   DeterministicFakeRecoveryMedium& operator=(const DeterministicFakeRecoveryMedium&) = delete;
   DeterministicFakeRecoveryMedium(DeterministicFakeRecoveryMedium&&) = delete;

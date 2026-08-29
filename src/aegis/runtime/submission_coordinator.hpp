@@ -1,4 +1,4 @@
-// Purpose: compose the deterministic M3 submission stack, optionally install one read-only M4
+// Purpose: compose the deterministic M3 submission stack, install one recovery-bound read-only M4
 // planning child while pristine, and execute the unchanged synchronous submission path.
 
 #pragma once
@@ -28,11 +28,37 @@
 #include <optional>
 #include <utility>
 
+namespace aegis::recovery {
+
+namespace detail {
+
+// ########################################################################
+// Opaque lease control keeps the installed recovery incarnation live without exposing its medium.
+struct FakeJournalLeaseControl;
+
+// ########################################################################
+
+} // namespace detail
+
+// ########################################################################
+// A completed bootstrap supplies the acknowledged namespace and lease consumed during M4 install.
+class RecoveryBootstrap;
+
+// ########################################################################
+
+} // namespace aegis::recovery
+
 namespace aegis::runtime {
 
 // ########################################################################
 // BotContext is the sole runtime authority allowed to enter the private submission coordinator.
 class BotContext;
+
+// ########################################################################
+
+// ########################################################################
+// BotRuntime alone may close recovery installation before callback authority becomes reachable.
+class BotRuntime;
 
 // ########################################################################
 
@@ -63,8 +89,10 @@ enum class TraceAppendFaultPointForTest : std::uint8_t {
 
 // ########################################################################
 // SubmissionCoordinator owns every mutable M3 component and is the sole direct-path entry below
-// BotContext. Before any M3 activity it may install one read-only M4 planning child, which is
-// destroyed first; no public operation grants it event-application or mutation authority.
+// BotContext. Before any M3 activity or callback-capable BotRuntime exists, it may consume one
+// acknowledged recovery bootstrap into the active identity stream and one read-only M4 planning
+// child, which is destroyed first; no public operation grants it event-application or mutation
+// authority.
 class SubmissionCoordinator final {
 public:
 
@@ -88,13 +116,14 @@ public:
   ~SubmissionCoordinator();
 
   // --------------------------------------------------------
-  // Install one fully allocated identity-planning child only while every M3 activity, evidence,
-  // fault, and test-probe field remains pristine. Dirty state, authority disagreement, unavailable
-  // capacity, or allocation failure returns InvalidM4Policy and leaves this owner unchanged;
-  // success publishes exactly one read-only child without activating private processing.
-  [[nodiscard]] model::Result<void>
-  install_private_order_reconciler(const configuration::StartupConfiguration& configuration,
-                                   const M4Policy& policy);
+  // Consume one namespace-acknowledged recovery bootstrap and install a fully allocated planning
+  // child only before callback authority attaches and while every M3 activity, evidence, fault,
+  // and test-probe field remains pristine. Any reported failure leaves both owner and bootstrap
+  // unchanged; success replaces the unused construction-time identity stream before publishing
+  // the read-only child.
+  [[nodiscard]] model::Result<void> install_recovery_bound_private_order_reconciler(
+      const configuration::StartupConfiguration& configuration, const M4Policy& policy,
+      recovery::RecoveryBootstrap&& recovery_bootstrap);
 
   // --------------------------------------------------------
   // Borrow the installed read-only planning child, or return null before successful installation.
@@ -171,6 +200,21 @@ private:
   friend class BotContext;
 
   // ########################################################################
+
+  // ########################################################################
+  // Only a successfully constructed BotRuntime may permanently close the recovery-install seam.
+  friend class BotRuntime;
+
+  // ########################################################################
+
+  // --------------------------------------------------------
+  // Permanently reject later recovery installation before callback authority can escape its
+  // successful factory; repeated closure is an idempotent startup-composition operation.
+  void close_recovery_installation_before_callback_authority() noexcept {
+    recovery_installation_closed_ = true;
+  }
+
+  // --------------------------------------------------------
 
   // ########################################################################
   // BotContext supplies this private binding from its active context; OrderRequest cannot author
@@ -328,7 +372,8 @@ private:
 
   // --------------------------------------------------------
   // Retain every M3 owner component, activity/fault latch, and the last-declared M4 planning child;
-  // all mutable fields remain source-private to the serialized submission path.
+  // the lease declared before the identity stream outlives that provider during reverse-order
+  // destruction, and all mutable fields remain source-private to the serialized submission path.
   execution::OwnerLocalRouteCatalog routes_;
   risk::ReservationLedger ledger_;
   execution::SubmissionPolicy policy_;
@@ -336,9 +381,11 @@ private:
   execution::DeterministicFakeOrderEncoder encoder_;
   execution::DeterministicFakeWriteInitiator initiator_;
   std::unique_ptr<execution::SubmissionMeasurementClock> measurement_clock_;
+  std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_identity_lease_;
   model::DeterministicOrderIdSource order_ids_;
   trace::SubmissionTraceSink trace_sink_;
   runtime::SubmissionDiagnosticSink diagnostics_;
+  bool recovery_installation_closed_{false};
   std::uint64_t attempts_consumed_{0U};
   bool submit_active_{false};
   bool reentry_traced_{false};
