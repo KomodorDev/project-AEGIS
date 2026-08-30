@@ -1,5 +1,5 @@
-// Purpose: build sealed fake-only M1-M4 value and owner fixtures, then drive genuine owner-bound
-// submissions without exposing private coordinator mechanics or changing M1-M3 production APIs.
+// Purpose: build sealed fake-only M1-M4 value, owner, and recovery-bootstrap fixtures, then drive
+// genuine owner-bound submissions without exposing private coordinator mechanics.
 
 #pragma once
 
@@ -7,6 +7,7 @@
 #include "aegis/execution/order_request.hpp"
 #include "aegis/execution/submit_result.hpp"
 #include "aegis/model/time.hpp"
+#include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 #include "aegis/runtime/m4_policy.hpp"
 #include "aegis/runtime/runtime_policy.hpp"
 #include "aegis/runtime/submission_coordinator.hpp"
@@ -44,6 +45,16 @@ struct M4OwnerTestAuthority {
 
 // ########################################################################
 
+// ########################################################################
+// The move-only recovery fixture retains an external fake-medium handle beside its sole live
+// namespace bootstrap. Reverse destruction releases the bootstrap lease before the medium.
+struct M4RecoveryBootstrapTestAuthority {
+  std::unique_ptr<recovery::DeterministicFakeRecoveryMedium> medium;
+  recovery::RecoveryBootstrap bootstrap;
+};
+
+// ########################################################################
+
 // --------------------------------------------------------
 // Return coherent generic capacities that satisfy every accepted M4 policy relationship.
 [[nodiscard]] runtime::M4PolicyCapacities create_ordinary_m4_policy_capacities() noexcept;
@@ -71,6 +82,23 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
 // Build the reference sealed chain while retaining the sole coordinator; invalid fixture authority
 // throws std::logic_error without returning a partial owner.
 [[nodiscard]] M4OwnerTestAuthority create_m4_owner_test_authority_or_throw();
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Create one policy-sized fake medium and acknowledged live bootstrap from deterministic seeds;
+// invalid recovery authority throws std::logic_error without returning a partial value.
+[[nodiscard]] M4RecoveryBootstrapTestAuthority
+create_m4_recovery_bootstrap_test_authority_or_throw(const runtime::M4Policy& policy,
+                                                     std::uint8_t recovery_lineage_seed = 0x10U,
+                                                     std::uint8_t order_namespace_seed = 0x30U);
+
+// --------------------------------------------------------
+// Install one ordinary seeded recovery bootstrap into a pristine exact owner; any failed
+// production installation throws std::logic_error without returning partial fixture state.
+void install_recovery_bound_private_order_reconciler_or_throw(
+    M4OwnerTestAuthority& authority, std::uint8_t recovery_lineage_seed = 0x10U,
+    std::uint8_t order_namespace_seed = 0x30U);
 
 // --------------------------------------------------------
 

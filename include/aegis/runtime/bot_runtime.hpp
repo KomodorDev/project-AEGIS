@@ -1,5 +1,6 @@
-// Purpose: own one strategy instance and persistent bot-bound context per configured bot, then
-// dispatch coherent market/state events in canonical subscription order.
+// Purpose: own one strategy instance and persistent bot-bound context per configured bot, close
+// recovery installation before publishing callback authority, and dispatch coherent events in
+// canonical subscription order.
 
 #pragma once
 
@@ -313,6 +314,8 @@ public:
 
   // --------------------------------------------------------
   // Validate exact bot coverage and build source/subscription routing before any callback is legal.
+  // Success with a submission coordinator permanently closes its recovery-install seam before
+  // returning; reported failure leaves that coordinator unchanged.
   [[nodiscard]] static model::Result<BotRuntime>
   create(const configuration::StartupConfiguration& configuration, const RuntimePolicy& policy,
          model::ClockProvider& measurement_clock, trace::RuntimeTraceSink& trace_sink,
