@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+# Import the repository-owned validator without turning tools into a product package.
 TOOLS_DIRECTORY = Path(__file__).resolve().parents[2] / "tools"
 sys.path.insert(0, str(TOOLS_DIRECTORY))
 
@@ -15,8 +16,10 @@ import validate_benchmark_evidence as validator  # noqa: E402
 
 
 # --------------------------------------------------------
-# Encode one exact raw-label fixture using the accepted ordered M3 provenance grammar.
-def provenance_label(workload_id: str, risk_fingerprint: str, submission_fingerprint: str) -> str:
+# Create one raw-label fixture from the accepted ordered M3 provenance fields.
+def create_m3_provenance_label(
+    workload_id: str, risk_fingerprint: str, submission_fingerprint: str
+) -> str:
     """Return one exact semicolon-delimited M3 benchmark label."""
 
     return (
@@ -42,8 +45,10 @@ def provenance_label(workload_id: str, risk_fingerprint: str, submission_fingerp
 
 
 # --------------------------------------------------------
-# Build one complete raw iteration record with the workload-specific counter vocabulary.
-def benchmark_record(index: int, *, p50: float = 4.0, p99: float = 8.0, p99_9: float = 10.0):
+# Create one complete raw iteration record with the workload-specific counter vocabulary.
+def create_m3_benchmark_record(
+    index: int, *, p50: float = 4.0, p99: float = 8.0, p99_9: float = 10.0
+) -> dict[str, Any]:
     """Return one valid M3 success or rejection benchmark record."""
 
     run_name = validator.M3_RUN_NAMES[index]
@@ -62,7 +67,7 @@ def benchmark_record(index: int, *, p50: float = 4.0, p99: float = 8.0, p99_9: f
         "p99_us": p99,
         "p99_9_us": p99_9,
         "sample_count": validator.M3_SAMPLE_COUNT,
-        "label": provenance_label(
+        "label": create_m3_provenance_label(
             workload_id,
             "3" * 64 if index == 0 else "6" * 64,
             "4" * 64 if index == 0 else "7" * 64,
@@ -78,13 +83,13 @@ def benchmark_record(index: int, *, p50: float = 4.0, p99: float = 8.0, p99_9: f
 
 
 # --------------------------------------------------------
-# Assemble one smoke bundle whose manifest repeats both raw provenance labels exactly.
-def smoke_fixture() -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+# Create one smoke bundle whose manifest repeats both raw provenance labels exactly.
+def create_m3_smoke_fixture() -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     """Return a valid raw result, smoke manifest, and anchored benchmark command."""
 
-    raw = {"benchmarks": [benchmark_record(0), benchmark_record(1)]}
+    raw = {"benchmarks": [create_m3_benchmark_record(0), create_m3_benchmark_record(1)]}
     provenance = [
-        validator.m3_provenance(record, location=f"fixture {index}")
+        validator.parse_m3_provenance_or_raise(record, location=f"fixture {index}")
         for index, record in enumerate(raw["benchmarks"])
     ]
     manifest = {
@@ -102,8 +107,8 @@ def smoke_fixture() -> tuple[dict[str, Any], dict[str, Any], list[str]]:
 
 
 # --------------------------------------------------------
-# Upgrade one smoke manifest to the exact controlled reference-host qualification shape.
-def qualify(manifest: dict[str, Any], raw: dict[str, Any]) -> None:
+# Promote one smoke fixture to the exact controlled reference-host qualification shape.
+def promote_fixture_to_qualification(manifest: dict[str, Any], raw: dict[str, Any]) -> None:
     """Mutate a fixture manifest into a valid two-claim REF-MAC-01 qualification."""
 
     manifest.update(
@@ -156,7 +161,7 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
     def test_accepts_complete_smoke_and_qualification(self) -> None:
         """Accept only the two explicitly supported evidence classifications."""
 
-        raw, manifest, command = smoke_fixture()
+        raw, manifest, command = create_m3_smoke_fixture()
         raw["benchmarks"][0].update(
             {
                 "error_occurred": False,
@@ -165,9 +170,9 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
                 "skip_message": "",
             }
         )
-        self.assertEqual(validator.validate_m3(raw, manifest, command), "smoke")
-        qualify(manifest, raw)
-        self.assertEqual(validator.validate_m3(raw, manifest, command), "qualification")
+        self.assertEqual(validator.validate_m3_or_raise(raw, manifest, command), "smoke")
+        promote_fixture_to_qualification(manifest, raw)
+        self.assertEqual(validator.validate_m3_or_raise(raw, manifest, command), "qualification")
 
     # --------------------------------------------------------
     # Reject malformed raw records, filters, counters, sample counts, and provenance bindings.
@@ -207,7 +212,7 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
             ][0].__setitem__("route_id", "route.foreign"),
             "same risk policy": lambda raw, manifest, command: raw["benchmarks"][1].__setitem__(
                 "label",
-                provenance_label(validator.M3_WORKLOAD_IDS[1], "3" * 64, "7" * 64),
+                create_m3_provenance_label(validator.M3_WORKLOAD_IDS[1], "3" * 64, "7" * 64),
             ),
             "smoke claim": lambda raw, manifest, command: manifest.__setitem__(
                 "threshold_claims", []
@@ -215,10 +220,10 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):
-                raw, manifest, command = smoke_fixture()
+                raw, manifest, command = create_m3_smoke_fixture()
                 mutate(raw, manifest, command)
                 with self.assertRaises(ValueError):
-                    validator.validate_m3(raw, manifest, command)
+                    validator.validate_m3_or_raise(raw, manifest, command)
 
     # --------------------------------------------------------
     # Reject missing, extra, reordered, mismatched, and independently failing qualification claims.
@@ -247,11 +252,11 @@ class M3BenchmarkEvidenceTest(unittest.TestCase):
         }
         for name, mutate in mutations.items():
             with self.subTest(name=name):
-                raw, manifest, command = smoke_fixture()
-                qualify(manifest, raw)
+                raw, manifest, command = create_m3_smoke_fixture()
+                promote_fixture_to_qualification(manifest, raw)
                 mutate(raw, manifest)
                 with self.assertRaises(ValueError):
-                    validator.validate_m3(raw, manifest, command)
+                    validator.validate_m3_or_raise(raw, manifest, command)
 
     # --------------------------------------------------------
 

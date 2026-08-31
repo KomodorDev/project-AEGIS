@@ -97,9 +97,11 @@ M3_PROVENANCE_KEYS = (
 
 
 # --------------------------------------------------------
-# Runs one required subprocess and returns normalized standard output.
-def command_output(arguments: Sequence[str], *, cwd: Path | None = None) -> str:
-    """Run a command successfully and return its standard output without surrounding whitespace."""
+# Execute one required subprocess, returning normalized output or propagating its failure.
+def execute_command_for_output_or_raise(
+    arguments: Sequence[str], *, cwd: Path | None = None
+) -> str:
+    """Return trimmed standard output; raise when the command cannot run successfully."""
 
     # check=True converts a nonzero exit into an exception; capture_output keeps evidence concise.
     completed = subprocess.run(
@@ -113,9 +115,9 @@ def command_output(arguments: Sequence[str], *, cwd: Path | None = None) -> str:
 
 
 # --------------------------------------------------------
-# Extracts one required configuration value from a CMake cache.
-def cache_value(cache_path: Path, name: str) -> str:
-    """Read one named value from CMake's `NAME:TYPE=value` cache representation."""
+# Parse one required CMake cache value or raise when the named entry is absent.
+def parse_cmake_cache_value_or_raise(cache_path: Path, name: str) -> str:
+    """Return one `NAME:TYPE=value` cache value; raise when the name is absent."""
 
     # Match the full cache-key prefix, then split only once so values may themselves contain `=`.
     prefix = f"{name}:"
@@ -126,8 +128,8 @@ def cache_value(cache_path: Path, name: str) -> str:
 
 
 # --------------------------------------------------------
-# Produces a deterministic digest of every tracked and relevant untracked change.
-def worktree_fingerprint(repository: Path) -> str:
+# Calculate a deterministic SHA-256 digest of every tracked and relevant untracked change.
+def calculate_worktree_fingerprint_sha256(repository: Path) -> str:
     """Hash tracked changes plus every non-ignored untracked path and its current content."""
 
     # ++++++++++++++++++++++++++++++++++++++++
@@ -184,27 +186,29 @@ def worktree_fingerprint(repository: Path) -> str:
 
 
 # --------------------------------------------------------
-# Reads optional macOS host metadata without making its absence fatal.
-def sysctl_value(name: str) -> str | None:
+# Query optional macOS host metadata without making its absence fatal.
+def query_sysctl_value(name: str) -> str | None:
     """Return a macOS sysctl value, or None when the key/command is unavailable."""
 
     # Host metadata is best-effort: unsupported probes must not invalidate benchmark results.
     try:
-        return command_output(["sysctl", "-n", name])
+        return execute_command_for_output_or_raise(["sysctl", "-n", name])
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
 
 
 # --------------------------------------------------------
-# Reads only non-sensitive hardware facts from macOS's fallback profiler.
+# Query only the non-sensitive hardware fields from macOS's fallback profiler.
 @cache
-def system_profiler_hardware() -> dict[str, str]:
+def query_system_profiler_hardware_fields() -> dict[str, str]:
     """Return model, chip, and core-count fields without retaining hardware identifiers."""
 
     # Sandboxed macOS processes may be denied sysctl while the minimal profiler remains available.
     # The allowlist deliberately excludes serial numbers, provisioning IDs, and hardware UUIDs.
     try:
-        output = command_output(["system_profiler", "SPHardwareDataType", "-detailLevel", "mini"])
+        output = execute_command_for_output_or_raise(
+            ["system_profiler", "SPHardwareDataType", "-detailLevel", "mini"]
+        )
     except (FileNotFoundError, subprocess.CalledProcessError):
         return {}
     allowed_fields = {"Model Identifier", "Chip", "Total Number of Cores"}
@@ -217,17 +221,17 @@ def system_profiler_hardware() -> dict[str, str]:
 
 
 # --------------------------------------------------------
-# Selects the most specific CPU identity exposed by the current operating system.
-def cpu_model() -> str:
+# Detect the most specific CPU identity exposed by the current operating system.
+def detect_cpu_model() -> str:
     """Return the most specific CPU model string available on macOS or Linux."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Apple exposes CPU identity through sysctl rather than Linux's /proc virtual filesystem.
     if platform.system() == "Darwin":
         return (
-            sysctl_value("machdep.cpu.brand_string")
-            or system_profiler_hardware().get("Chip")
-            or sysctl_value("hw.model")
+            query_sysctl_value("machdep.cpu.brand_string")
+            or query_system_profiler_hardware_fields().get("Chip")
+            or query_sysctl_value("hw.model")
             or "unknown"
         )
 
@@ -247,14 +251,14 @@ def cpu_model() -> str:
 
 
 # --------------------------------------------------------
-# Resolves a hardware model independently of the machine's user-assigned name.
-def host_model() -> str:
+# Detect a hardware model independently of the machine's user-assigned name.
+def detect_host_model() -> str:
     """Return the host's hardware model rather than its user-assigned network name."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Apple publishes the machine model directly through sysctl.
     if platform.system() == "Darwin":
-        return sysctl_value("hw.model") or system_profiler_hardware().get(
+        return query_sysctl_value("hw.model") or query_system_profiler_hardware_fields().get(
             "Model Identifier", "unknown"
         )
 
@@ -279,14 +283,14 @@ def host_model() -> str:
 
 
 # --------------------------------------------------------
-# Determines total physical memory through the current platform's native facilities.
-def total_memory_bytes() -> int:
-    """Return installed/visible physical memory in bytes using operating-system facilities."""
+# Detect total physical memory through native facilities or raise when none is available.
+def detect_total_memory_bytes_or_raise() -> int:
+    """Return installed/visible physical memory in bytes, or raise when it cannot be detected."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # macOS exposes installed physical memory directly through sysctl.
     if platform.system() == "Darwin":
-        value = sysctl_value("hw.memsize")
+        value = query_sysctl_value("hw.memsize")
         if value:
             return int(value)
 
@@ -302,17 +306,17 @@ def total_memory_bytes() -> int:
 
 
 # --------------------------------------------------------
-# Counts physical processor cores when platform topology data is available.
-def physical_core_count() -> int | None:
+# Detect the physical processor-core count when platform topology data is available.
+def detect_physical_core_count() -> int | None:
     """Count physical CPU cores when the host exposes topology without extra dependencies."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # macOS reports the total directly.
     if platform.system() == "Darwin":
-        value = sysctl_value("hw.physicalcpu")
+        value = query_sysctl_value("hw.physicalcpu")
         if value:
             return int(value)
-        profiler_value = system_profiler_hardware().get("Total Number of Cores")
+        profiler_value = query_system_profiler_hardware_fields().get("Total Number of Cores")
         if profiler_value:
             try:
                 return int(profiler_value.split("(", 1)[0].strip())
@@ -323,12 +327,12 @@ def physical_core_count() -> int | None:
     # ++++++++++++++++++++++++++++++++++++++++
     # Linux lscpu emits CORE,SOCKET pairs; unique pairs distinguish cores across CPU sockets.
     try:
-        rows = command_output(["lscpu", "--parse=CORE,SOCKET"])
+        rows = execute_command_for_output_or_raise(["lscpu", "--parse=CORE,SOCKET"])
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
 
     # ++++++++++++++++++++++++++++++++++++++++
-    # Interesting syntax: this set comprehension both filters comments and removes duplicates.
+    # Filter comments and remove duplicate core/socket pairs before counting physical cores.
     cores = {
         line for line in rows.splitlines() if line and not line.startswith("#") and line != "-,-"
     }
@@ -338,8 +342,8 @@ def physical_core_count() -> int | None:
 
 
 # --------------------------------------------------------
-# Determines whether recorded facts exactly identify the controlled reference host.
-def qualifies_as_ref_mac_01(context: dict[str, object]) -> bool:
+# Report whether recorded facts exactly satisfy the controlled reference-host contract.
+def is_ref_mac_01_qualification_context(context: dict[str, object]) -> bool:
     """Return whether context truthfully satisfies every controlled REF-MAC-01 condition."""
 
     # A free-form approximation never authorizes a threshold claim: every hardware, toolchain, and
@@ -360,9 +364,9 @@ def qualifies_as_ref_mac_01(context: dict[str, object]) -> bool:
 
 
 # --------------------------------------------------------
-# Extracts the sole threshold-bearing observation from a raw M2 result.
-def callback_p99_microseconds(raw_result: dict[str, object]) -> float:
-    """Return the finite nonnegative callback p99 counter needed for a qualification claim."""
+# Extract the sole threshold-bearing M2 observation or raise for malformed evidence.
+def extract_m2_callback_p99_microseconds_or_raise(raw_result: dict[str, object]) -> float:
+    """Return the finite nonnegative callback p99 counter, or raise for invalid raw evidence."""
 
     # The validator performs the complete schema audit; generation needs only one exact record and
     # one numeric counter to create an eligible controlled-host claim.
@@ -389,8 +393,10 @@ def callback_p99_microseconds(raw_result: dict[str, object]) -> float:
 
 
 # --------------------------------------------------------
-# Extracts and cross-checks the immutable configuration identities emitted by every M2 workload.
-def m2_fingerprints(raw_result: dict[str, object]) -> tuple[str, str]:
+# Parse and require the one immutable fingerprint pair shared by every valid M2 workload.
+def parse_consistent_m2_fingerprint_pair_or_raise(
+    raw_result: dict[str, object],
+) -> tuple[str, str]:
     """Return one identical valid configuration/runtime-policy fingerprint pair from all M2 runs."""
 
     # Each result is independently attributable; requiring equality prevents a mixed raw bundle
@@ -415,8 +421,10 @@ def m2_fingerprints(raw_result: dict[str, object]) -> tuple[str, str]:
 
 
 # --------------------------------------------------------
-# Extracts the two raw M3 p99 observations in the published workload order.
-def m3_p99_microseconds(raw_result: dict[str, object]) -> tuple[float, float]:
+# Extract the two valid raw M3 p99 observations in the published workload order.
+def extract_m3_p99_microsecond_pair_or_raise(
+    raw_result: dict[str, object],
+) -> tuple[float, float]:
     """Return the finite nonnegative p99 values used by the two controlled-host claims."""
 
     # Each claim must bind one unique raw iteration record rather than a derived or aggregate row.
@@ -445,8 +453,10 @@ def m3_p99_microseconds(raw_result: dict[str, object]) -> tuple[float, float]:
 
 
 # --------------------------------------------------------
-# Parses the exact ordered provenance label emitted by every M3 benchmark fixture.
-def m3_workload_provenance(raw_result: dict[str, object]) -> list[dict[str, object]]:
+# Parse the exact ordered provenance label emitted by every M3 benchmark fixture.
+def parse_m3_workload_provenance_or_raise(
+    raw_result: dict[str, object],
+) -> list[dict[str, object]]:
     """Return one exact manifest provenance object for each ordered M3 workload."""
 
     # ++++++++++++++++++++++++++++++++++++++++
@@ -493,9 +503,9 @@ def m3_workload_provenance(raw_result: dict[str, object]) -> list[dict[str, obje
 
 
 # --------------------------------------------------------
-# Parses the M0/M2/M3 suite and output destination while retaining the no-argument M0 contract.
-def parse_arguments() -> argparse.Namespace:
-    """Select M0 by default or one explicit suite and repository-relative evidence directory."""
+# Parse CLI suite/output arguments or exit while retaining the no-argument M0 contract.
+def parse_cli_arguments_or_exit() -> argparse.Namespace:
+    """Select M0 by default or one explicit suite and output directory; exit for invalid input."""
 
     # Resolving from __file__ makes the default independent of the caller's current directory.
     repository = Path(__file__).resolve().parents[1]
@@ -515,13 +525,13 @@ def parse_arguments() -> argparse.Namespace:
 
 
 # --------------------------------------------------------
-# Builds, runs, and records the selected benchmark suite and its provenance.
-def main() -> int:
-    """Build first, run exactly one suite, and write raw results plus a context manifest."""
+# Generate the selected benchmark suite and provenance, propagating required-operation failures.
+def generate_benchmark_evidence_or_raise() -> int:
+    """Build and run one suite, then write raw results plus a context manifest or raise."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Derive all fixed inputs from the repository and the release preset's stable output paths.
-    arguments = parse_arguments()
+    arguments = parse_cli_arguments_or_exit()
     suite = arguments.suite
     repository = Path(__file__).resolve().parents[1]
     binary = (repository / "build/release/benchmarks/aegis_benchmarks").resolve()
@@ -532,10 +542,12 @@ def main() -> int:
     # The release cache is the source of truth for the actual generator, tools, and source tree.
     if not cache_path.is_file():
         raise FileNotFoundError(f"release configuration not found: {cache_path}")
-    build_type = cache_value(cache_path, "CMAKE_BUILD_TYPE")
+    build_type = parse_cmake_cache_value_or_raise(cache_path, "CMAKE_BUILD_TYPE")
     if build_type != "Release":
         raise RuntimeError(f"release preset cache has unexpected build type: {build_type}")
-    configured_source = Path(cache_value(cache_path, "CMAKE_HOME_DIRECTORY")).resolve()
+    configured_source = Path(
+        parse_cmake_cache_value_or_raise(cache_path, "CMAKE_HOME_DIRECTORY")
+    ).resolve()
     if configured_source != repository:
         raise RuntimeError(
             f"release cache belongs to {configured_source}, not this repository: {repository}"
@@ -544,7 +556,7 @@ def main() -> int:
     # ++++++++++++++++++++++++++++++++++++++++
     # Rebuild the exact benchmark target before measuring so stale or debug executables cannot be
     # mislabeled as evidence for the current source tree. The cache supplies the configured CMake.
-    cmake = cache_value(cache_path, "CMAKE_COMMAND")
+    cmake = parse_cmake_cache_value_or_raise(cache_path, "CMAKE_COMMAND")
     build_command = [cmake, "--build", "--preset", "release", "--target", "aegis_benchmarks"]
     subprocess.run(build_command, cwd=repository, check=True)
     if not binary.is_file():
@@ -595,8 +607,8 @@ def main() -> int:
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Read tool locations and raw library metadata from the build/result rather than assumptions.
-    compiler = cache_value(cache_path, "CMAKE_CXX_COMPILER")
-    build_tool = cache_value(cache_path, "CMAKE_MAKE_PROGRAM")
+    compiler = parse_cmake_cache_value_or_raise(cache_path, "CMAKE_CXX_COMPILER")
+    build_tool = parse_cmake_cache_value_or_raise(cache_path, "CMAKE_MAKE_PROGRAM")
     raw_result = json.loads(benchmark_path.read_text(encoding="utf-8"))
     raw_context = raw_result.get("context")
     if not isinstance(raw_context, dict):
@@ -610,7 +622,9 @@ def main() -> int:
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Fingerprint both the repository view and the produced files after the synchronized build.
-    git_status = command_output(["git", "status", "--porcelain"], cwd=repository)
+    git_status = execute_command_for_output_or_raise(
+        ["git", "status", "--porcelain"], cwd=repository
+    )
     benchmark_hash = hashlib.sha256(benchmark_path.read_bytes()).hexdigest()
     executable_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
 
@@ -619,24 +633,30 @@ def main() -> int:
     context = {
         "schema_version": 1,
         "generated_at_utc": datetime.now(UTC).isoformat(),
-        "git_revision": command_output(["git", "rev-parse", "HEAD"], cwd=repository),
-        "git_head_tree": command_output(["git", "rev-parse", "HEAD^{tree}"], cwd=repository),
+        "git_revision": execute_command_for_output_or_raise(
+            ["git", "rev-parse", "HEAD"], cwd=repository
+        ),
+        "git_head_tree": execute_command_for_output_or_raise(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=repository
+        ),
         "git_worktree_dirty": bool(git_status),
-        "git_worktree_fingerprint_sha256": worktree_fingerprint(repository),
+        "git_worktree_fingerprint_sha256": calculate_worktree_fingerprint_sha256(repository),
         "build_preset": "release",
         "build_type": build_type,
-        "build_system": cache_value(cache_path, "CMAKE_GENERATOR"),
-        "compiler": command_output([compiler, "--version"]).splitlines()[0],
-        "cmake": command_output([cmake, "--version"]).splitlines()[0],
-        "build_tool": command_output([build_tool, "--version"]).splitlines()[0],
+        "build_system": parse_cmake_cache_value_or_raise(cache_path, "CMAKE_GENERATOR"),
+        "compiler": execute_command_for_output_or_raise([compiler, "--version"]).splitlines()[0],
+        "cmake": execute_command_for_output_or_raise([cmake, "--version"]).splitlines()[0],
+        "build_tool": execute_command_for_output_or_raise([build_tool, "--version"]).splitlines()[
+            0
+        ],
         "google_benchmark_library_version": library_version,
         "operating_system": platform.platform(),
-        "host_model": host_model(),
+        "host_model": detect_host_model(),
         "machine": platform.machine(),
-        "cpu_model": cpu_model(),
-        "total_memory_bytes": total_memory_bytes(),
+        "cpu_model": detect_cpu_model(),
+        "total_memory_bytes": detect_total_memory_bytes_or_raise(),
         "logical_core_count": os.cpu_count(),
-        "physical_core_count": physical_core_count(),
+        "physical_core_count": detect_physical_core_count(),
         "power_mode": os.environ.get("AEGIS_BENCHMARK_POWER_MODE", "uncontrolled"),
         "host_isolation": os.environ.get("AEGIS_BENCHMARK_HOST_ISOLATION", "uncontrolled"),
         "thermal_state": os.environ.get("AEGIS_BENCHMARK_THERMAL_STATE", "uncontrolled"),
@@ -663,7 +683,9 @@ def main() -> int:
             }
         )
     elif suite == "m2":
-        configuration_fingerprint, runtime_policy_fingerprint = m2_fingerprints(raw_result)
+        configuration_fingerprint, runtime_policy_fingerprint = (
+            parse_consistent_m2_fingerprint_pair_or_raise(raw_result)
+        )
         context.update(
             {
                 "benchmark_suite": "m2",
@@ -678,8 +700,8 @@ def main() -> int:
                 "evidence_classification": "smoke",
             }
         )
-        if qualifies_as_ref_mac_01(context):
-            observed_p99 = callback_p99_microseconds(raw_result)
+        if is_ref_mac_01_qualification_context(context):
+            observed_p99 = extract_m2_callback_p99_microseconds_or_raise(raw_result)
             callback_limit = 100.0
             context["evidence_classification"] = "qualification"
             context["qualification_reference"] = "REF-MAC-01"
@@ -694,7 +716,7 @@ def main() -> int:
                 }
             ]
     else:
-        workload_provenance = m3_workload_provenance(raw_result)
+        workload_provenance = parse_m3_workload_provenance_or_raise(raw_result)
         context.update(
             {
                 "benchmark_suite": "m3",
@@ -709,8 +731,8 @@ def main() -> int:
                 "evidence_classification": "smoke",
             }
         )
-        if qualifies_as_ref_mac_01(context):
-            initiated_p99, rejected_p99 = m3_p99_microseconds(raw_result)
+        if is_ref_mac_01_qualification_context(context):
+            initiated_p99, rejected_p99 = extract_m3_p99_microsecond_pair_or_raise(raw_result)
             context["evidence_classification"] = "qualification"
             context["qualification_reference"] = "REF-MAC-01"
             context["threshold_claims"] = [
@@ -742,6 +764,6 @@ def main() -> int:
 
 # --------------------------------------------------------
 
-# Interesting syntax: this guard runs main only as a script, not when helpers are imported in tests.
+# Interesting syntax: this guard generates evidence only when invoked as a script, not on import.
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(generate_benchmark_evidence_or_raise())
