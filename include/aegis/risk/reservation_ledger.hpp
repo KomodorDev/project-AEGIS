@@ -230,11 +230,11 @@ public:
   scope_evidence_at(std::size_t canonical_index) const;
 
   // --------------------------------------------------------
-  // Recompose one coherent scope projection from its shared mutable cells without mutation.
+  // Calculate one coherent scope projection from its shared mutable cells without mutation.
   [[nodiscard]] std::optional<RiskScopeExposure>
-  scope_exposure(const model::FirmId& firm_id, RiskScopeKind scope, std::string_view scope_subject,
-                 const model::InstrumentId& instrument_id,
-                 std::string_view quote_currency) const noexcept;
+  calculate_scope_exposure(const model::FirmId& firm_id, RiskScopeKind scope,
+                           std::string_view scope_subject, const model::InstrumentId& instrument_id,
+                           std::string_view quote_currency) const noexcept;
 
 private:
 

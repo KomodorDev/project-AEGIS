@@ -661,7 +661,7 @@ create_invalid_runtime_trace_record_result(std::string_view field) {
 // Convert a nominal optional counter into the primitive form assigned to schema-one bytes.
 template <typename Counter>
 [[nodiscard]] std::optional<std::uint64_t>
-counter_value(const std::optional<Counter>& value) noexcept {
+optional_uint64_from_optional_counter(const std::optional<Counter>& value) noexcept {
   return value.has_value() ? std::optional<std::uint64_t>{value->value()} : std::nullopt;
 }
 
@@ -687,15 +687,15 @@ encode_record(const RuntimeTraceRecord& record, const RuntimeTraceProvenance& pr
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Project nominal counters into stable unsigned fields without changing their type at the API.
-  const auto session_epoch = counter_value(fields.session_epoch);
-  const auto source_sequence = counter_value(fields.source_sequence);
-  const auto admission_ordinal = counter_value(fields.admission_ordinal);
-  const auto turn_ordinal = counter_value(fields.turn_ordinal);
-  const auto callback_ordinal = counter_value(fields.callback_ordinal);
-  const auto receive_sequence = counter_value(fields.receive_sequence);
-  const auto metadata_revision = counter_value(fields.metadata_revision);
-  const auto book_generation = counter_value(fields.book_generation);
-  const auto book_revision = counter_value(fields.book_revision);
+  const auto session_epoch = optional_uint64_from_optional_counter(fields.session_epoch);
+  const auto source_sequence = optional_uint64_from_optional_counter(fields.source_sequence);
+  const auto admission_ordinal = optional_uint64_from_optional_counter(fields.admission_ordinal);
+  const auto turn_ordinal = optional_uint64_from_optional_counter(fields.turn_ordinal);
+  const auto callback_ordinal = optional_uint64_from_optional_counter(fields.callback_ordinal);
+  const auto receive_sequence = optional_uint64_from_optional_counter(fields.receive_sequence);
+  const auto metadata_revision = optional_uint64_from_optional_counter(fields.metadata_revision);
+  const auto book_generation = optional_uint64_from_optional_counter(fields.book_generation);
+  const auto book_revision = optional_uint64_from_optional_counter(fields.book_revision);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit the independent record envelope and all tagged values in compatibility order.

@@ -43,7 +43,7 @@ template <typename Value>
 concept HasPublicCoordinatorSubmitOrder = requires { &Value::submit_order; };
 
 template <typename Value>
-concept HasPublicMeasurementClock = requires { &Value::measurement_now; };
+concept HasPublicMeasurementClock = requires { &Value::take_measurement_nanosecond_reading; };
 
 template <typename Value>
 concept HasPublicCallbackBinding = requires { typename Value::CallbackBinding; };

@@ -250,7 +250,7 @@ find_limit_row_or_throw(risk::RiskPolicyParams& params,
 calculate_scope_exposure_or_throw(const risk::ReservationLedger& ledger,
                                   const execution::InstalledSubmissionRoute& route,
                                   risk::RiskScopeKind scope) {
-  const auto snapshot = ledger.scope_exposure(
+  const auto snapshot = ledger.calculate_scope_exposure(
       route.attribution().firm_id, scope, derive_risk_scope_subject_or_throw(route, scope),
       route.metadata().instrument_id(), route.metadata().quote_currency());
   if (!snapshot) {
@@ -623,9 +623,9 @@ TEST_CASE("risk ledger preserves directional worst case and multi-firm isolation
     CHECK(observed->scope_subject == expected.scope_subject());
     CHECK(observed->instrument_id == expected.instrument_id());
     CHECK(observed->quote_currency == expected.quote_currency());
-    const auto direct =
-        ledger.scope_exposure(expected.firm_id(), expected.scope(), expected.scope_subject(),
-                              expected.instrument_id(), expected.quote_currency());
+    const auto direct = ledger.calculate_scope_exposure(
+        expected.firm_id(), expected.scope(), expected.scope_subject(), expected.instrument_id(),
+        expected.quote_currency());
     REQUIRE(direct.has_value());
     CHECK(observed->exposure == *direct);
   }

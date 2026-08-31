@@ -313,9 +313,10 @@ private:
                std::optional<std::uint64_t> entry_started) noexcept;
 
   // --------------------------------------------------------
-  // Read the dedicated thread-safe clock without consulting or mutating any owner-local state.
-  [[nodiscard]] std::optional<std::uint64_t> measurement_now() noexcept {
-    return measurement_clock_->now_nanoseconds();
+  // Take one dedicated thread-safe clock sample without consulting or mutating owner-local state;
+  // deterministic clocks visibly consume at most one scripted reading.
+  [[nodiscard]] std::optional<std::uint64_t> take_measurement_nanosecond_reading() noexcept {
+    return measurement_clock_->take_nanosecond_reading();
   }
 
   // --------------------------------------------------------

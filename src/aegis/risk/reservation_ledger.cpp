@@ -724,8 +724,8 @@ ReservationLedger::scope_evidence_at(std::size_t canonical_index) const {
     return std::nullopt;
   }
   const auto& row = implementation_->policy.limit_sets()[canonical_index];
-  auto exposure = scope_exposure(row.firm_id(), row.scope(), row.scope_subject(),
-                                 row.instrument_id(), row.quote_currency());
+  auto exposure = calculate_scope_exposure(row.firm_id(), row.scope(), row.scope_subject(),
+                                           row.instrument_id(), row.quote_currency());
   if (!exposure) {
     return std::nullopt;
   }
@@ -739,7 +739,7 @@ ReservationLedger::scope_evidence_at(std::size_t canonical_index) const {
 
 // --------------------------------------------------------
 // Recompose one coherent evidence view from the same shared cells used by admission decisions.
-std::optional<RiskScopeExposure> ReservationLedger::scope_exposure(
+std::optional<RiskScopeExposure> ReservationLedger::calculate_scope_exposure(
     const model::FirmId& firm_id, RiskScopeKind scope, std::string_view subject,
     const model::InstrumentId& instrument_id, std::string_view quote_currency) const noexcept {
   const auto firm = firm_id.value();

@@ -36,7 +36,7 @@ from run_benchmarks import (
     M3_RUN_NAMES,
     M3_SAMPLE_COUNT,
     M3_WORKLOAD_IDS,
-    calculate_worktree_fingerprint_sha256,
+    calculate_worktree_fingerprint_sha256_or_raise,
 )
 
 EXPECTED_AGGREGATES = {"mean", "median", "stddev", "cv"}
@@ -861,7 +861,7 @@ def validate_repository_provenance_or_raise(manifest: dict[str, Any], repository
     )
     require_evidence_condition(
         manifest["git_worktree_fingerprint_sha256"]
-        == calculate_worktree_fingerprint_sha256(repository),
+        == calculate_worktree_fingerprint_sha256_or_raise(repository),
         "git_worktree_fingerprint_sha256 no longer matches checkout",
     )
 

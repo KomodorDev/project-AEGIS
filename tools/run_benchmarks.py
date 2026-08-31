@@ -129,8 +129,12 @@ def parse_cmake_cache_value_or_raise(cache_path: Path, name: str) -> str:
 
 # --------------------------------------------------------
 # Calculate a deterministic SHA-256 digest of every tracked and relevant untracked change.
-def calculate_worktree_fingerprint_sha256(repository: Path) -> str:
-    """Hash tracked changes plus every non-ignored untracked path and its current content."""
+def calculate_worktree_fingerprint_sha256_or_raise(repository: Path) -> str:
+    """Return a deterministic digest over tracked and untracked content.
+
+    Raise `OSError` for file access, `subprocess.CalledProcessError` for Git failures, or
+    `RuntimeError` for unsupported untracked path types.
+    """
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Git's binary diff covers staged and unstaged tracked changes while disabling user diff helpers
@@ -640,7 +644,9 @@ def generate_benchmark_evidence_or_raise() -> int:
             ["git", "rev-parse", "HEAD^{tree}"], cwd=repository
         ),
         "git_worktree_dirty": bool(git_status),
-        "git_worktree_fingerprint_sha256": calculate_worktree_fingerprint_sha256(repository),
+        "git_worktree_fingerprint_sha256": calculate_worktree_fingerprint_sha256_or_raise(
+            repository
+        ),
         "build_preset": "release",
         "build_type": build_type,
         "build_system": parse_cmake_cache_value_or_raise(cache_path, "CMAKE_GENERATOR"),

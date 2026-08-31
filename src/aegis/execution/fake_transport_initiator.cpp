@@ -208,10 +208,10 @@ DeterministicFakeWriteInitiator::initiate(const EncodedFakeOrder& encoded_order,
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Emplacing the full byte copy is the exact boundary after which no definite failure is returned;
-  // read the endpoint immediately, before constructing or returning any later result state.
+  // take the endpoint immediately, before constructing or returning any later result state.
   auto accepted_write = AcceptedFakeWrite{encoded_order, invocation.value(), write_ordinal.value()};
   accepted_writes_.push_back(std::move(accepted_write));
-  const auto accepted_slot_endpoint = measurement_clock.now_nanoseconds();
+  const auto accepted_slot_endpoint = measurement_clock.take_nanosecond_reading();
   return model::Result<FakeInitiationResult>::create_success(
       FakeInitiationResult{invocation.value(), selected_outcome,
                            std::optional{write_ordinal.value()}, accepted_slot_endpoint});

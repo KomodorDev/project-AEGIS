@@ -98,7 +98,7 @@ create_route_catalog(const configuration::StartupConfiguration& configuration) {
 // Calculate the exact longest positional AEGISFOE record without creating an order or calling the
 // encoder; every identifier contributes its two-byte length prefix plus accepted ASCII bytes.
 [[nodiscard]] model::Result<std::uint64_t>
-required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
+calculate_required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
   constexpr std::uint64_t fixed_bytes = 8U + 2U + model::OrderId::byte_size + (9U * 2U) + 3U +
                                         (2U * 9U) + (4U * model::sha256_digest_size) +
                                         (5U * sizeof(std::uint64_t));
@@ -137,8 +137,8 @@ required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
 // --------------------------------------------------------
 // Subtract only available ordered readings so regression and unsigned wrap remain unrepresentable.
 [[nodiscard]] std::optional<std::uint64_t>
-local_duration(std::optional<std::uint64_t> started,
-               std::optional<std::uint64_t> finished) noexcept {
+calculate_local_duration(std::optional<std::uint64_t> started,
+                         std::optional<std::uint64_t> finished) noexcept {
   if (!started || !finished || *finished < *started) {
     return std::nullopt;
   }
@@ -148,7 +148,7 @@ local_duration(std::optional<std::uint64_t> started,
 // --------------------------------------------------------
 // Copy the exact installed route projection into canonical submission evidence.
 [[nodiscard]] trace::AuthorizedSubmissionProjection
-authorized_projection(const InstalledSubmissionRoute& route) {
+authorized_submission_projection_from_installed_route(const InstalledSubmissionRoute& route) {
   return trace::AuthorizedSubmissionProjection{
       route.route().id,
       route.route().venue_id,
@@ -162,7 +162,7 @@ authorized_projection(const InstalledSubmissionRoute& route) {
 // --------------------------------------------------------
 // Initialize every optional causal group explicitly so strict missing-field warnings remain useful.
 [[nodiscard]] trace::SubmissionTraceFields
-empty_trace_fields(const trace::SubmissionTraceContext& context) {
+submission_trace_fields_from_context(const trace::SubmissionTraceContext& context) {
   return trace::SubmissionTraceFields{
       context,      std::nullopt,
       std::nullopt, std::nullopt,
@@ -176,10 +176,10 @@ empty_trace_fields(const trace::SubmissionTraceContext& context) {
 // --------------------------------------------------------
 // Bind one admitted order to every immutable startup and policy identity used by the decision.
 [[nodiscard]] oms::OutboundOrderProvenance
-outbound_provenance(const InstalledSubmissionRoute& installed,
-                    const risk::RiskPolicySnapshot& risk_policy,
-                    const SubmissionPolicy& submission_policy,
-                    const model::Sha256Digest& runtime_policy_fingerprint) {
+create_outbound_order_provenance(const InstalledSubmissionRoute& installed,
+                                 const risk::RiskPolicySnapshot& risk_policy,
+                                 const SubmissionPolicy& submission_policy,
+                                 const model::Sha256Digest& runtime_policy_fingerprint) {
   const auto& route = installed.route();
   const auto& attribution = installed.attribution();
   return oms::OutboundOrderProvenance{
@@ -233,7 +233,7 @@ SubmissionCoordinator::create_submission_coordinator(
     return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
         route_catalog.error());
   }
-  auto required_bytes = required_encoded_order_bytes(route_catalog.value());
+  auto required_bytes = calculate_required_encoded_order_bytes(route_catalog.value());
   if (!required_bytes) {
     return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
         required_bytes.error());
@@ -577,7 +577,7 @@ std::optional<std::uint64_t> SubmissionCoordinator::finish_measurement(
     std::optional<std::uint64_t> entry_started, std::optional<std::uint64_t> measurement_finished,
     const trace::SubmissionTraceFields& fields, const CallbackBinding& binding,
     SubmissionStage stage, SubmissionReason reason) noexcept {
-  const auto duration = local_duration(entry_started, measurement_finished);
+  const auto duration = calculate_local_duration(entry_started, measurement_finished);
   if (duration) {
     return duration;
   }
@@ -607,7 +607,7 @@ SubmitResult SubmissionCoordinator::complete_rejection(
       stage, reason, fields.context.attempt_id, order_id, risk_evidence);
   fields.final_result = trace::SubmissionFinalResult::from_submit_result(canonical);
   if (!append_trace(trace::SubmissionTraceEventKind::SubmissionCompleted, fields)) {
-    const auto measurement_finished = measurement_now();
+    const auto measurement_finished = take_measurement_nanosecond_reading();
     const auto duration =
         finish_measurement(entry_started, measurement_finished, fields, binding,
                            SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted);
@@ -615,8 +615,8 @@ SubmitResult SubmissionCoordinator::complete_rejection(
         SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted,
         fields.context.attempt_id, std::move(order_id), std::nullopt, duration);
   }
-  const auto duration =
-      finish_measurement(entry_started, measurement_now(), fields, binding, stage, reason);
+  const auto duration = finish_measurement(entry_started, take_measurement_nanosecond_reading(),
+                                           fields, binding, stage, reason);
   return SubmitResult::create_locally_rejected_result(stage, reason, fields.context.attempt_id,
                                                       std::move(order_id), std::move(risk_evidence),
                                                       duration);
@@ -718,7 +718,7 @@ SubmitResult SubmissionCoordinator::fail_internal(
       }
     }
     const auto measurement_finished = captured_measurement_finished == nullptr
-                                          ? measurement_now()
+                                          ? take_measurement_nanosecond_reading()
                                           : *captured_measurement_finished;
     const auto duration =
         finish_measurement(entry_started, measurement_finished, fields, binding,
@@ -749,7 +749,7 @@ SubmitResult SubmissionCoordinator::fail_internal(
   }
   if (canonical_append_failed) {
     const auto duration =
-        finish_measurement(entry_started, measurement_now(), fields, binding,
+        finish_measurement(entry_started, take_measurement_nanosecond_reading(), fields, binding,
                            SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted);
     return SubmitResult::create_locally_rejected_result(
         SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted,
@@ -786,7 +786,7 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
     const auto active_attempt =
         active_trace_context_ ? std::optional{active_trace_context_->attempt_id} : std::nullopt;
     if (active_trace_context_) {
-      auto nested = empty_trace_fields(*active_trace_context_);
+      auto nested = submission_trace_fields_from_context(*active_trace_context_);
       nested.context.request = request;
       auto result = SubmitResult::create_locally_rejected_result(
           SubmissionStage::Context, SubmissionReason::SubmissionReentry,
@@ -804,7 +804,7 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
       static_cast<void>(diagnostics_.append_diagnostic(
           runtime::SubmissionDiagnosticKind::ReentryDetected, std::move(diagnostic)));
       const auto duration =
-          finish_measurement(entry_started, measurement_now(), nested, binding,
+          finish_measurement(entry_started, take_measurement_nanosecond_reading(), nested, binding,
                              SubmissionStage::Context, SubmissionReason::SubmissionReentry);
       return SubmitResult::create_locally_rejected_result(
           SubmissionStage::Context, SubmissionReason::SubmissionReentry, active_attempt,
@@ -854,7 +854,7 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
         SubmissionStage::Evidence, SubmissionReason::EvidenceCapacityExceeded, attempt_id.value());
   }
 
-  auto fields = empty_trace_fields(*active_trace_context_);
+  auto fields = submission_trace_fields_from_context(*active_trace_context_);
   if (!append_trace(trace::SubmissionTraceEventKind::Attempt, fields)) {
     return fail_internal(fields, nullptr, std::nullopt, binding, entry_started, true);
   }
@@ -867,7 +867,7 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
                               std::nullopt, binding, entry_started);
   }
   const auto& installed = *authorization.installed_route;
-  fields.authorized_projection = authorized_projection(installed);
+  fields.authorized_projection = authorized_submission_projection_from_installed_route(installed);
   if (!append_trace(trace::SubmissionTraceEventKind::RouteAuthorized, fields)) {
     return fail_internal(fields, nullptr, std::nullopt, binding, entry_started, true);
   }
@@ -940,8 +940,8 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
       reservation_id,
       economics,
       *fields.approved_exposure,
-      outbound_provenance(installed, ledger_.policy(), policy_,
-                          policy_.runtime_policy_fingerprint()),
+      create_outbound_order_provenance(installed, ledger_.policy(), policy_,
+                                       policy_.runtime_policy_fingerprint()),
   });
   if (!admitted) {
     latch_runtime_fault(std::move(admitted).error());

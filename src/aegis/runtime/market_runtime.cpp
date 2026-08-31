@@ -63,7 +63,7 @@ parser_detail(market_data::RecordedFixtureParseCode code) noexcept {
 // --------------------------------------------------------
 // Project the accepted executor authority into the narrower market-state context.
 [[nodiscard]] constexpr market_data::AcceptedMarketTurnContext
-accepted_market_context(const AcceptedTurnContext& context) noexcept {
+accepted_market_turn_context_from_accepted_turn(const AcceptedTurnContext& context) noexcept {
   return market_data::AcceptedMarketTurnContext{context.receipt.attempt_ordinal,
                                                 context.turn_ordinal, context.processing_timestamp};
 }
@@ -71,14 +71,14 @@ accepted_market_context(const AcceptedTurnContext& context) noexcept {
 // --------------------------------------------------------
 // Project owner-control authority without fabricating an admission or receive identity.
 [[nodiscard]] constexpr market_data::OwnerMarketTurnContext
-owner_market_context(const ControlTurnContext& context) noexcept {
+owner_market_turn_context_from_control_turn(const ControlTurnContext& context) noexcept {
   return market_data::OwnerMarketTurnContext{context.turn_ordinal, context.processing_timestamp};
 }
 
 // --------------------------------------------------------
 // Bootstrap and resynchronization commands use accepted scheduling but owner-control semantics.
 [[nodiscard]] constexpr market_data::OwnerMarketTurnContext
-owner_market_context(const AcceptedTurnContext& context) noexcept {
+owner_market_turn_context_from_accepted_turn(const AcceptedTurnContext& context) noexcept {
   return market_data::OwnerMarketTurnContext{context.turn_ordinal, context.processing_timestamp};
 }
 
@@ -846,7 +846,8 @@ MarketRuntime::on_source_discontinuity(const SourceDiscontinuity& discontinuity,
   // Exact authorization and trace reservation precede state mutation; later dispatch faults
   // preserve this applied turn.
   auto outcome = market_states_[source_index].apply_source_discontinuity(
-      discontinuity.earliest_failed_attempt, owner_market_context(context), trace_sink_, preflight);
+      discontinuity.earliest_failed_attempt, owner_market_turn_context_from_control_turn(context),
+      trace_sink_, preflight);
   if (!outcome) {
     preflight.cancel_dispatch_plan();
     return model::Result<void>::create_failure(runtime_error_from_turn_error(outcome.error()));
@@ -1024,8 +1025,8 @@ model::Result<void> MarketRuntime::execute_bootstrap_turn(std::uint32_t source_i
   // ++++++++++++++++++++++++++++++++++++++++
   // Preflight exact state-only fan-out before initialization publishes Synchronizing.
   ExactBotDispatchPreflight preflight{*bot_runtime_};
-  auto outcome = market_states_[source_index].initialize_market_state(owner_market_context(context),
-                                                                      trace_sink_, preflight);
+  auto outcome = market_states_[source_index].initialize_market_state(
+      owner_market_turn_context_from_accepted_turn(context), trace_sink_, preflight);
   if (!outcome) {
     preflight.cancel_dispatch_plan();
     return model::Result<void>::create_failure(outcome.error());
@@ -1083,8 +1084,8 @@ MarketRuntime::execute_resynchronization_turn(std::uint32_t source_index,
                                                       "market_runtime.resynchronize_source");
   }
   ExactBotDispatchPreflight preflight{*bot_runtime_};
-  auto outcome = market_states_[source_index].resynchronize_source(owner_market_context(context),
-                                                                   trace_sink_, preflight);
+  auto outcome = market_states_[source_index].resynchronize_source(
+      owner_market_turn_context_from_accepted_turn(context), trace_sink_, preflight);
   if (!outcome) {
     preflight.cancel_dispatch_plan();
     return model::Result<void>::create_failure(outcome.error());
@@ -1140,7 +1141,7 @@ MarketRuntime::execute_normalized_market_turn(market_data::NormalizedRecordedMar
   // ++++++++++++++++++++++++++++++++++++++++
   // Visit exactly one state overload; every failure promises no state mutation and cancels no-op
   // observational preflight before the executor latches a terminal handler failure.
-  const auto market_context = accepted_market_context(context);
+  const auto market_context = accepted_market_turn_context_from_accepted_turn(context);
   auto outcome = std::visit(
       [&](auto&& value) {
         using Value = std::decay_t<decltype(value)>;
@@ -1198,7 +1199,7 @@ model::Result<void> MarketRuntime::execute_attributable_failure_turn(
       market_data::MarketSourceIdentity::from_runtime_source(source), session_epoch,
       receipt.receive_sequence, receipt.received_at, disposition};
   auto outcome = market_states_[source_index].apply_attributable_failure(
-      rejected, accepted_market_context(context), trace_sink_, preflight);
+      rejected, accepted_market_turn_context_from_accepted_turn(context), trace_sink_, preflight);
   if (!outcome) {
     preflight.cancel_dispatch_plan();
     return model::Result<void>::create_failure(outcome.error());

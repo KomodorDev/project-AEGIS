@@ -423,8 +423,8 @@ struct DecimalDivisionStep {
 
 // --------------------------------------------------------
 // Computes (remainder * 10) / divisor without ever forming the potentially overflowing product.
-[[nodiscard]] DecimalDivisionStep next_decimal_digit(std::uint64_t remainder,
-                                                     std::uint64_t divisor) noexcept {
+[[nodiscard]] DecimalDivisionStep
+calculate_next_decimal_division_step(std::uint64_t remainder, std::uint64_t divisor) noexcept {
   std::uint64_t accumulated = 0U;
   std::uint8_t digit = 0U;
   for (std::uint8_t iteration = 0U; iteration < 10U; ++iteration) {
@@ -907,7 +907,7 @@ Result<FixedPoint> FixedPoint::divide_validated(FixedPoint divisor, std::uint64_
     // Extend the quotient by ordinary long division, retaining the final remainder for rounding.
     auto retained = decimal_digits_from_unsigned(truncated);
     for (int index = 0; index < exponent; ++index) {
-      const auto step = next_decimal_digit(remainder, denominator);
+      const auto step = calculate_next_decimal_division_step(remainder, denominator);
       append_decimal_digit(retained, step.digit);
       remainder = step.remainder;
     }

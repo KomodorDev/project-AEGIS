@@ -179,10 +179,10 @@ BotContext::BotContext(organization::BotAttribution attribution,
 // --------------------------------------------------------
 
 // --------------------------------------------------------
-// Read a monotonic timestamp before any owner-local gate, then either fail closed for observation
+// Take a measurement timestamp before any owner-local gate, then either fail closed for observation
 // mode or enter the concrete coordinator with one private runtime-derived binding.
 execution::SubmitResult BotContext::submit_order(const execution::OrderRequest& request) noexcept {
-  const auto entry_started = submission_measurement_clock_->now_nanoseconds();
+  const auto entry_started = submission_measurement_clock_->take_nanosecond_reading();
   if (submission_coordinator_ == nullptr) {
     return execution::SubmitResult::create_locally_rejected_result(
         execution::SubmissionStage::Context,
