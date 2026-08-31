@@ -100,6 +100,9 @@ but must define ownership and backpressure before doing so.
 
 ## Consequences
 
+The immutable-provenance decision yields the following attribution guarantees and implementation
+obligations.
+
 - Multiple subsidiaries can coexist without weakening bot-to-firm attribution.
 - Startup either publishes one sealed, provenance-carrying rulebook or fails closed.
 - Semantically identical configuration has one cross-platform identity independent of authoring

@@ -28,6 +28,9 @@ anchor.
 
 ## Decision
 
+The following subsections define the complete accepted M3 authority, canonical-order, fixed-risk,
+reservation, and evidence contract.
+
 ### Bot-bound authority and explicit route identity
 
 `BotContext` gains one normalized `submit` operation. Only `BotRuntime` can mint the callback
@@ -176,7 +179,7 @@ fields.
 
 Every result also has a noncanonical optional local-path duration in nanoseconds. A dedicated
 thread-safe monotonic measurement clock—not the owner-local deterministic event clock—is read as the
-first operation inside `BotContext::submit`; a wrong-thread call may read this clock but still
+first operation inside `BotContext::submit_order`; a wrong-thread call may read this clock but still
 rejects before any owner-local read or mutation. For a local rejection the end is read after all
 required rollback and evidence work, immediately before return. For accepted initiation or
 post-acceptance uncertainty the end is read at the fake initiator outcome, before later local state
@@ -251,7 +254,7 @@ organization revision, route revision, instrument metadata revision, or referenc
 does not exactly equal the sealed startup authority. Time-based expiry and later-revision adoption
 begin with dynamic policy publication in M5.
 
-The existing observation-only M2 `MarketRuntime::create` remains valid without an M3 policy and
+The existing observation-only M2 `MarketRuntime::create_market_runtime` remains valid without an M3 policy and
 installs no submission authority. Its concrete `BotContext` still has the normalized method for API
 compatibility, but every call returns `LocallyRejected` at stage `Context` with
 `SubmissionCapabilityUnavailable`, no attempt or order identity, and no M3 trace or diagnostic
@@ -338,27 +341,29 @@ Bot, desk, and firm subjects come from `BotContext`. Account, route, venue, and 
 come from the authorized route and metadata. The complete keys are:
 
 ```text
-CountKey       = (firm, scope kind, scope subject)
-QuantityKey    = (CountKey, instrument)
-NotionalKey    = (CountKey, quote currency)
-DirectionalNotionalKey = (CountKey, instrument, quote currency)
-LimitSetKey    = (CountKey, instrument, quote currency)
+RiskScopeCountKey = (firm, scope kind, scope subject)
+RiskScopeInstrumentQuantityKey = (RiskScopeCountKey, instrument)
+RiskScopeQuoteNotionalKey = (RiskScopeCountKey, quote currency)
+RiskScopeInstrumentDirectionalNotionalKey = (RiskScopeCountKey, instrument, quote currency)
+RiskLimitKey = (RiskScopeCountKey, instrument, quote currency)
 ```
 
 The scope subject is the corresponding bot, desk, firm, logical account, route, instrument, or venue
 identifier. Every key begins with authoritative firm identity; venue and instrument scopes are
-therefore firm-qualified. One `LimitSetKey` carries all six limits. Policy validation requires
-quantity limits to agree across records with the same `QuantityKey`, notional limits to agree across
-records with the same `NotionalKey`, and the open-count limit to agree across records with the same
-`CountKey`. Therefore two peer firms never share a bucket, and collection order cannot choose a
+therefore firm-qualified. One `RiskLimitKey` carries all six limits. Policy validation requires
+quantity limits to agree across records with the same `RiskScopeInstrumentQuantityKey`, notional
+limits to agree across records with the same `RiskScopeQuoteNotionalKey`, and the open-count limit
+to agree across records with the same `RiskScopeCountKey`. Therefore two peer firms never share a
+bucket, and collection order cannot choose a
 limit.
 
 ### Atomic check-and-reserve and identity consumption
 
 For each of seven scope projections, the serialized owner resolves five mutable cells: count; gross
-notional by `NotionalKey`; buy/sell quantity by `QuantityKey`; buy/sell notional plus its current
-instrument-worst contribution by `DirectionalNotionalKey`; and aggregate worst notional by
-`NotionalKey`. These are mutable ledger cells, not seven overloaded policy rows. A decision
+notional by `RiskScopeQuoteNotionalKey`; buy/sell quantity by
+`RiskScopeInstrumentQuantityKey`; buy/sell notional plus its current instrument-worst contribution
+by `RiskScopeInstrumentDirectionalNotionalKey`; and aggregate worst notional by
+`RiskScopeQuoteNotionalKey`. These are mutable ledger cells, not seven overloaded policy rows. A decision
 calculates all 35 candidate cells in fixed scratch storage, then checks all six limits scope-major
 and limit-kind-minor in the order above. It next checks held-reservation capacity. Only after every
 check succeeds does it commit every cell and one reservation. Capacity exhaustion mutates no cell.
@@ -402,6 +407,9 @@ use the separately assigned persisted codes `InvalidRiskPolicy = 700`,
 `InvalidFakeState = 803`.
 
 ## Consequences
+
+The canonical-submission decision produces the following authority and exposure guarantees, together
+with deliberate vocabulary limits.
 
 - Caller-supplied data cannot forge strategy, bot, desk, firm, account, venue, or client-order
   identity.

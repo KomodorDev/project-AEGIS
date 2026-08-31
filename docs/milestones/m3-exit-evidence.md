@@ -20,6 +20,9 @@ conditions; it makes no `REF-MAC-01` qualification or provisional-threshold clai
 
 ## Dependency and revision record
 
+The table preserves the exact M2 base, M3 producer, publication, and merge identities needed to
+interpret the evidence below.
+
 | Field | Recorded value |
 |---|---|
 | M2 integration baseline | `d7733bb16a52d5ec954338f861d798d8c6620dad` |
@@ -45,6 +48,9 @@ does not move its source, test, executable, or benchmark identity.
 
 ## Accepted M3 contracts
 
+These adopted decisions define the canonical-submission and conservative fake-initiation promises
+against which M3 is evaluated.
+
 - [ADR-0008](../decisions/0008-canonical-submission-and-fixed-risk.md) fixes the bot-bound
   capability, explicit `RouteId`, limit/GTC/no-flags vocabulary, canonical validation order,
   immutable fixed risk policy, exact conservative exposure, seven scopes, atomic reservation, and
@@ -58,6 +64,8 @@ does not move its source, test, executable, or benchmark identity.
   older schemas.
 
 ## Implemented scope
+
+The table maps each M3 scope area to the concrete local implementation and tests that prove it.
 
 | Scope | Local implementation evidence |
 |---|---|
@@ -93,9 +101,9 @@ construction and boundary cases that do not belong in one replay.
 | `M3-E13` | Worst-case exposure is never understated | Property/model tests use an independent 500-point inverse-contract ceiling grid, a 20-order alternating directional grid, same-currency two-instrument aggregation/release cases, every 7×6 limit position, and checked overflow cases. They prove conservative rounding, monotonic aggregation, and atomic rejection. |
 | `M3-E14` | Direct path contains none of the forbidden hops or operations | Final fake and identity/clock types are closed; compile-time capability probes deny raw/live access; same-thread/same-turn tests prove the capability/evidence → route → validation → identity → risk → OMS → encode → fake-initiate order; the product link graph has no networking/database client; and a fail-closed manifest scanner audits the complete direct dependency closure plus tests, benchmarks, tools, CMake, presets, and CI. |
 | `M3-E15` | Local success is never an exchange acknowledgement | The closed `SubmitResult` has only `LocallyRejected`, `WriteInitiated`, and `SubmissionUnknown`; compile-time probes prove there is no acknowledgement member. M4 owns acknowledgements and other exchange events. |
-| `M3-E16` | `BENCH-M3-SUBMIT-001` reports the required metrics | The exact 10,000-sample record reports p50/p99/p99.9 and orders/s from the first bot-bound submit operation through the accepted fake-initiation endpoint. `allocations_per_order` separately covers the complete `context.submit()` call, including post-endpoint finalization, and is zero. The clean run is smoke only; no p99 qualification claim is made. |
+| `M3-E16` | `BENCH-M3-SUBMIT-001` reports the required metrics | The exact 10,000-sample record reports p50/p99/p99.9 and orders/s from the first bot-bound submit operation through the accepted fake-initiation endpoint. `allocations_per_order` separately covers the complete `context.submit_order()` call, including post-endpoint finalization, and is zero. The clean run is smoke only; no p99 qualification claim is made. |
 | `M3-E17` | `BENCH-M3-SUBMIT-002` reports the required metrics | Workload 002 shares workload 001's value-identical request, configuration/organization, route/account/metadata, runtime policy, namespace, capacities, and scripts. Only its risk policy lowers the bot single-order-quantity limit to 1, changing the risk/submission fingerprints and rejecting before reservation/OMS. The exact 10,000-sample record reports p50/p99/p99.9, rejections/s, and allocations/request. The clean run is smoke only. |
-| `M3-E18` | Timing excludes network and acknowledgement work and labels uncontrolled evidence honestly | The internal monotonic duration begins at `BotContext::submit` entry. Success ends immediately after accepted-slot copy; risk rejection ends at its completed local result. Fixture construction, preallocation, bootstrap, initial Ready callback, later OMS/trace finalization after the success endpoint, all network round trips, and acknowledgement timing are excluded. The manifest records all three host controls as `uncontrolled`, sets `evidence_classification` to `smoke`, and contains neither `qualification_reference` nor `threshold_claims`. |
+| `M3-E18` | Timing excludes network and acknowledgement work and labels uncontrolled evidence honestly | The internal monotonic duration begins at `BotContext::submit_order` entry. Success ends immediately after accepted-slot copy; risk rejection ends at its completed local result. Fixture construction, preallocation, bootstrap, initial Ready callback, later OMS/trace finalization after the success endpoint, all network round trips, and acknowledgement timing are excluded. The manifest records all three host controls as `uncontrolled`, sets `evidence_classification` to `smoke`, and contains neither `qualification_reference` nor `threshold_claims`. |
 | `M3-E19` | Context gates, bounded attempts, evidence preflight, and re-entry fail before unsafe mutation | Capability-absent, inactive/post-callback, and wrong-owner calls return before attempt or evidence mutation. The configured final `SubmissionAttemptId` is consumed once; the next outer call returns `SubmissionAttemptExhausted` with no new attempt, OrderId, duration, trace, or diagnostic. An owner-valid attempt preflights the fixed 11-record maximum before local OrderId generation or reservation; exhaustion returns `EvidenceCapacityExceeded` with a bounded noncanonical diagnostic and no reservation. The first nested submit consumes the outer attempt's reserved `ReentryRejected` slot; repeats coalesce into a saturating diagnostic count without creating a second attempt. Source-private, fixed-enum, one-shot probes prove that failed first re-entry evidence halts before local identity; failed `RiskReserved` evidence releases exactly once before OMS; and failed post-acceptance `WriteInitiated` or completion evidence returns `SubmissionUnknown`, retains exposure and the accepted fake write, moves authoritative OMS to `SubmissionUnknown`, and preserves the already accepted trace prefix without invention. Every later submit stops at the runtime latch without mutation. Focused coordinator, OMS, trace, diagnostic, and BotContext tests prove each branch. |
 
 ## Deterministic reference replay
@@ -228,7 +236,8 @@ layers:
 4. Coordinator and integrated runtime tests prove the required route → validation → identity →
    risk → OMS → encode → fake-initiate order in one active thread/turn with no owner admission or
    queue change.
-   The direct-path scan rejects executor `WorkItem`/`try_admit`, queues, futures, coroutines,
+   The direct-path scan rejects executor `InlineCommandWorkItem`/`try_admit`, queues, futures,
+   coroutines,
    blocking synchronization, files, databases, networking, DNS, and remote calls across the complete
    synchronous dependency closure.
 5. The manifest-backed scanner covers M3 production, unit tests, support fixtures, deterministic
@@ -240,6 +249,9 @@ No credential, DNS lookup, socket, HTTP/WebSocket call, live venue connection, a
 private session, or real order transmission is present in M3.
 
 ## Deferred capabilities
+
+The table makes later ownership explicit so the M3 evidence cannot be mistaken for networking,
+private-event, recovery, or operator capability.
 
 | Owner | Capability that remains deferred |
 |---|---|
@@ -257,6 +269,9 @@ private session, or real order transmission is present in M3.
 | Later explicit decisions | Market/trigger orders, more TIFs, venue flags, collars, linear-contract risk, more venue filters, cross-currency aggregation, and cross-firm limits. |
 
 ## Publication and integration status
+
+These facts distinguish the feature branch, reviewed producer, pull request, merge revision, and
+historical M3 evidence boundary.
 
 - M3 was created once from the verified M2 `dev` merge baseline and is not stacked on the old M2
   feature branch.

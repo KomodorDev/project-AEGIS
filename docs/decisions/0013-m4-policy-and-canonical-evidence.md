@@ -25,6 +25,9 @@ evidence names, and requires a separate accepted schema ADR before any evidence 
 
 ## Decision
 
+The following subsections define the accepted M4 capacity policy, provenance, semantic evidence, and
+compatibility boundary.
+
 ### Stable M4 policy error
 
 M4 appends `DomainErrorCode::InvalidM4Policy = 930`. Invalid `AEGISM4P` provenance, zero or
@@ -443,6 +446,9 @@ framing, sort key, maximum encoded length, and semantic/body/reason-set digest p
 implementation and tests must land in the same or a later commit.
 
 ## Consequences
+
+The policy-and-evidence decision gives every M4 component common bounded authority while preserving
+earlier byte schemas.
 
 - Every M4 component binds one explicit capacity policy and root provenance fingerprint.
 - Runtime-global identity records never invent an account or venue subject.

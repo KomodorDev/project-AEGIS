@@ -24,6 +24,9 @@ DNS, HTTP, WebSocket, authentication, private sessions, or exchange communicatio
 
 ## Decision
 
+The following subsections define the accepted outbound OMS states, fake-initiation boundary, and
+caller-visible outcomes.
+
 ### Minimal outbound OMS
 
 The owner-local outbound OMS is the only component that admits a risk-approved order. It uses a
@@ -177,7 +180,7 @@ The complete call stack is:
 
 ```text
 strategy callback
-→ BotContext::submit
+→ BotContext::submit_order
 → owner-local route authorization and canonical validation
 → exact risk check-and-reserve
 → outbound OMS admission
@@ -186,7 +189,8 @@ strategy callback
 → SubmitResult return to the same callback
 ```
 
-The stack contains no `SerializedExecutor::try_admit`, `WorkItem`, executor driver, coroutine,
+The stack contains no `SerializedExecutor::try_admit`, `InlineCommandWorkItem`, executor driver,
+coroutine,
 future, promise, callback handoff, general-purpose queue, serialization boundary, remote call,
 database access, file access, DNS, socket, HTTP, WebSocket, or blocking I/O. The final fake byte
 encoding is a local deterministic transform, not a cross-process serialization boundary. Every
@@ -323,7 +327,7 @@ the complete submit-result vector, callback sequence, OMS/reservation state, acc
 
 `BENCH-M3-SUBMIT-001/submission.authorized-limit-fake-initiation` and
 `BENCH-M3-SUBMIT-002/submission.inline-risk-rejection` each run exactly 10,000 manually timed
-samples through `BotContext::submit`. Percentiles use the noncanonical duration captured inside that
+samples through `BotContext::submit_order`. Percentiles use the noncanonical duration captured inside that
 operation: its start is the first bot-bound entry operation; SUBMIT-001 ends at the accepted fake
 initiation outcome; SUBMIT-002 ends after the intended local risk rejection is complete immediately
 before return. Scoped allocation tracking brackets the call itself immediately before and after.
@@ -377,6 +381,9 @@ M3 combines five independent proofs that its fakes cannot communicate live:
 No single text scan is treated as proof of execution structure; the layers are reviewed together.
 
 ## Consequences
+
+The outbound-state decision makes conservative uncertainty explicit and constrains what local
+success may claim.
 
 - A definite pre-acceptance failure never leaks a reservation, while uncertainty never releases
   exposure optimistically.

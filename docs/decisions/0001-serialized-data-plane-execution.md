@@ -127,6 +127,9 @@ The data plane publishes market, inventory, order, exposure and health observati
 
 ### State Ownership
 
+The table assigns each mutable or published state family to exactly one v1 owner and states the only
+permitted cross-plane interaction.
+
 | State | Owner in v1 | Cross-plane rule |
 |---|---|---|
 | Venue connection, parser, sequence and account-session state | Data-plane thread | External I/O completions become serialized callbacks. |
@@ -173,7 +176,11 @@ The implementation must preserve these properties:
 
 ## Consequences
 
+The accepted single-owner model produces the following benefits and deliberate costs.
+
 ### Benefits
+
+These properties make state transitions reviewable and deterministic in the first implementation.
 
 - Single ownership makes mutation and ordering explicit.
 - Check-and-reserve semantics can be implemented without a distributed locking protocol.
@@ -184,6 +191,8 @@ The implementation must preserve these properties:
 - Logical subsystem boundaries remain visible even though their hot-path calls are in-process and inline.
 
 ### Costs and Limitations
+
+These constraints are accepted until measurements justify revisiting the ownership decision.
 
 - One slow callback delays every later data-plane event.
 - CPU-heavy parsing, strategy computation, logging or reporting can create head-of-line blocking.
@@ -196,6 +205,9 @@ The implementation must preserve these properties:
 These limitations are accepted for v1. They are reasons to measure the implementation, not reasons to add concurrency before a workload demonstrates the need.
 
 ## Alternatives Considered
+
+The following designs were evaluated and rejected for the first implementation because they weaken
+ownership clarity or add unproven coordination cost.
 
 ### General Worker Pool with Shared Mutable State
 

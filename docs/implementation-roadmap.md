@@ -31,6 +31,8 @@ The ordering deliberately:
 
 ## Milestones at a Glance
 
+The table names each capability gate, the externally meaningful result it must ship, and the earlier gate on which it depends.
+
 | Milestone | Shippable outcome | Depends on |
 |---|---|---|
 | M0 | Repeatable delivery plus bounded product, venue and account assumptions | Accepted architecture |
@@ -63,6 +65,8 @@ Prepare the workshop before building the robot: choose the tools, make automatic
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Choose and record the supported C++ standard, compiler/platform matrix, build system, dependency approach and test framework.
 - Add CI with warnings-as-errors, formatting checks, unit tests and appropriate sanitizer jobs.
 - Establish a minimal benchmark harness before optimizing anything.
@@ -73,6 +77,8 @@ Prepare the workshop before building the robot: choose the tools, make automatic
 - Record blocking choices as ADRs; do not create empty subsystem directories.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - A clean checkout configures, builds and runs tests with one documented command locally and in CI.
 - The reference scenario, first venue and supported environment are explicit.
@@ -101,6 +107,8 @@ Give everything a clear name, label and measuring stick. The robot must never co
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Add strong, dependency-light identifiers for firms, desks, bots, venues, accounts, instruments and orders.
 - Define fixed-point price, quantity and notional types, including overflow, rounding, tick-size, lot-size and contract-multiplier rules. Floating-point values must not silently enter order or risk decisions.
 - Define source, receive and processing timestamps; sequence/session epochs; error/result types; and injected clock and identifier providers. Tests use deterministic providers, while production order identities must remain unique across restart.
@@ -111,6 +119,8 @@ Give everything a clear name, label and measuring stick. The robot must never co
 - Add deterministic trace output suitable for scenario comparison; keep richer reporting off the data plane.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Invalid identifiers, instrument metadata, unit conversions and hierarchy references fail deterministically.
 - A bot cannot alter its desk/firm identity or infer trading permission from a market-data subscription.
@@ -142,6 +152,8 @@ Teach the robot to listen to market messages one at a time and build an order-bo
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement the dedicated serialized executor, bounded ingress and a deterministic test driver for run-to-completion turns. Expose queue age/capacity and never hide an admission failure.
 - Define the minimum normalized `MarketEvent` contract required by the reference strategy, including source/session identity, source and receive sequence/timestamps, metadata revision, snapshot/delta meaning and book generation where applicable.
 - Maintain the current normalized order book in owner-local memory for each active venue/instrument subscription that needs it. Apply a complete snapshot or delta before dispatching the resulting event/read-only view; leave retained depth and historical storage configurable or deferred.
@@ -152,6 +164,8 @@ Teach the robot to listen to market messages one at a time and build an order-bo
 - Detect accidental callback re-entry and make blocking or unbounded callback work reviewable and measurable.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - A recorded fixture invokes the subscribed bot exactly as expected; unrelated bots receive nothing.
 - Malformed input cannot reach a strategy or corrupt the following valid event.
@@ -189,6 +203,8 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement the accepted explicit `RouteId` and owner-local route projection; the route selects the
   account, venue and instrument under bot-bound authority.
 - Implement the accepted limit-only, GTC, no-flags vocabulary. Canonically validate positive exact
@@ -206,6 +222,8 @@ Before pressing “send,” check that the order is valid, allowed and within it
 - Instrument the direct submission path for latency and allocation measurements.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Deterministic scenarios cover unauthorized route, invalid order, risk rejection, duplicate local
   identity, OMS non-admission, encoding failure, definite pre-acceptance initiation failure,
@@ -229,7 +247,7 @@ Before pressing “send,” check that the order is valid, allowed and within it
 
 ## M4 — OMS, Inventory and Recovery Contract
 
-**Accepted contract status (2026-08-23):**
+**Accepted contract and integrated-foundation status:**
 [ADR-0010](decisions/0010-normalized-private-events-and-oms.md) fixes the normalized private-event
 vocabulary, correlation, idempotency, fill ordering, extended OMS, cancellation and callback rules.
 [ADR-0011](decisions/0011-inventory-reservation-and-account-safety.md) fixes cumulative reservation
@@ -238,8 +256,11 @@ conversion, signed seven-scope inventory and account quarantine.
 journal/snapshot ordering, complete reconciliation proof, restart identities, safe convergence and
 the one-shot reference intent. [ADR-0013](decisions/0013-m4-policy-and-canonical-evidence.md) fixes
 the immutable M4 capacity policy, stable evidence semantics, provenance scopes and fail-closed
-headroom. A required ADR-0014 must fix exact new evidence bytes before any M4 encoder or byte golden.
-Implementation and exit evidence remain to be completed on the M4 feature branch.
+headroom. The current baseline integrates policy/identity, normalized-ingress, first-admission
+resolution, owner-bound correlation, fake-recovery authority, provenance, audit-span, and typed
+semantic-evidence foundations. A required ADR-0014 must still fix exact new evidence bytes before
+any M4 encoder or byte golden. The remaining inventory, reservation-conversion, full reconciliation,
+crash-matrix, and exit-evidence work keeps the complete M4 gate open.
 
 ### Outcome
 
@@ -250,6 +271,8 @@ Normalized private-order events produce one coherent OMS, reservation and invent
 Give the robot a careful notebook for every order and everything it owns. A repeated message must not be counted twice, and after a restart the robot must be able to rebuild the notebook safely.
 
 ### Scope
+
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
 
 - Implement ADR-0010's accepted OMS transition matrix for acknowledgements, exchange rejections, fill-before-ack, partial and full fills, cancel requests and results, local failures, timeouts, duplicate trade IDs, unknown orders and valid out-of-order delivery.
 - Define client/exchange identifier correlation, cumulative-versus-incremental fill handling and idempotency rules. Treat replace as cancel-plus-new unless a demonstrated venue requirement justifies another model, and reserve for both orders while both may coexist.
@@ -266,6 +289,8 @@ Give the robot a careful notebook for every order and everything it owns. A repe
 - Add fake journal/reconciliation adapters and inject a crash at every lifecycle transition.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Table-driven tests exercise every accepted transition and reject every forbidden transition.
 - Model/property tests prove total worst-case exposure is never understated through partial fills, rejection, cancellation, replacement, fill-before-ack, duplicates and ambiguous transmission outcomes.
@@ -290,6 +315,8 @@ Add a safety boss that gives each bot and desk an allowance. If the instructions
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Allocate the v1 limit vocabulary from M3 across bot, desk, firm and non-organizational scopes such as account, route, instrument and venue where applicable.
 - Define hierarchy precedence and exact `Normal`, `ReduceOnly` and `Halted` semantics, including budget cuts below current exposure, cancellation permissions, existing-order treatment and cancel-all failure.
 - Publish immutable order, reservation, exposure and inventory observations from the data plane.
@@ -301,6 +328,8 @@ Add a safety boss that gives each bot and desk an allowance. If the instructions
 - Provide a narrow non-UI control interface for tests and operator-command integration later.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Organizational and applicable account/route/instrument/venue limits cannot be bypassed by interleaved submissions.
 - A callback observes one complete authority epoch/revision for its full turn.
@@ -323,6 +352,8 @@ Connect the robot’s ears to one real exchange, but do not give it hands. It ca
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement public session lifecycle, subscription, parsing, symbol mapping and normalization for the selected venue and instrument family.
 - Implement venue snapshot/delta, checksum, duplicate/out-of-order, reconnect-epoch, sequence-gap and resubscription rules. A gap or checksum failure immediately invalidates the book and suppresses readiness until resynchronization.
 - Use revisioned authoritative venue metadata for all tick, lot, multiplier and timestamp conversions.
@@ -332,6 +363,8 @@ Connect the robot’s ears to one real exchange, but do not give it hands. It ca
 - Compare normalized output and message-rate behavior against the deterministic harness.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Recorded fixtures and a live public endpoint both drive the same normalized contract.
 - A strategy sees `Ready` only after a coherent generation; disconnect, gap, checksum, malformed-input and overload scenarios move through observable non-ready states and recover through resnapshot.
@@ -352,6 +385,8 @@ Let the robot look inside a practice account without giving it a send button. It
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement private authentication and session lifecycle with a secrets provider that keeps credentials out of source, logs and fixtures.
 - Consume and normalize private order, execution, balance and position streams plus authoritative open-order/recent-execution queries needed by the M4 reconciliation contract.
 - Validate account permissions, position/margin mode, clock/nonce behavior, reconnect epochs and client/exchange correlation.
@@ -361,6 +396,8 @@ Let the robot look inside a practice account without giving it a send button. It
 - Keep native order encoding and write initiation outside the constructed runtime or behind a test-proven fail-closed capability boundary.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Startup query results and private streams converge into the expected OMS, position and account state without double application.
 - Unknown orders, unexpected permissions or account-mode mismatch halt/quarantine the account instead of being guessed or ignored.
@@ -381,6 +418,8 @@ Turn on the send button only for the pretend-money exchange. Practice sending, c
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement native order encoding as a lossless mapping from the canonical, risk-approved order.
 - Give every session a hard bound on outstanding outbound work, even when its transport permits concurrent writes. Use a session-local sequencer when serialization or buffer lifetime requires it; capacity exhaustion follows an explicit OMS transition and retains conservative exposure unless non-submission is proven.
 - Handle venue rate limits and retry semantics without blindly retrying an ambiguous submission.
@@ -389,6 +428,8 @@ Turn on the send button only for the pretend-money exchange. Practice sending, c
 - Use deterministic venue-contract/fake-transport scenarios for every failure branch. Treat the live sandbox as a smoke test only for behavior the venue can reliably induce.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Market event → strategy → route authorization → canonical validation → local identity → risk → OMS → native submission → private event → inventory succeeds end to end in the sandbox.
 - Submit, acknowledgement and cancel smoke flows work; a fill is demonstrated when the sandbox can reliably provide one.
@@ -410,6 +451,8 @@ Pull the plug and turn the robot back on. It must remember what it can, ask the 
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement the journal, snapshot and audit design fixed in M4 without adding synchronous persistence to the latency-sensitive path unless a later accepted ADR explicitly changes that invariant.
 - State the exact durability guarantee and the crash windows that require exchange reconstruction; do not promise uninterrupted local audit where asynchronous publication cannot provide it.
 - Recover stable client-order identities, OMS state, reservations, positions and installed configuration/policy provenance across restart.
@@ -418,6 +461,8 @@ Pull the plug and turn the robot back on. It must remember what it can, ask the 
 - Inject crashes before and after reservation, OMS admission, write initiation, private event application, audit publication and snapshot rotation.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Restart and reconnect converge with the venue without double-applied fills, orphan orders, reused client identities or prematurely released uncertain exposure.
 - Audit evidence explains each accepted, rejected, cancelled and filled order, including configuration, metadata, route/account and risk authority epoch/revision.
@@ -439,6 +484,8 @@ Give the robot a terrible day: too many messages, slow connections and broken pa
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Stress the bounded admission, public-data shedding/resync, observation handoff and outbound sequencing policies introduced in M2, M5, M6 and M8 rather than inventing them here.
 - Finalize and stress the scheduling priorities introduced progressively so private execution events, halt/cancel commands and reconciliation work cannot be silently dropped or indefinitely starved by public market data.
 - Add exception/fault containment, watchdogs and explicit healthy/degraded/halted states.
@@ -447,6 +494,8 @@ Give the robot a terrible day: too many messages, slow connections and broken pa
 - Optimize measured bottlenecks only. Revisit the single-thread ADR only when a documented trigger is reproducible.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Saturation has a bounded, observable response and cannot bypass route authorization, risk or OMS.
 - Public data may be coalesced or invalidated and resynchronized; private execution facts, halt commands and reconciliation requirements are never silently lost.
@@ -468,6 +517,8 @@ Build the control room with alarms, status screens and a big stop button. Record
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement authorized revisioned runtime configuration and execution-route adoption while preserving the immutable provenance established in M1–M4.
 - Add the minimum monitoring, alerts, structured logs and control-plane status surfaces needed to operate safely. Every view exposes its age, source and relevant revision where staleness matters.
 - Add operator workflows for risk-mode changes, local emergency halt, route/account disablement, reconciliation and quarantine resolution.
@@ -475,6 +526,8 @@ Build the control room with alarms, status screens and a big stop button. Record
 - Define single-venue deployment, secrets rotation, backups, rollback, incident response and venue-specific runbooks.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Operator/reporting surfaces use copied control-plane state and cannot read, mutate or block live data-plane objects.
 - Alerts distinguish stale reporting, stale policy, invalid market state, private-session loss and unresolved reconciliation.
@@ -496,6 +549,8 @@ Let the robot practice for a long time without real money. Watch until its numbe
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Decide P&L ownership and marking semantics before implementing reporting: realized/unrealized treatment, mark/index/reference-price authority and freshness, currency conversion, fees and late corrections.
 - Add single-venue inventory/P&L reporting and the risk-monitoring views needed to evaluate the shadow run; cosmetic UI polish remains deferrable.
 - Run shadow/paper operation and sandbox-only execution for an agreed period with realistic public traffic and recorded qualification criteria.
@@ -503,6 +558,8 @@ Let the robot practice for a long time without real money. Watch until its numbe
 - Freeze the first-venue contract only after recovery, capacity and operational evidence remains stable for the agreed window.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - The observation window completes without unexplained order, reservation, position or audit drift.
 - P&L/reporting projections are deterministic for the same facts and expose their marking source, freshness and revision.
@@ -524,6 +581,8 @@ Only after the first exchange works safely, teach the robot about the second one
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Implement the second adapter against the proven market-data, execution, OMS, recovery, overload and operations contracts.
 - Generalize shared abstractions only where the second implementation demonstrates a real commonality.
 - Repeat public read-only, private observe-only and sandbox capability gates for the second venue; do not skip directly to transmission.
@@ -532,6 +591,8 @@ Only after the first exchange works safely, teach the robot about the second one
 - Re-run contract, recovery, audit and load suites against each adapter and the combined workload.
 
 ### Exit Gate
+
+This milestone is complete only when every following observable condition has reproducible evidence.
 
 - Both adapters pass the same behavior-oriented contract suites while keeping native types inside venue code.
 - A multi-venue bot can price on both venues and hedge only through authorized, ready routes.
@@ -553,6 +614,8 @@ Give the whole two-exchange robot its final safety exam. Passing the exam still 
 
 ### Scope
 
+The following work belongs to this milestone; behavior not named here remains in its owning later gate.
+
 - Repeat representative benchmarks, long soaks and fault drills with both venues and the cross-venue workload.
 - Qualify time synchronization, venue rate-limit headroom, account permissions, credential rotation, backups, deployment rollback and kill/halt paths.
 - Exercise venue isolation, simultaneous reconnect, asymmetric fills, stale pricing, policy expiry and control-plane outage scenarios from runbooks.
@@ -564,6 +627,8 @@ Give the whole two-exchange robot its final safety exam. Passing the exam still 
 
 ### Exit Gate
 
+This milestone is complete only when every following observable condition has reproducible evidence.
+
 - Combined latency, capacity, queue-age, recovery and audit targets pass with agreed headroom.
 - Kill/halt, credential-rotation, restart, rollback, venue-isolation and reconciliation drills pass from versioned runbooks.
 - Every live-eligible leveraged route has passing margin, collateral, liquidation-proximity and risk-pricing tests; unsupported routes remain disabled.
@@ -572,6 +637,8 @@ Give the whole two-exchange robot its final safety exam. Passing the exam still 
 - Real-money connectivity remains a deliberate, audited authorization outside this roadmap's automatic execution.
 
 ## Execution Rules
+
+These rules govern how every milestone is decomposed, reviewed, evidenced, and kept within its accepted capability boundary.
 
 - Treat a milestone as an aggregate capability gate, not one giant pull request. Deliver it through small, independently reviewable task branches created from `dev`, with every pull request targeting `dev`.
 - Resolve a milestone's blocking ADR, transition table or failure policy before merging implementation that depends on it.

@@ -7,6 +7,9 @@ This document expands the [architecture overview](../architecture.md). It descri
 
 ## Status Legend
 
+The table defines the status words used below so implemented, accepted, proposed, illustrative, and
+unresolved work are never conflated.
+
 | Label | Meaning |
 |---|---|
 | **Accepted** | An adopted architectural decision that constrains implementation. |
@@ -20,9 +23,12 @@ This document expands the [architecture overview](../architecture.md). It descri
 are **Accepted and implemented**. M3 route, fixed-risk, outbound OMS, and fake-initiation contracts
 are **Accepted and integrated** through [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
 at `dev` merge commit `962eb8602c13c1930a74c59232f96920482edb2b`. The diagram is
-**Illustrative** and does not imply queues, processes, or thread hops. M4 private-event, inventory,
-account-safety, fake-recovery, capacity, and evidence contracts are **Accepted for implementation**
-in ADR-0010 through ADR-0013; this status does not claim that their implementation is complete.
+**Illustrative** and does not imply queues, processes, or thread hops. ADR-0010 through ADR-0013
+accept the M4 private-event, inventory, account-safety, fake-recovery, capacity, and evidence
+contracts. The current baseline integrates the M4 policy/identity, normalized-ingress,
+first-admission resolution, owner-bound correlation, fake-recovery authority, provenance, and typed
+semantic-evidence foundations; it does not yet claim the complete inventory, reservation-conversion,
+reconciliation, crash-matrix, or canonical-byte gate.
 
 ```mermaid
 flowchart LR

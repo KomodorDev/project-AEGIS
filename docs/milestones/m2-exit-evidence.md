@@ -19,6 +19,9 @@ producer revision, and it creates no new controlled-host performance-qualificati
 
 ## Dependency and rebase record
 
+The table preserves the exact M1 base, M2 producer, rebase, review, and integration identities
+needed to interpret later evidence.
+
 | Field | Recorded value |
 |---|---|
 | M1 branch | `codex/m1-domain-kernel` |
@@ -50,6 +53,9 @@ their original feature-branch producers.
 
 ## Accepted M2 contracts
 
+These adopted decisions define the bounded runtime and market-validity promises against which the M2
+evidence is judged.
+
 - [ADR-0006](../decisions/0006-bounded-deterministic-runtime.md) fixes bounded admission, one owner,
   queue age, overload fencing, non-reentrancy, and deterministic/dedicated driver equivalence.
 - [ADR-0007](../decisions/0007-market-state-validity.md) fixes normalized fixture boundaries,
@@ -59,6 +65,8 @@ their original feature-branch producers.
   fingerprinted runtime policy and runtime trace schemas.
 
 ## Scope evidence
+
+The table maps every required M2 behavior to its current implementation and deterministic proof.
 
 | Gate | Required behavior | Current evidence |
 |---|---|---|
@@ -72,6 +80,8 @@ their original feature-branch producers.
 
 ## Exit-gate evidence
 
+The table records whether each M2 exit condition has the required reproducible proof.
+
 | Gate | Required proof | Current evidence |
 |---|---|---|
 | `M2-E01` | One matching recorded update invokes exactly the subscribed strategy grant; unrelated bots receive no market callback | BotRuntime exact-routing test plus the full scenario's unrelated registered strategy count of zero |
@@ -83,6 +93,9 @@ their original feature-branch producers.
 | `M2-E07` | All mutable data-plane state is owned by one bound executor; wrong-owner and recursive entry fail before mutation | Bound-owner, wrong-owner, active-turn re-entry, callback nested-drive, producer-coordination, and manual/dedicated parity tests |
 
 ## Named quality workloads
+
+The table fixes each M2 measurement interval, required metric vocabulary, and the strongest evidence
+currently available.
 
 | Workload | Required interval and metrics | Current evidence |
 |---|---|---|
@@ -152,6 +165,9 @@ M3 owns orders; M6 owns real public connectivity and venue-native protocol polic
 sessions; M8 owns transmission.
 
 ## Integration status
+
+These facts separate the historical M1 base, M2 feature head, pull request, and integrated `dev`
+revision.
 
 - M1 merged into `dev` as `6287e01be33300e0e7ea24c76dd64a869c67612b`; its reviewed head remained
   exactly `796321825d701f3add83af104b7924eb2826fd07`.

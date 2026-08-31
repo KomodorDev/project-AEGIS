@@ -1,52 +1,52 @@
 # Purpose: keep compiler output, local tooling, and machine-specific files out of Git.
-# Interesting syntax: `*` is a wildcard, while a trailing `/` ignores a whole directory.
+# Glob rules use `*` as a wildcard, while a trailing `/` ignores a whole directory.
 
-# Prerequisites
+# Ignore compiler-generated dependency records that are recreated with their object files.
 *.d
 
-# Compiled Object files
+# Ignore intermediate object files produced before linking.
 *.slo
 *.lo
 *.o
 *.obj
 
-# Precompiled Headers
+# Ignore compiler-specific precompiled-header artifacts.
 *.gch
 *.pch
 
-# Linker files
+# Ignore linker-generated incremental state.
 *.ilk
 
-# Debugger Files
+# Ignore platform debugger-symbol databases.
 *.pdb
 
-# Compiled Dynamic libraries
+# Ignore compiled dynamic libraries on Unix, macOS, and Windows.
 *.so
 *.dylib
 *.dll
 *.so.*
 
-# Fortran module files
+# Ignore Fortran module outputs if a development tool probes or generates them locally.
 *.mod
 *.smod
 
-# Compiled Static libraries
+# Ignore compiled static libraries and libtool archives.
 *.lai
 *.la
 *.a
 *.lib
 
-# Executables
+# Ignore executable and application-bundle outputs.
 *.exe
 *.out
 *.app
 
-# Build directories
+# Ignore every supported local CMake build-directory naming convention.
 build/
 Build/
 build-*/
 
-# CMake generated files
+# Ignore CMake and generator outputs that may also appear outside the normal build directories.
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
@@ -54,28 +54,28 @@ Makefile
 install_manifest.txt
 compile_commands.json
 
-# Temporary files
+# Ignore editor, diagnostic, backup, and other temporary files.
 *.tmp
 *.log
 *.bak
 *.swp
 
-# vcpkg
+# Ignore a local vcpkg dependency installation if a developer creates one for experimentation.
 vcpkg_installed/
 
-# debug information files
+# Ignore split DWARF debug-information files.
 *.dwo
 
-# test output & cache
+# Ignore CTest output and generic local tool caches.
 Testing/
 .cache/
 
-# Local development environments and generated measurements
+# Ignore local Python environments, Python caches, and generated benchmark measurements.
 .venv/
 .ruff_cache/
 benchmark-results/
 __pycache__/
 *.pyc
 
-# macOS metadata
+# Ignore Finder metadata that carries no repository meaning.
 .DS_Store

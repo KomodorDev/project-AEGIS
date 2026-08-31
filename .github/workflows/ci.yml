@@ -1,5 +1,5 @@
-# Purpose: Build and inspect the implemented M0-M3 baseline on every supported compiler, run
-# sanitizer checks, and retain machine-readable benchmark smoke results.
+# Purpose: Build and inspect the integrated M0-M4 baseline on every supported compiler, run
+# sanitizer checks, and retain machine-readable M0, M2, and M3 benchmark smoke results.
 name: Delivery baseline
 
 # Run for changes entering the integration branch and allow an operator to run

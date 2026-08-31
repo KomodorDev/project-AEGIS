@@ -1,4 +1,4 @@
-# Purpose: install the exact local/CI tool versions used to reproduce M0 verification.
+# Purpose: install the exact local and CI tool versions used to reproduce repository verification.
 # Exact `==` pins prevent silent formatting or build behavior changes between installations.
 
 # C++ formatting and build orchestration.

@@ -83,9 +83,10 @@ retries it. ADR-0012 owns this command; M3's request vocabulary and direct path 
 
 No stage silently retries an ambiguous submission. A market-data subscription never implies
 execution permission. This table fixes externally visible scenario behavior, including the
-implemented M3 contract and accepted venue-neutral M4 lifecycle/recovery contract. Native private
-protocol, dynamic risk, durable recovery and operator-interface designs remain owned by M7, M5,
-M9 and M11 respectively.
+implemented M3 contract, the integrated bounded M4 private/recovery/evidence foundations, and the
+remaining accepted venue-neutral M4 lifecycle/recovery contract. Native private protocol, dynamic
+risk, durable recovery and operator-interface designs remain owned by M7, M5, M9 and M11
+respectively.
 
 ## M2 deterministic replay
 

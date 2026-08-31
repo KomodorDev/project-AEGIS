@@ -25,6 +25,9 @@ resubscription remain M6.
 
 ## Decision
 
+The following subsections define the adopted normalization, transactional-book, validity-state, and
+callback boundaries.
+
 ### Four explicit boundaries
 
 M2 keeps raw, normalized, and strategy-facing values distinct:
@@ -184,6 +187,9 @@ sealed configuration and runtime policy, fixture bytes, admission outcomes, scri
 identifiers must reproduce the complete callback vector and `AEGISRTS` bytes and digest exactly.
 
 ## Consequences
+
+The validity model provides the following safety guarantees and requires explicit recovery from
+incomplete market state.
 
 - A strategy can distinguish all four market states while receiving prices only through a coherent
   `ReadyBookView`.
