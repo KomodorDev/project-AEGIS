@@ -19,11 +19,11 @@ public:
 
   // --------------------------------------------------------
   // Construct the successful arm while transferring ownership of the domain value.
-  [[nodiscard]] static Result success(T value) { return Result{std::move(value)}; }
+  [[nodiscard]] static Result create_success(T value) { return Result{std::move(value)}; }
 
   // --------------------------------------------------------
   // Construct the failed arm while preserving the complete stable domain error.
-  [[nodiscard]] static Result failure(DomainError error) { return Result{std::move(error)}; }
+  [[nodiscard]] static Result create_failure(DomainError error) { return Result{std::move(error)}; }
 
   // --------------------------------------------------------
   // Inspect which variant arm is active without accessing its payload.
@@ -70,11 +70,11 @@ public:
 
   // --------------------------------------------------------
   // Construct success as the absence of an error.
-  [[nodiscard]] static Result success() noexcept { return Result{}; }
+  [[nodiscard]] static Result create_success() noexcept { return Result{}; }
 
   // --------------------------------------------------------
   // Construct failure as ownership of one stable domain error.
-  [[nodiscard]] static Result failure(DomainError error) { return Result{std::move(error)}; }
+  [[nodiscard]] static Result create_failure(DomainError error) { return Result{std::move(error)}; }
 
   // --------------------------------------------------------
   // Inspect the optional discriminant without accessing its payload.
@@ -85,9 +85,9 @@ public:
   explicit operator bool() const noexcept { return has_value(); }
 
   // --------------------------------------------------------
-  // Treat reading a failed void result as the same programming error as reading an inactive
-  // variant.
-  void value() const {
+  // Require successful completion and throw std::logic_error when the result instead contains a
+  // domain failure; callers that expect domain failure must inspect error() rather than call this.
+  void require_success() const {
     if (!has_value()) {
       throw std::logic_error{"attempted to read a failed Result<void>"};
     }

@@ -9,11 +9,11 @@ namespace aegis_benchmark_support::allocation_tracking {
 
 // --------------------------------------------------------
 // Begin one non-nested allocation interval on the calling benchmark thread.
-void begin() noexcept;
+void begin_allocation_interval() noexcept;
 
 // --------------------------------------------------------
 // Finish the calling thread's interval and return its successful C++ heap-allocation count.
-[[nodiscard]] std::uint64_t finish() noexcept;
+[[nodiscard]] std::uint64_t finish_allocation_interval() noexcept;
 
 // --------------------------------------------------------
 

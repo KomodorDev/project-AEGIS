@@ -107,7 +107,8 @@ public:
 
   // --------------------------------------------------------
   // Accept or reject the exact bounded turn shape without mutating market-owner state.
-  [[nodiscard]] virtual model::Result<void> authorize(const MarketTurnPreflight& preflight) = 0;
+  [[nodiscard]] virtual model::Result<void>
+  authorize_market_turn(const MarketTurnPreflight& preflight) = 0;
 
   // --------------------------------------------------------
 };
@@ -133,31 +134,36 @@ public:
 
   // --------------------------------------------------------
   // Return the first snapshot identity.
-  [[nodiscard]] static constexpr BookIdentity initial() noexcept {
-    return BookIdentity{model::BookGeneration::initial(), model::BookRevision::initial()};
+  [[nodiscard]] static constexpr BookIdentity create_initial() noexcept {
+    return BookIdentity{model::BookGeneration::create_initial(),
+                        model::BookRevision::create_initial()};
   }
 
   // --------------------------------------------------------
   // Start a new snapshot generation and advance the global revision exactly once.
-  [[nodiscard]] model::Result<BookIdentity> next_snapshot() const;
+  [[nodiscard]] model::Result<BookIdentity> derive_next_snapshot_identity() const;
 
   // --------------------------------------------------------
   // Advance only the global revision for a valid delta commit.
-  [[nodiscard]] model::Result<BookIdentity> next_delta() const;
+  [[nodiscard]] model::Result<BookIdentity> derive_next_delta_identity() const;
 
   // --------------------------------------------------------
+  // Return the snapshot generation retained by this committed identity.
   [[nodiscard]] model::BookGeneration generation() const noexcept { return generation_; }
 
   // --------------------------------------------------------
+  // Return the global book revision retained by this committed identity.
   [[nodiscard]] model::BookRevision revision() const noexcept { return revision_; }
 
   // --------------------------------------------------------
+  // Compare both checked components of the committed book identity.
   friend bool operator==(const BookIdentity&, const BookIdentity&) = default;
 
   // --------------------------------------------------------
 private:
 
   // --------------------------------------------------------
+  // Assemble only a validated initial, restored, or checked successor identity.
   constexpr BookIdentity(model::BookGeneration generation, model::BookRevision revision) noexcept
       : generation_{generation}, revision_{revision} {}
 
@@ -229,7 +235,7 @@ public:
 
   // --------------------------------------------------------
   // Distinguish a successful book swap from ignored, rejected, and control turns.
-  [[nodiscard]] bool book_committed() const noexcept { return book_committed_; }
+  [[nodiscard]] bool is_book_committed() const noexcept { return book_committed_; }
 
   // --------------------------------------------------------
   // Return the exact callback count implied by present state and market events across all grants.
@@ -291,10 +297,10 @@ public:
 
   // --------------------------------------------------------
   // Validate policy membership/source/metadata coherence and preallocate fixed owner state.
-  [[nodiscard]] static model::Result<MarketStateMachine>
-  create(const runtime::RuntimePolicy& policy, const runtime::RuntimeSource& source,
-         model::InstrumentMetadata metadata,
-         MarketIntegrityValidator integrity_validator = validate_recorded_fixture_integrity);
+  [[nodiscard]] static model::Result<MarketStateMachine> create_market_state_machine(
+      const runtime::RuntimePolicy& policy, const runtime::RuntimeSource& source,
+      model::InstrumentMetadata metadata,
+      MarketIntegrityValidator integrity_validator = validate_recorded_fixture_integrity);
 
   // --------------------------------------------------------
   // Mutable owner state cannot be copied; a one-time move supports factory publication.
@@ -306,56 +312,59 @@ public:
   // --------------------------------------------------------
   // Publish the required initial Synchronizing transition without fabricating ingress context.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  initialize(const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
-             MarketTurnPreflightAuthority& preflight_authority =
-                 permissive_market_turn_preflight_authority());
+  initialize_market_state(const OwnerMarketTurnContext& context,
+                          trace::RuntimeTraceSink& trace_sink,
+                          MarketTurnPreflightAuthority& preflight_authority =
+                              permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Clear source continuity and require a fresh snapshot, retaining hidden historical book bytes.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  resynchronize(const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
-                MarketTurnPreflightAuthority& preflight_authority =
-                    permissive_market_turn_preflight_authority());
+  resynchronize_source(const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
+                       MarketTurnPreflightAuthority& preflight_authority =
+                           permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Classify and transactionally apply one normalized snapshot or delta.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  process(NormalizedMarketUpdate update, const AcceptedMarketTurnContext& context,
-          trace::RuntimeTraceSink& trace_sink,
-          MarketTurnPreflightAuthority& preflight_authority =
-              permissive_market_turn_preflight_authority());
+  apply_market_update(NormalizedMarketUpdate update, const AcceptedMarketTurnContext& context,
+                      trace::RuntimeTraceSink& trace_sink,
+                      MarketTurnPreflightAuthority& preflight_authority =
+                          permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Apply deterministic session-age policy and clear continuity only for a newer session.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  process(const SessionStarted& control, const AcceptedMarketTurnContext& context,
-          trace::RuntimeTraceSink& trace_sink,
-          MarketTurnPreflightAuthority& preflight_authority =
-              permissive_market_turn_preflight_authority());
+  apply_session_start(const SessionStarted& control, const AcceptedMarketTurnContext& context,
+                      trace::RuntimeTraceSink& trace_sink,
+                      MarketTurnPreflightAuthority& preflight_authority =
+                          permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Evaluate the explicit freshness timestamp without reading an ambient clock.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  process(const StalenessCheck& control, const AcceptedMarketTurnContext& context,
-          trace::RuntimeTraceSink& trace_sink,
-          MarketTurnPreflightAuthority& preflight_authority =
-              permissive_market_turn_preflight_authority());
+  apply_staleness_check(const StalenessCheck& control, const AcceptedMarketTurnContext& context,
+                        trace::RuntimeTraceSink& trace_sink,
+                        MarketTurnPreflightAuthority& preflight_authority =
+                            permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Contain one attributable malformed or unsupported active-stream frame without raw payload.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  reject(const AttributableMarketFailure& failure, const AcceptedMarketTurnContext& context,
-         trace::RuntimeTraceSink& trace_sink,
-         MarketTurnPreflightAuthority& preflight_authority =
-             permissive_market_turn_preflight_authority());
+  apply_attributable_failure(const AttributableMarketFailure& failure,
+                             const AcceptedMarketTurnContext& context,
+                             trace::RuntimeTraceSink& trace_sink,
+                             MarketTurnPreflightAuthority& preflight_authority =
+                                 permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Consume one ordered admission-loss fence and require snapshot recovery.
   [[nodiscard]] model::Result<MarketTurnOutcome>
-  source_discontinuity(model::AdmissionOrdinal failed_admission,
-                       const OwnerMarketTurnContext& context, trace::RuntimeTraceSink& trace_sink,
-                       MarketTurnPreflightAuthority& preflight_authority =
-                           permissive_market_turn_preflight_authority());
+  apply_source_discontinuity(model::AdmissionOrdinal failed_admission,
+                             const OwnerMarketTurnContext& context,
+                             trace::RuntimeTraceSink& trace_sink,
+                             MarketTurnPreflightAuthority& preflight_authority =
+                                 permissive_market_turn_preflight_authority());
 
   // --------------------------------------------------------
   // Return absence until initialization publishes the first explicit state.
@@ -363,7 +372,7 @@ public:
 
   // --------------------------------------------------------
   // Expose a book only while the source is explicitly Ready.
-  [[nodiscard]] model::Result<ReadyBookView> ready_book() const;
+  [[nodiscard]] model::Result<ReadyBookView> create_ready_book_view() const;
 
   // --------------------------------------------------------
   // Return the last committed generation/revision pair, absent before the first snapshot.
@@ -378,6 +387,7 @@ public:
   }
 
   // --------------------------------------------------------
+  // Return the last accepted source sequence, absent until a committed market update exists.
   [[nodiscard]] std::optional<model::SequenceNumber> last_source_sequence() const noexcept {
     return last_source_sequence_;
   }

@@ -118,7 +118,7 @@ public:
 
   // --------------------------------------------------------
   // Transfer the complete canonical byte prefix out of the consumed writer.
-  [[nodiscard]] std::vector<std::byte> take() && { return std::move(bytes_); }
+  [[nodiscard]] std::vector<std::byte> take_canonical_bytes() && { return std::move(bytes_); }
 
   // --------------------------------------------------------
 private:
@@ -138,9 +138,9 @@ private:
 
 // --------------------------------------------------------
 // Return one stable malformed-evidence error without carrying authored values as text.
-[[nodiscard]] model::Result<void> invalid(std::string_view field) {
-  return model::Result<void>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidValue, std::string{field}));
+[[nodiscard]] model::Result<void> create_invalid_submission_trace_result(std::string_view field) {
+  return model::Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidValue, std::string{field}));
 }
 
 // --------------------------------------------------------
@@ -493,8 +493,8 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
 
 // --------------------------------------------------------
 // Prove that at most the first recursive call receives the reserved canonical re-entry slot.
-[[nodiscard]] bool already_has_reentry(std::span<const SubmissionTraceRecord> records,
-                                       model::SubmissionAttemptId attempt_id) noexcept {
+[[nodiscard]] bool has_reentry_for_attempt(std::span<const SubmissionTraceRecord> records,
+                                           model::SubmissionAttemptId attempt_id) noexcept {
   for (auto iterator = records.rbegin(); iterator != records.rend(); ++iterator) {
     if (iterator->fields().context.attempt_id != attempt_id) {
       break;
@@ -508,8 +508,8 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
 
 // --------------------------------------------------------
 // Define every allowed consecutive ordinary event in the M3 branch table.
-[[nodiscard]] bool may_follow(SubmissionTraceEventKind previous,
-                              SubmissionTraceEventKind current) noexcept {
+[[nodiscard]] bool can_follow_in_submission_trace(SubmissionTraceEventKind previous,
+                                                  SubmissionTraceEventKind current) noexcept {
   switch (previous) {
   case SubmissionTraceEventKind::Attempt:
     return current == SubmissionTraceEventKind::RouteAuthorized ||
@@ -554,9 +554,9 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
 
 // --------------------------------------------------------
 // Check the final result against the exact causal branch that immediately precedes completion.
-[[nodiscard]] bool completion_matches(std::span<const SubmissionTraceRecord> records,
-                                      const SubmissionTraceRecord& previous,
-                                      const SubmissionFinalResult& result) {
+[[nodiscard]] bool does_completion_match(std::span<const SubmissionTraceRecord> records,
+                                         const SubmissionTraceRecord& previous,
+                                         const SubmissionFinalResult& result) {
   if (is_internal_rejection(result)) {
     return previous.kind() != SubmissionTraceEventKind::WriteInitiated &&
            previous.kind() != SubmissionTraceEventKind::SubmissionUnknown;
@@ -611,9 +611,10 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
 
 // --------------------------------------------------------
 // Apply only the evidence introduction or state transition assigned to the current event.
-[[nodiscard]] SubmissionTraceFields expected_snapshot(const SubmissionTraceFields& previous,
-                                                      SubmissionTraceEventKind current,
-                                                      const SubmissionTraceFields& candidate) {
+[[nodiscard]] SubmissionTraceFields
+derive_expected_submission_trace_snapshot(const SubmissionTraceFields& previous,
+                                          SubmissionTraceEventKind current,
+                                          const SubmissionTraceFields& candidate) {
   SubmissionTraceFields expected = previous;
   switch (current) {
   case SubmissionTraceEventKind::RouteAuthorized:
@@ -670,42 +671,43 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
     if (previous != nullptr &&
         (previous->kind() != SubmissionTraceEventKind::SubmissionCompleted ||
          fields.context.attempt_id.value() <= previous->fields().context.attempt_id.value())) {
-      return invalid("submission_trace.sequence");
+      return create_invalid_submission_trace_result("submission_trace.sequence");
     }
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
 
   if (previous == nullptr || previous->kind() == SubmissionTraceEventKind::SubmissionCompleted) {
-    return invalid("submission_trace.sequence");
+    return create_invalid_submission_trace_result("submission_trace.sequence");
   }
 
   if (kind == SubmissionTraceEventKind::ReentryRejected) {
     if (!has_same_outer_context(fields.context, previous->fields().context) ||
-        already_has_reentry(records, fields.context.attempt_id)) {
-      return invalid("submission_trace.reentry");
+        has_reentry_for_attempt(records, fields.context.attempt_id)) {
+      return create_invalid_submission_trace_result("submission_trace.reentry");
     }
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
 
-  if (fields.context != previous->fields().context || !may_follow(previous->kind(), kind)) {
-    return invalid("submission_trace.sequence");
+  if (fields.context != previous->fields().context ||
+      !can_follow_in_submission_trace(previous->kind(), kind)) {
+    return create_invalid_submission_trace_result("submission_trace.sequence");
   }
 
-  const auto expected = expected_snapshot(previous->fields(), kind, fields);
+  const auto expected = derive_expected_submission_trace_snapshot(previous->fields(), kind, fields);
   if (fields != expected) {
-    return invalid("submission_trace.cumulative_fields");
+    return create_invalid_submission_trace_result("submission_trace.cumulative_fields");
   }
   if (kind == SubmissionTraceEventKind::SubmissionCompleted &&
-      !completion_matches(records, *previous, *fields.final_result)) {
-    return invalid("submission_trace.final_result");
+      !does_completion_match(records, *previous, *fields.final_result)) {
+    return create_invalid_submission_trace_result("submission_trace.final_result");
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Encode one risk evidence measure into its single pair of positional decimal/count slots.
-[[nodiscard]] bool append(CanonicalSubmissionTraceWriter& writer,
-                          const execution::RiskLimitEvidence& evidence) {
+[[nodiscard]] bool append_risk_limit_evidence(CanonicalSubmissionTraceWriter& writer,
+                                              const execution::RiskLimitEvidence& evidence) {
   if (!writer.append_byte(static_cast<std::uint8_t>(evidence.scope())) ||
       !writer.append_byte(static_cast<std::uint8_t>(evidence.measure_kind()))) {
     return false;
@@ -731,8 +733,8 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
 
 // --------------------------------------------------------
 // Encode one complete positional record without a native-layout or per-record envelope.
-[[nodiscard]] bool append(CanonicalSubmissionTraceWriter& writer,
-                          const SubmissionTraceRecord& record) {
+[[nodiscard]] bool append_submission_trace_record(CanonicalSubmissionTraceWriter& writer,
+                                                  const SubmissionTraceRecord& record) {
   const auto& fields = record.fields();
   const auto& context = fields.context;
   const auto& request = context.request;
@@ -798,7 +800,7 @@ ordinary_before(std::span<const SubmissionTraceRecord> records,
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit rejection, OMS, encoding, and initiation evidence only in their assigned optional slots.
   if (!writer.append_byte(fields.risk_rejection ? 1U : 0U) ||
-      (fields.risk_rejection && !append(writer, *fields.risk_rejection)) ||
+      (fields.risk_rejection && !append_risk_limit_evidence(writer, *fields.risk_rejection)) ||
       !writer.append_byte(fields.oms_state ? 1U : 0U) ||
       (fields.oms_state && !writer.append_byte(static_cast<std::uint8_t>(*fields.oms_state))) ||
       !writer.append_byte(fields.encoding ? 1U : 0U)) {
@@ -849,40 +851,42 @@ SubmissionTraceSink::SubmissionTraceSink(SubmissionTraceProvenance provenance,
 
 // --------------------------------------------------------
 // Reject insufficient headroom before identity generation or any risk reservation can occur.
-model::Result<void> SubmissionTraceSink::preflight(std::uint32_t additional_records) const {
+model::Result<void>
+SubmissionTraceSink::preflight_trace_append(std::uint32_t additional_records) const {
   if (additional_records > remaining_capacity()) {
-    return model::Result<void>::failure(
-        DomainError::at_index(DomainErrorCode::SubmissionEvidenceExhausted,
-                              "submission_trace.capacity", static_cast<std::size_t>(capacity_)));
+    return model::Result<void>::create_failure(DomainError::create_at_index(
+        DomainErrorCode::SubmissionEvidenceExhausted, "submission_trace.capacity",
+        static_cast<std::size_t>(capacity_)));
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Validate shape, causal order, and cumulative fields without consuming capacity or an ordinal.
-model::Result<void> SubmissionTraceSink::validate(SubmissionTraceEventKind kind,
-                                                  const SubmissionTraceFields& fields) const {
+model::Result<void>
+SubmissionTraceSink::validate_trace_record(SubmissionTraceEventKind kind,
+                                           const SubmissionTraceFields& fields) const {
   if (!has_valid_event_shape(kind, fields)) {
-    return invalid("submission_trace.fields");
+    return create_invalid_submission_trace_result("submission_trace.fields");
   }
   return validate_sequence(records_, kind, fields);
 }
 
 // --------------------------------------------------------
 // Capacity and all deterministic validation precede mutation of the accepted canonical prefix.
-model::Result<void> SubmissionTraceSink::append(SubmissionTraceEventKind kind,
-                                                SubmissionTraceFields fields) {
+model::Result<void> SubmissionTraceSink::append_trace_record(SubmissionTraceEventKind kind,
+                                                             SubmissionTraceFields fields) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Capacity precedence keeps a full sink's behavior independent of attempted field shape.
-  auto capacity_check = preflight(1U);
+  auto capacity_check = preflight_trace_append(1U);
   if (!capacity_check) {
     return capacity_check;
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate the entire record before assigning its one-based accepted-prefix ordinal.
-  auto validation = validate(kind, fields);
+  auto validation = validate_trace_record(kind, fields);
   if (!validation) {
     return validation;
   }
@@ -891,38 +895,41 @@ model::Result<void> SubmissionTraceSink::append(SubmissionTraceEventKind kind,
   // Preallocated storage makes this append allocation-free under the sealed policy capacity.
   const auto ordinal = SubmissionTraceOrdinal{static_cast<std::uint64_t>(records_.size()) + 1U};
   records_.push_back(SubmissionTraceRecord{ordinal, kind, provenance_, std::move(fields)});
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Emit magic, version, count, and every complete positional record in accepted order.
-model::Result<std::vector<std::byte>> SubmissionTraceSink::canonical_bytes() const {
+model::Result<std::vector<std::byte>> SubmissionTraceSink::encode_canonical_bytes() const {
   CanonicalSubmissionTraceWriter writer;
   bool success = writer.append_ascii_raw(submission_stream_magic) &&
-                 writer.append_u16(submission_trace_schema_version) && writer.append_u32(size());
+                 writer.append_u16(submission_trace_schema_version) &&
+                 writer.append_u32(record_count());
   for (const auto& record : records_) {
-    if (!success || !::aegis::trace::append(writer, record)) {
+    if (!success || !append_submission_trace_record(writer, record)) {
       success = false;
       break;
     }
   }
   if (!success) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "submission_trace"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "submission_trace"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take());
+  return model::Result<std::vector<std::byte>>::create_success(
+      std::move(writer).take_canonical_bytes());
 }
 
 // --------------------------------------------------------
 // Hash exactly the complete AEGISSTS bytes without embedding the digest back into the stream.
-model::Result<model::Sha256Digest> SubmissionTraceSink::digest() const {
-  auto encoded = canonical_bytes();
+model::Result<model::Sha256Digest> SubmissionTraceSink::derive_digest() const {
+  auto encoded = encode_canonical_bytes();
   if (!encoded) {
-    return model::Result<model::Sha256Digest>::failure(std::move(encoded).error());
+    return model::Result<model::Sha256Digest>::create_failure(std::move(encoded).error());
   }
-  return model::Result<model::Sha256Digest>::success(model::sha256(encoded.value()));
+  return model::Result<model::Sha256Digest>::create_success(
+      model::calculate_sha256_digest(encoded.value()));
 }
 
 // --------------------------------------------------------

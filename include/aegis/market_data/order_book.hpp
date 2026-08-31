@@ -144,17 +144,18 @@ private:
 
   // --------------------------------------------------------
   // Reset both sides before constructing an authoritative snapshot candidate.
-  void clear() noexcept;
+  void clear_levels() noexcept;
 
   // --------------------------------------------------------
   // Insert, replace, or delete one absolute-quantity level while preserving canonical side order.
-  [[nodiscard]] model::Result<void> apply(BookSide side, model::Price price,
-                                          model::Quantity quantity, std::size_t retained_depth);
+  [[nodiscard]] model::Result<void> apply_level_change(BookSide side, model::Price price,
+                                                       model::Quantity quantity,
+                                                       std::size_t retained_depth);
 
   // --------------------------------------------------------
   // Validate positivity, metadata increments, depth, side ordering, and strict uncrossedness.
-  [[nodiscard]] model::Result<void> validate(const model::InstrumentMetadata& metadata,
-                                             std::size_t retained_depth) const;
+  [[nodiscard]] model::Result<void> validate_book_state(const model::InstrumentMetadata& metadata,
+                                                        std::size_t retained_depth) const;
 
   // --------------------------------------------------------
   // Exchange complete fixed storage only after every fallible candidate check has succeeded.

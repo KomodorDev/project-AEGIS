@@ -26,8 +26,9 @@ namespace {
 
 // --------------------------------------------------------
 // Name impossible local fake states without turning them into ordinary scripted EncodingFailed.
-[[nodiscard]] model::DomainError invalid_fake_state(std::string field) {
-  return model::DomainError::at_field(model::DomainErrorCode::InvalidFakeState, std::move(field));
+[[nodiscard]] model::DomainError create_invalid_fake_state_error(std::string field) {
+  return model::DomainError::create_at_field(model::DomainErrorCode::InvalidFakeState,
+                                             std::move(field));
 }
 
 // ########################################################################
@@ -105,7 +106,8 @@ public:
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] std::size_t size() const noexcept { return size_; }
+  // Return the number of initialized bytes currently held by the bounded encoder.
+  [[nodiscard]] std::size_t encoded_byte_count() const noexcept { return size_; }
 
   // --------------------------------------------------------
   // Transfer the fixed storage after the caller has captured the used prefix length.
@@ -142,20 +144,21 @@ private:
 // --------------------------------------------------------
 // Validate actions and bounds before sorting authored overrides into their canonical order.
 model::Result<FakeEncoderScript>
-FakeEncoderScript::create(FakeEncodingAction default_action, std::uint64_t maximum_invocations,
-                          std::vector<FakeEncodingOverride> overrides) {
+FakeEncoderScript::create_fake_encoder_script(FakeEncodingAction default_action,
+                                              std::uint64_t maximum_invocations,
+                                              std::vector<FakeEncodingOverride> overrides) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Fail closed on an unassigned default or a maximum outside the AEGISSUP schema-one bound.
   if (!is_assigned(default_action)) {
-    return model::Result<FakeEncoderScript>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.encoder_script.default_action"));
+    return model::Result<FakeEncoderScript>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.encoder_script.default_action"));
   }
   if (maximum_invocations == 0U || maximum_invocations > maximum_submission_attempts_supported) {
-    return model::Result<FakeEncoderScript>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.maximum_submission_attempts"));
+    return model::Result<FakeEncoderScript>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.maximum_submission_attempts"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -171,15 +174,15 @@ FakeEncoderScript::create(FakeEncodingAction default_action, std::uint64_t maxim
     if (override.invocation_ordinal == 0U || override.invocation_ordinal > maximum_invocations ||
         !is_assigned(override.action) ||
         (index != 0U && overrides[index - 1U].invocation_ordinal == override.invocation_ordinal)) {
-      return model::Result<FakeEncoderScript>::failure(
-          model::DomainError::at_index(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                       "submission_policy.encoder_script.overrides", index));
+      return model::Result<FakeEncoderScript>::create_failure(
+          model::DomainError::create_at_index(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                              "submission_policy.encoder_script.overrides", index));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the validated default plus canonical unique override list as one immutable value.
-  return model::Result<FakeEncoderScript>::success(
+  return model::Result<FakeEncoderScript>::create_success(
       FakeEncoderScript{default_action, maximum_invocations, std::move(overrides)});
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -230,13 +233,14 @@ FakeEncodingResult::FakeEncodingResult(EncodedFakeOrder encoded_order) noexcept
 // --------------------------------------------------------
 // Validate the fixed local byte bound without accepting any transport-shaped parameter.
 model::Result<DeterministicFakeOrderEncoder>
-DeterministicFakeOrderEncoder::create(FakeEncoderScript script, std::uint16_t byte_capacity) {
+DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+    FakeEncoderScript script, std::uint16_t byte_capacity) {
   if (byte_capacity == 0U || byte_capacity > maximum_encoded_fake_order_bytes) {
-    return model::Result<DeterministicFakeOrderEncoder>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.encoded_byte_capacity"));
+    return model::Result<DeterministicFakeOrderEncoder>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.encoded_byte_capacity"));
   }
-  return model::Result<DeterministicFakeOrderEncoder>::success(
+  return model::Result<DeterministicFakeOrderEncoder>::create_success(
       DeterministicFakeOrderEncoder{std::move(script), byte_capacity});
 }
 
@@ -250,8 +254,8 @@ DeterministicFakeOrderEncoder::DeterministicFakeOrderEncoder(FakeEncoderScript s
 // Consume before selection so scripted failures and successful encodes advance identically.
 model::Result<model::EncoderInvocationOrdinal> DeterministicFakeOrderEncoder::consume_invocation() {
   if (invocations_consumed_ == script_.maximum_invocations()) {
-    return model::Result<model::EncoderInvocationOrdinal>::failure(
-        invalid_fake_state("fake_order_encoder.invocation_ordinal"));
+    return model::Result<model::EncoderInvocationOrdinal>::create_failure(
+        create_invalid_fake_state_error("fake_order_encoder.invocation_ordinal"));
   }
   ++invocations_consumed_;
   return model::EncoderInvocationOrdinal::from_value(invocations_consumed_);
@@ -260,13 +264,13 @@ model::Result<model::EncoderInvocationOrdinal> DeterministicFakeOrderEncoder::co
 // --------------------------------------------------------
 // Apply the selected deterministic action, then encode every listed AEGISFOE field in exact order.
 model::Result<FakeEncodingResult>
-DeterministicFakeOrderEncoder::encode(const oms::OutboundOrderRecord& order) {
+DeterministicFakeOrderEncoder::encode_order(const oms::OutboundOrderRecord& order) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Every reached call consumes one ordinal and its selected action before any later check.
   auto invocation = consume_invocation();
   if (!invocation) {
-    return model::Result<FakeEncodingResult>::failure(invocation.error());
+    return model::Result<FakeEncodingResult>::create_failure(invocation.error());
   }
   const auto action = script_.action_for(invocation.value());
 
@@ -276,14 +280,15 @@ DeterministicFakeOrderEncoder::encode(const oms::OutboundOrderRecord& order) {
   if (order.state() != oms::OutboundOrderState::PendingEncoding ||
       admission.attempt_id.value() != admission.reservation_id.value() ||
       admission.economics.quantity != admission.exposure.order_quantity()) {
-    return model::Result<FakeEncodingResult>::failure(
-        invalid_fake_state("fake_order_encoder.order"));
+    return model::Result<FakeEncodingResult>::create_failure(
+        create_invalid_fake_state_error("fake_order_encoder.order"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A valid scripted failure is ordinary and creates no byte object or initiator work.
   if (action == FakeEncodingAction::Fail) {
-    return model::Result<FakeEncodingResult>::success(FakeEncodingResult{invocation.value()});
+    return model::Result<FakeEncodingResult>::create_success(
+        FakeEncodingResult{invocation.value()});
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -316,17 +321,18 @@ DeterministicFakeOrderEncoder::encode(const oms::OutboundOrderRecord& order) {
       writer.append_u64(provenance.risk_policy_revision.value()) &&
       append_digest(writer, provenance.submission_policy_fingerprint) &&
       writer.append_u64(admission.reservation_id.value());
-  if (!encoded || writer.size() > std::numeric_limits<std::uint16_t>::max()) {
-    return model::Result<FakeEncodingResult>::failure(
-        invalid_fake_state("fake_order_encoder.bytes"));
+  if (!encoded || writer.encoded_byte_count() > std::numeric_limits<std::uint16_t>::max()) {
+    return model::Result<FakeEncodingResult>::create_failure(
+        create_invalid_fake_state_error("fake_order_encoder.bytes"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the exact used prefix and keep attempt/invocation provenance outside canonical bytes.
-  const auto byte_length = static_cast<std::uint16_t>(writer.size());
+  const auto byte_length = static_cast<std::uint16_t>(writer.encoded_byte_count());
   EncodedFakeOrder encoded_order{admission.attempt_id, invocation.value(),
                                  std::move(writer).take_bytes(), byte_length};
-  return model::Result<FakeEncodingResult>::success(FakeEncodingResult{std::move(encoded_order)});
+  return model::Result<FakeEncodingResult>::create_success(
+      FakeEncodingResult{std::move(encoded_order)});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

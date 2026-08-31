@@ -112,39 +112,46 @@ public:
 
   // --------------------------------------------------------
   // Validate a kind-specific fixed-field profile without changing prefix or counters.
-  [[nodiscard]] model::Result<void> validate(SubmissionDiagnosticKind kind,
-                                             const SubmissionDiagnosticFields& fields) const;
+  [[nodiscard]] model::Result<void>
+  validate_diagnostic(SubmissionDiagnosticKind kind,
+                      const SubmissionDiagnosticFields& fields) const;
 
   // --------------------------------------------------------
   // Retain one valid observation or account for its loss after prefix saturation.
-  [[nodiscard]] model::Result<void> append(SubmissionDiagnosticKind kind,
-                                           SubmissionDiagnosticFields fields);
+  [[nodiscard]] model::Result<void> append_diagnostic(SubmissionDiagnosticKind kind,
+                                                      SubmissionDiagnosticFields fields);
 
   // --------------------------------------------------------
   // Resolve one retained record in oldest-to-newest order; out-of-range positions return null.
   [[nodiscard]] const SubmissionDiagnosticRecord*
-  at(std::size_t chronological_index) const noexcept;
+  diagnostic_at(std::size_t chronological_index) const noexcept;
 
   // --------------------------------------------------------
-  [[nodiscard]] std::uint32_t size() const noexcept {
+  // Return the number of observations retained in the immutable accepted prefix.
+  [[nodiscard]] std::uint32_t diagnostic_count() const noexcept {
     return static_cast<std::uint32_t>(records_.size());
   }
 
   // --------------------------------------------------------
+  // Return the fixed maximum retained-record count reserved at construction.
   [[nodiscard]] constexpr std::uint32_t capacity() const noexcept { return capacity_; }
 
   // --------------------------------------------------------
+  // Borrow the canonical policy identities attached to every retained observation.
   [[nodiscard]] const SubmissionDiagnosticProvenance& provenance() const noexcept {
     return provenance_;
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] bool saturated() const noexcept { return records_.size() == capacity_; }
+  // Report whether the retained prefix has reached its fixed record capacity.
+  [[nodiscard]] bool is_saturated() const noexcept { return records_.size() == capacity_; }
 
   // --------------------------------------------------------
+  // Return the saturated count of valid observations retained by this sink.
   [[nodiscard]] constexpr std::uint64_t accepted_count() const noexcept { return accepted_count_; }
 
   // --------------------------------------------------------
+  // Return the saturated count of valid observations discarded after capacity was exhausted.
   [[nodiscard]] constexpr std::uint64_t dropped_count() const noexcept { return dropped_count_; }
 
   // --------------------------------------------------------

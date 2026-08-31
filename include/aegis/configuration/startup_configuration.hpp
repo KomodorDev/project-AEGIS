@@ -109,7 +109,7 @@ public:
   // --------------------------------------------------------
   // Validate all sections and atomically seal their canonical bytes, fingerprint, and provenance.
   [[nodiscard]] static model::Result<StartupConfiguration>
-  create(StartupConfigurationParams params);
+  create_startup_configuration(StartupConfigurationParams params);
 
   // --------------------------------------------------------
   // Return the revision of the complete accepted startup configuration.

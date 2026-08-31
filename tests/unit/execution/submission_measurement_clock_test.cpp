@@ -25,6 +25,7 @@ class ExternalSubmissionMeasurementClock final : public execution::SubmissionMea
 private:
 
   // --------------------------------------------------------
+  // Return one harmless reading solely to complete the inaccessible external implementation probe.
   [[nodiscard]] std::optional<std::uint64_t> read_now_nanoseconds() noexcept override { return 0U; }
 
   // --------------------------------------------------------

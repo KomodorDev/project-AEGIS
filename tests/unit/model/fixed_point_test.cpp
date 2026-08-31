@@ -93,7 +93,7 @@ static_assert(!HasProductOperator<Price, Quantity>);
 
 // --------------------------------------------------------
 // Parse every fixture literal through the production path so malformed test data fails immediately.
-[[nodiscard]] FixedPoint decimal(std::string_view text) {
+[[nodiscard]] FixedPoint parse_fixed_point_or_throw(std::string_view text) {
   auto result = FixedPoint::parse_ascii(text);
   REQUIRE(result);
   return result.value();
@@ -105,22 +105,22 @@ TEST_CASE("decimal parsing is strict and storage is canonical", "[model][fixed-p
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonicalize redundant leading and fractional zeros while retaining the exact value.
-  const auto value = decimal("0012.3400");
+  const auto value = parse_fixed_point_or_throw("0012.3400");
   CHECK(value.coefficient() == 1234);
   CHECK(value.scale() == 2U);
   CHECK(value.to_string() == "12.34");
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Collapse every signed zero representation to the unique scale-zero value.
-  const auto zero = decimal("-0.000");
+  const auto zero = parse_fixed_point_or_throw("-0.000");
   CHECK(zero.coefficient() == 0);
   CHECK(zero.scale() == 0U);
   CHECK(zero.to_string() == "0");
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Numeric equality and ordering ignore representational differences after canonicalization.
-  CHECK(decimal("1.0") == decimal("1"));
-  CHECK(decimal("-0.10") < decimal("0"));
+  CHECK(parse_fixed_point_or_throw("1.0") == parse_fixed_point_or_throw("1"));
+  CHECK(parse_fixed_point_or_throw("-0.10") < parse_fixed_point_or_throw("0"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -151,17 +151,23 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Accept both signed coefficient limits exactly.
-  CHECK(decimal("9223372036854775807").coefficient() == std::numeric_limits<std::int64_t>::max());
-  CHECK(decimal("-9223372036854775808").coefficient() == std::numeric_limits<std::int64_t>::min());
+  CHECK(parse_fixed_point_or_throw("9223372036854775807").coefficient() ==
+        std::numeric_limits<std::int64_t>::max());
+  CHECK(parse_fixed_point_or_throw("-9223372036854775808").coefficient() ==
+        std::numeric_limits<std::int64_t>::min());
 
   // Redundant fractional zeros at either signed limit must canonicalize before range evaluation.
-  CHECK(decimal("9223372036854775807.0") == decimal("9223372036854775807"));
-  CHECK(decimal("-9223372036854775808.000") == decimal("-9223372036854775808"));
+  CHECK(parse_fixed_point_or_throw("9223372036854775807.0") ==
+        parse_fixed_point_or_throw("9223372036854775807"));
+  CHECK(parse_fixed_point_or_throw("-9223372036854775808.000") ==
+        parse_fixed_point_or_throw("-9223372036854775808"));
 
   // Canonicalization must also preserve boundary coefficients when significant fractional digits
   // remain after the redundant zero is removed.
-  CHECK(decimal("922337203685477580.70") == decimal("922337203685477580.7"));
-  CHECK(decimal("-922337203685477580.80") == decimal("-922337203685477580.8"));
+  CHECK(parse_fixed_point_or_throw("922337203685477580.70") ==
+        parse_fixed_point_or_throw("922337203685477580.7"));
+  CHECK(parse_fixed_point_or_throw("-922337203685477580.80") ==
+        parse_fixed_point_or_throw("-922337203685477580.8"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject coefficients immediately outside the signed representation range.
@@ -194,7 +200,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
       FixedPoint::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
   REQUIRE_FALSE(maximum_unsigned_coefficient);
   CHECK(maximum_unsigned_coefficient.error() ==
-        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
+        DomainError::create_at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
 
   const auto maximum_signed_as_unsigned = FixedPoint::from_scaled(
       static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()), 0U);
@@ -207,7 +213,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto invalid_price = Price::from_scaled(std::numeric_limits<std::uint64_t>::max(), 0U);
   REQUIRE_FALSE(invalid_price);
   CHECK(invalid_price.error() ==
-        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "price"));
+        DomainError::create_at_field(DomainErrorCode::ArithmeticOverflow, "price"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Instantiating both narrow signed and unsigned source types proves supported character-width
@@ -215,7 +221,7 @@ TEST_CASE("decimal parsing rejects non-ordinary notation and representation over
   const auto narrow_integers =
       FixedPoint::from_scaled(static_cast<signed char>(12), static_cast<unsigned char>(1));
   REQUIRE(narrow_integers);
-  CHECK(narrow_integers.value() == decimal("1.2"));
+  CHECK(narrow_integers.value() == parse_fixed_point_or_throw("1.2"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -227,21 +233,25 @@ TEST_CASE("addition and subtraction preserve exact cross-scale values and fail o
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Preserve exact values while aligning unlike scales for addition and subtraction.
-  const auto sum = decimal("1.2").checked_add(decimal("0.03"));
+  const auto sum =
+      parse_fixed_point_or_throw("1.2").checked_add(parse_fixed_point_or_throw("0.03"));
   REQUIRE(sum);
-  CHECK(sum.value() == decimal("1.23"));
+  CHECK(sum.value() == parse_fixed_point_or_throw("1.23"));
 
-  const auto difference = decimal("1.2").checked_subtract(decimal("2.03"));
+  const auto difference =
+      parse_fixed_point_or_throw("1.2").checked_subtract(parse_fixed_point_or_throw("2.03"));
   REQUIRE(difference);
-  CHECK(difference.value() == decimal("-0.83"));
+  CHECK(difference.value() == parse_fixed_point_or_throw("-0.83"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject overflow in both signed directions rather than wrapping coefficients.
-  const auto add_overflow = decimal("9223372036854775807").checked_add(decimal("1"));
+  const auto add_overflow = parse_fixed_point_or_throw("9223372036854775807")
+                                .checked_add(parse_fixed_point_or_throw("1"));
   REQUIRE_FALSE(add_overflow);
   CHECK(add_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
 
-  const auto subtract_overflow = decimal("-9223372036854775808").checked_subtract(decimal("1"));
+  const auto subtract_overflow = parse_fixed_point_or_throw("-9223372036854775808")
+                                     .checked_subtract(parse_fixed_point_or_throw("1"));
   REQUIRE_FALSE(subtract_overflow);
   CHECK(subtract_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
 
@@ -255,27 +265,39 @@ TEST_CASE("rescaling requires an explicit policy and handles every signed direct
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Exact rescaling rejects discarded information rather than selecting an implicit policy.
-  const auto exact = decimal("1.25").rescale(1U, RoundingMode::Exact);
+  const auto exact = parse_fixed_point_or_throw("1.25").rescale(1U, RoundingMode::Exact);
   REQUIRE_FALSE(exact);
   CHECK(exact.error().code == DomainErrorCode::PrecisionLoss);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin every directional and ties-to-even policy for positive values.
-  CHECK(decimal("1.25").rescale(1U, RoundingMode::TowardZero).value() == decimal("1.2"));
-  CHECK(decimal("1.25").rescale(1U, RoundingMode::AwayFromZero).value() == decimal("1.3"));
-  CHECK(decimal("1.25").rescale(1U, RoundingMode::Floor).value() == decimal("1.2"));
-  CHECK(decimal("1.25").rescale(1U, RoundingMode::Ceiling).value() == decimal("1.3"));
-  CHECK(decimal("1.25").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("1.2"));
-  CHECK(decimal("1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("1.4"));
+  CHECK(parse_fixed_point_or_throw("1.25").rescale(1U, RoundingMode::TowardZero).value() ==
+        parse_fixed_point_or_throw("1.2"));
+  CHECK(parse_fixed_point_or_throw("1.25").rescale(1U, RoundingMode::AwayFromZero).value() ==
+        parse_fixed_point_or_throw("1.3"));
+  CHECK(parse_fixed_point_or_throw("1.25").rescale(1U, RoundingMode::Floor).value() ==
+        parse_fixed_point_or_throw("1.2"));
+  CHECK(parse_fixed_point_or_throw("1.25").rescale(1U, RoundingMode::Ceiling).value() ==
+        parse_fixed_point_or_throw("1.3"));
+  CHECK(parse_fixed_point_or_throw("1.25").rescale(1U, RoundingMode::NearestTiesToEven).value() ==
+        parse_fixed_point_or_throw("1.2"));
+  CHECK(parse_fixed_point_or_throw("1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() ==
+        parse_fixed_point_or_throw("1.4"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin the corresponding sign-sensitive behavior for negative values.
-  CHECK(decimal("-1.25").rescale(1U, RoundingMode::TowardZero).value() == decimal("-1.2"));
-  CHECK(decimal("-1.25").rescale(1U, RoundingMode::AwayFromZero).value() == decimal("-1.3"));
-  CHECK(decimal("-1.25").rescale(1U, RoundingMode::Floor).value() == decimal("-1.3"));
-  CHECK(decimal("-1.25").rescale(1U, RoundingMode::Ceiling).value() == decimal("-1.2"));
-  CHECK(decimal("-1.25").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("-1.2"));
-  CHECK(decimal("-1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() == decimal("-1.4"));
+  CHECK(parse_fixed_point_or_throw("-1.25").rescale(1U, RoundingMode::TowardZero).value() ==
+        parse_fixed_point_or_throw("-1.2"));
+  CHECK(parse_fixed_point_or_throw("-1.25").rescale(1U, RoundingMode::AwayFromZero).value() ==
+        parse_fixed_point_or_throw("-1.3"));
+  CHECK(parse_fixed_point_or_throw("-1.25").rescale(1U, RoundingMode::Floor).value() ==
+        parse_fixed_point_or_throw("-1.3"));
+  CHECK(parse_fixed_point_or_throw("-1.25").rescale(1U, RoundingMode::Ceiling).value() ==
+        parse_fixed_point_or_throw("-1.2"));
+  CHECK(parse_fixed_point_or_throw("-1.25").rescale(1U, RoundingMode::NearestTiesToEven).value() ==
+        parse_fixed_point_or_throw("-1.2"));
+  CHECK(parse_fixed_point_or_throw("-1.35").rescale(1U, RoundingMode::NearestTiesToEven).value() ==
+        parse_fixed_point_or_throw("-1.4"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -287,63 +309,79 @@ TEST_CASE("multiplication and division are target-scaled and checked", "[model][
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Preserve an exact target-scaled product and reject a genuinely overflowing product.
-  const auto product = decimal("0.2").multiply(decimal("0.5"), 1U, RoundingMode::Exact);
+  const auto product = parse_fixed_point_or_throw("0.2").multiply(parse_fixed_point_or_throw("0.5"),
+                                                                  1U, RoundingMode::Exact);
   REQUIRE(product);
-  CHECK(product.value() == decimal("0.1"));
+  CHECK(product.value() == parse_fixed_point_or_throw("0.1"));
 
   const auto product_overflow =
-      decimal("9223372036854775807").multiply(decimal("2"), 0U, RoundingMode::Exact);
+      parse_fixed_point_or_throw("9223372036854775807")
+          .multiply(parse_fixed_point_or_throw("2"), 0U, RoundingMode::Exact);
   REQUIRE_FALSE(product_overflow);
   CHECK(product_overflow.error().code == DomainErrorCode::ArithmeticOverflow);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Requesting maximum precision cannot create insignificant zeros that overflow a boundary value.
   const auto maximum_product =
-      decimal("9223372036854775807").multiply(decimal("1"), 18U, RoundingMode::Exact);
+      parse_fixed_point_or_throw("9223372036854775807")
+          .multiply(parse_fixed_point_or_throw("1"), 18U, RoundingMode::Exact);
   REQUIRE(maximum_product);
-  CHECK(maximum_product.value() == decimal("9223372036854775807"));
+  CHECK(maximum_product.value() == parse_fixed_point_or_throw("9223372036854775807"));
 
   // The asymmetric negative coefficient limit remains representable through exact multiplication.
   const auto minimum_product =
-      decimal("-9223372036854775808").multiply(decimal("1"), 18U, RoundingMode::Exact);
+      parse_fixed_point_or_throw("-9223372036854775808")
+          .multiply(parse_fixed_point_or_throw("1"), 18U, RoundingMode::Exact);
   REQUIRE(minimum_product);
-  CHECK(minimum_product.value() == decimal("-9223372036854775808"));
+  CHECK(minimum_product.value() == parse_fixed_point_or_throw("-9223372036854775808"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Preserve an exact quotient and make non-terminating precision policy explicit.
-  const auto quotient = decimal("1").divide(decimal("8"), 3U, RoundingMode::Exact);
+  const auto quotient = parse_fixed_point_or_throw("1").divide(parse_fixed_point_or_throw("8"), 3U,
+                                                               RoundingMode::Exact);
   REQUIRE(quotient);
-  CHECK(quotient.value() == decimal("0.125"));
+  CHECK(quotient.value() == parse_fixed_point_or_throw("0.125"));
 
-  const auto third_exact = decimal("1").divide(decimal("3"), 2U, RoundingMode::Exact);
+  const auto third_exact = parse_fixed_point_or_throw("1").divide(parse_fixed_point_or_throw("3"),
+                                                                  2U, RoundingMode::Exact);
   REQUIRE_FALSE(third_exact);
   CHECK(third_exact.error().code == DomainErrorCode::PrecisionLoss);
-  CHECK(decimal("1").divide(decimal("3"), 2U, RoundingMode::TowardZero).value() == decimal("0.33"));
-  CHECK(decimal("-1").divide(decimal("3"), 2U, RoundingMode::Floor).value() == decimal("-0.34"));
-  CHECK(decimal("-1").divide(decimal("3"), 2U, RoundingMode::Ceiling).value() == decimal("-0.33"));
+  CHECK(parse_fixed_point_or_throw("1")
+            .divide(parse_fixed_point_or_throw("3"), 2U, RoundingMode::TowardZero)
+            .value() == parse_fixed_point_or_throw("0.33"));
+  CHECK(parse_fixed_point_or_throw("-1")
+            .divide(parse_fixed_point_or_throw("3"), 2U, RoundingMode::Floor)
+            .value() == parse_fixed_point_or_throw("-0.34"));
+  CHECK(parse_fixed_point_or_throw("-1")
+            .divide(parse_fixed_point_or_throw("3"), 2U, RoundingMode::Ceiling)
+            .value() == parse_fixed_point_or_throw("-0.33"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Long division must normalize its scratch quotient before checking the signed coefficient bound.
   const auto maximum_quotient =
-      decimal("9223372036854775807").divide(decimal("1"), 18U, RoundingMode::Exact);
+      parse_fixed_point_or_throw("9223372036854775807")
+          .divide(parse_fixed_point_or_throw("1"), 18U, RoundingMode::Exact);
   REQUIRE(maximum_quotient);
-  CHECK(maximum_quotient.value() == decimal("9223372036854775807"));
+  CHECK(maximum_quotient.value() == parse_fixed_point_or_throw("9223372036854775807"));
 
   // Dividing INT64_MIN by one preserves it, while division by negative one correctly rejects the
   // unrepresentable positive magnitude.
   const auto minimum_quotient =
-      decimal("-9223372036854775808").divide(decimal("1"), 18U, RoundingMode::Exact);
+      parse_fixed_point_or_throw("-9223372036854775808")
+          .divide(parse_fixed_point_or_throw("1"), 18U, RoundingMode::Exact);
   REQUIRE(minimum_quotient);
-  CHECK(minimum_quotient.value() == decimal("-9223372036854775808"));
+  CHECK(minimum_quotient.value() == parse_fixed_point_or_throw("-9223372036854775808"));
 
   const auto minimum_negated =
-      decimal("-9223372036854775808").divide(decimal("-1"), 18U, RoundingMode::Exact);
+      parse_fixed_point_or_throw("-9223372036854775808")
+          .divide(parse_fixed_point_or_throw("-1"), 18U, RoundingMode::Exact);
   REQUIRE_FALSE(minimum_negated);
   CHECK(minimum_negated.error().code == DomainErrorCode::ArithmeticOverflow);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Division by zero remains a distinct domain failure after all range-boundary cases.
-  const auto division_by_zero = decimal("1").divide(decimal("0"), 2U, RoundingMode::Exact);
+  const auto division_by_zero = parse_fixed_point_or_throw("1").divide(
+      parse_fixed_point_or_throw("0"), 2U, RoundingMode::Exact);
   REQUIRE_FALSE(division_by_zero);
   CHECK(division_by_zero.error().code == DomainErrorCode::DivisionByZero);
 
@@ -357,19 +395,27 @@ TEST_CASE("multiple tests and quantization are exact across different scales",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Determine exact divisibility after aligning unlike decimal scales.
-  CHECK(decimal("1.2").is_multiple_of(decimal("0.3")).value());
-  CHECK(decimal("0.5").is_multiple_of(decimal("0.25")).value());
-  CHECK_FALSE(decimal("0.6").is_multiple_of(decimal("0.25")).value());
+  CHECK(
+      parse_fixed_point_or_throw("1.2").is_multiple_of(parse_fixed_point_or_throw("0.3")).value());
+  CHECK(
+      parse_fixed_point_or_throw("0.5").is_multiple_of(parse_fixed_point_or_throw("0.25")).value());
+  CHECK_FALSE(
+      parse_fixed_point_or_throw("0.6").is_multiple_of(parse_fixed_point_or_throw("0.25")).value());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Quantize both signs with explicit floor and ceiling policies.
-  CHECK(decimal("1.24").quantize(decimal("0.05"), RoundingMode::Floor).value() == decimal("1.2"));
-  CHECK(decimal("1.24").quantize(decimal("0.05"), RoundingMode::Ceiling).value() ==
-        decimal("1.25"));
-  CHECK(decimal("-1.24").quantize(decimal("0.05"), RoundingMode::Floor).value() ==
-        decimal("-1.25"));
-  CHECK(decimal("-1.24").quantize(decimal("0.05"), RoundingMode::Ceiling).value() ==
-        decimal("-1.2"));
+  CHECK(parse_fixed_point_or_throw("1.24")
+            .quantize(parse_fixed_point_or_throw("0.05"), RoundingMode::Floor)
+            .value() == parse_fixed_point_or_throw("1.2"));
+  CHECK(parse_fixed_point_or_throw("1.24")
+            .quantize(parse_fixed_point_or_throw("0.05"), RoundingMode::Ceiling)
+            .value() == parse_fixed_point_or_throw("1.25"));
+  CHECK(parse_fixed_point_or_throw("-1.24")
+            .quantize(parse_fixed_point_or_throw("0.05"), RoundingMode::Floor)
+            .value() == parse_fixed_point_or_throw("-1.25"));
+  CHECK(parse_fixed_point_or_throw("-1.24")
+            .quantize(parse_fixed_point_or_throw("0.05"), RoundingMode::Ceiling)
+            .value() == parse_fixed_point_or_throw("-1.2"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -381,9 +427,10 @@ TEST_CASE("unassigned rounding modes fail instead of selecting an implicit polic
   const auto invalid = static_cast<RoundingMode>(255U);
 
   for (const auto& result :
-       {decimal("1.25").rescale(1U, invalid), decimal("1").multiply(decimal("2"), 0U, invalid),
-        decimal("1").divide(decimal("2"), 1U, invalid),
-        decimal("1.25").quantize(decimal("0.5"), invalid)}) {
+       {parse_fixed_point_or_throw("1.25").rescale(1U, invalid),
+        parse_fixed_point_or_throw("1").multiply(parse_fixed_point_or_throw("2"), 0U, invalid),
+        parse_fixed_point_or_throw("1").divide(parse_fixed_point_or_throw("2"), 1U, invalid),
+        parse_fixed_point_or_throw("1.25").quantize(parse_fixed_point_or_throw("0.5"), invalid)}) {
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::InvalidValue);
     CHECK(result.error().context.field == "rounding_mode");
@@ -398,9 +445,11 @@ TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-poi
   // Apply the same wide-scale firewall to rescaling, multiplication, and division.
   constexpr auto invalid_scale = std::uint64_t{256U};
   for (const auto& result :
-       {decimal("1").rescale(invalid_scale, RoundingMode::Exact),
-        decimal("1").multiply(decimal("1"), invalid_scale, RoundingMode::Exact),
-        decimal("1").divide(decimal("1"), invalid_scale, RoundingMode::Exact)}) {
+       {parse_fixed_point_or_throw("1").rescale(invalid_scale, RoundingMode::Exact),
+        parse_fixed_point_or_throw("1").multiply(parse_fixed_point_or_throw("1"), invalid_scale,
+                                                 RoundingMode::Exact),
+        parse_fixed_point_or_throw("1").divide(parse_fixed_point_or_throw("1"), invalid_scale,
+                                               RoundingMode::Exact)}) {
     REQUIRE_FALSE(result);
     CHECK(result.error().code == DomainErrorCode::InvalidScale);
   }
@@ -408,10 +457,10 @@ TEST_CASE("wide target scales are rejected before narrowing", "[model][fixed-poi
   // ++++++++++++++++++++++++++++++++++++++++
   // Rescaling also preserves a signed target until validation, so -1 cannot wrap to an unsigned
   // scale before the domain error is selected.
-  const auto negative_scale = decimal("1").rescale(-1, RoundingMode::Exact);
+  const auto negative_scale = parse_fixed_point_or_throw("1").rescale(-1, RoundingMode::Exact);
   REQUIRE_FALSE(negative_scale);
   CHECK(negative_scale.error() ==
-        DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
+        DomainError::create_at_field(DomainErrorCode::InvalidScale, "fixed_point"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

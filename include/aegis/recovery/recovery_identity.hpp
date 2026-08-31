@@ -125,16 +125,18 @@ public:
   // caller types before the explicit range and nonzero checks run.
   template <model::detail::CheckedIntegerInput Counter>
   [[nodiscard]] static model::Result<ReconciliationEpochId>
-  from_parts(const RuntimeEpochId& runtime_epoch_id, Counter counter) {
+  reconciliation_epoch_id_from_runtime_and_counter(const RuntimeEpochId& runtime_epoch_id,
+                                                   Counter counter) {
     if (!std::in_range<std::uint64_t>(counter) || counter == 0) {
-      return model::Result<ReconciliationEpochId>::failure(model::DomainError::at_field(
-          model::DomainErrorCode::InvalidRecoveryPolicy, "reconciliation_epoch_id"));
+      return model::Result<ReconciliationEpochId>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::InvalidRecoveryPolicy,
+                                              "reconciliation_epoch_id"));
     }
     const auto validated_counter = static_cast<std::uint64_t>(counter);
     Bytes bytes{};
     model::detail::append_identity_counter<RuntimeEpochId::byte_size>(
         bytes, runtime_epoch_id.bytes(), validated_counter);
-    return model::Result<ReconciliationEpochId>::success(
+    return model::Result<ReconciliationEpochId>::create_success(
         ReconciliationEpochId{runtime_epoch_id, validated_counter, bytes});
   }
 
@@ -186,8 +188,8 @@ public:
   // --------------------------------------------------------
   // Start an active runtime's reconciliation epoch stream at one.
   [[nodiscard]] static model::Result<ReconciliationEpochIdProvider>
-  create(RuntimeEpochId runtime_epoch_id) {
-    return create(runtime_epoch_id, 1U);
+  create_reconciliation_epoch_id_provider(RuntimeEpochId runtime_epoch_id) {
+    return create_reconciliation_epoch_id_provider(runtime_epoch_id, 1U);
   }
 
   // --------------------------------------------------------
@@ -196,13 +198,16 @@ public:
   // available for explicit validation while excluding unsupported caller types at compile time.
   template <model::detail::CheckedIntegerInput Counter>
   [[nodiscard]] static model::Result<ReconciliationEpochIdProvider>
-  create(RuntimeEpochId runtime_epoch_id, Counter initial_counter) {
-    const auto validation = ReconciliationEpochId::from_parts(runtime_epoch_id, initial_counter);
+  create_reconciliation_epoch_id_provider(RuntimeEpochId runtime_epoch_id,
+                                          Counter initial_counter) {
+    const auto validation = ReconciliationEpochId::reconciliation_epoch_id_from_runtime_and_counter(
+        runtime_epoch_id, initial_counter);
     if (!validation) {
-      return model::Result<ReconciliationEpochIdProvider>::failure(validation.error());
+      return model::Result<ReconciliationEpochIdProvider>::create_failure(validation.error());
     }
-    return model::Result<ReconciliationEpochIdProvider>::success(ReconciliationEpochIdProvider{
-        runtime_epoch_id, static_cast<std::uint64_t>(initial_counter)});
+    return model::Result<ReconciliationEpochIdProvider>::create_success(
+        ReconciliationEpochIdProvider{runtime_epoch_id,
+                                      static_cast<std::uint64_t>(initial_counter)});
   }
 
   // --------------------------------------------------------
@@ -234,12 +239,14 @@ public:
 
   // --------------------------------------------------------
   // Emit one epoch identity, then advance or enter non-wrapping terminal exhaustion.
-  [[nodiscard]] model::Result<ReconciliationEpochId> next() {
+  [[nodiscard]] model::Result<ReconciliationEpochId> generate_next_reconciliation_epoch_id() {
     if (exhausted_) {
-      return model::Result<ReconciliationEpochId>::failure(model::DomainError::at_field(
-          ReconciliationEpochId::exhaustion_code, std::string{ReconciliationEpochId::field}));
+      return model::Result<ReconciliationEpochId>::create_failure(
+          model::DomainError::create_at_field(ReconciliationEpochId::exhaustion_code,
+                                              std::string{ReconciliationEpochId::field}));
     }
-    auto identity = ReconciliationEpochId::from_parts(runtime_epoch_id_, next_counter_);
+    auto identity = ReconciliationEpochId::reconciliation_epoch_id_from_runtime_and_counter(
+        runtime_epoch_id_, next_counter_);
     if (next_counter_ == std::numeric_limits<std::uint64_t>::max()) {
       exhausted_ = true;
     } else {

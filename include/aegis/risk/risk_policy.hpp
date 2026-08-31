@@ -29,15 +29,19 @@ class RiskPolicyFingerprint final {
 public:
 
   // --------------------------------------------------------
+  // Own one already-derived fixed-width risk-policy digest.
   explicit RiskPolicyFingerprint(model::Sha256Digest bytes) noexcept : bytes_{std::move(bytes)} {}
 
   // --------------------------------------------------------
+  // Borrow the fixed-width binary identity of the canonical policy bytes.
   [[nodiscard]] const model::Sha256Digest& bytes() const noexcept { return bytes_; }
 
   // --------------------------------------------------------
+  // Render the same digest as exactly 64 lowercase hexadecimal characters.
   [[nodiscard]] std::string to_hex() const;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete canonical policy digest.
   friend bool operator==(const RiskPolicyFingerprint&, const RiskPolicyFingerprint&) = default;
 
   // --------------------------------------------------------
@@ -72,51 +76,63 @@ class RiskLimitSet final {
 public:
 
   // --------------------------------------------------------
+  // Borrow the authoritative firm component of this complete semantic key.
   [[nodiscard]] const model::FirmId& firm_id() const noexcept { return firm_id_; }
 
   // --------------------------------------------------------
+  // Return the canonical scope kind selected by this limit row.
   [[nodiscard]] RiskScopeKind scope() const noexcept { return scope_; }
 
   // --------------------------------------------------------
+  // Borrow the validated subject spelling required by the selected scope kind.
   [[nodiscard]] std::string_view scope_subject() const noexcept { return scope_subject_; }
 
   // --------------------------------------------------------
+  // Borrow the normalized instrument component shared by all six limits.
   [[nodiscard]] const model::InstrumentId& instrument_id() const noexcept { return instrument_id_; }
 
   // --------------------------------------------------------
+  // Borrow the validated quote-currency component used by notional limits.
   [[nodiscard]] std::string_view quote_currency() const noexcept { return quote_currency_; }
 
   // --------------------------------------------------------
+  // Return the positive per-order quantity ceiling.
   [[nodiscard]] model::Quantity maximum_single_order_quantity() const noexcept {
     return maximum_single_order_quantity_;
   }
 
   // --------------------------------------------------------
+  // Return the positive once-rounded quote-notional ceiling for one order.
   [[nodiscard]] model::Notional maximum_single_order_quote_notional() const noexcept {
     return maximum_single_order_quote_notional_;
   }
 
   // --------------------------------------------------------
+  // Return the positive narrowed count ceiling for open reservations.
   [[nodiscard]] std::uint32_t maximum_open_order_count() const noexcept {
     return maximum_open_order_count_;
   }
 
   // --------------------------------------------------------
+  // Return the positive aggregate reserved quote-notional ceiling.
   [[nodiscard]] model::Notional maximum_gross_reserved_quote_notional() const noexcept {
     return maximum_gross_reserved_quote_notional_;
   }
 
   // --------------------------------------------------------
+  // Return the positive directional worst-case position-quantity ceiling.
   [[nodiscard]] model::Quantity maximum_worst_case_position_quantity() const noexcept {
     return maximum_worst_case_position_quantity_;
   }
 
   // --------------------------------------------------------
+  // Return the positive directional worst-case position-notional ceiling.
   [[nodiscard]] model::Notional maximum_worst_case_position_quote_notional() const noexcept {
     return maximum_worst_case_position_quote_notional_;
   }
 
   // --------------------------------------------------------
+  // Structural equality compares the complete semantic key and all six validated limits.
   friend bool operator==(const RiskLimitSet&, const RiskLimitSet&) = default;
 
   // --------------------------------------------------------
@@ -129,6 +145,7 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
+  // Publish one fully validated row with its count already narrowed to implementation width.
   explicit RiskLimitSet(RiskLimitSetParams params, std::uint32_t maximum_open_order_count)
       : firm_id_{std::move(params.firm_id)}, scope_{params.scope},
         scope_subject_{std::move(params.scope_subject)},
@@ -185,54 +202,66 @@ public:
   // Fail closed unless provenance, metadata, scope subjects, completeness, and shared-key limits
   // exactly match the sealed startup authority and every enabled submission route.
   [[nodiscard]] static model::Result<RiskPolicySnapshot>
-  create(RiskPolicyParams params, const configuration::StartupConfiguration& authority,
-         const execution::OwnerLocalRouteCatalog& routes);
+  create_risk_policy_snapshot(RiskPolicyParams params,
+                              const configuration::StartupConfiguration& authority,
+                              const execution::OwnerLocalRouteCatalog& routes);
 
   // --------------------------------------------------------
+  // Return the immutable risk-policy revision encoded into this snapshot.
   [[nodiscard]] model::RiskPolicyRevision revision() const noexcept { return revision_; }
 
   // --------------------------------------------------------
+  // Borrow the sealed startup-configuration identity validated during creation.
   [[nodiscard]] const configuration::ConfigurationFingerprint&
   configuration_fingerprint() const noexcept {
     return configuration_fingerprint_;
   }
 
   // --------------------------------------------------------
+  // Return the exact startup-configuration revision bound into policy provenance.
   [[nodiscard]] model::ConfigurationRevision configuration_revision() const noexcept {
     return configuration_revision_;
   }
 
   // --------------------------------------------------------
+  // Return the exact organization revision bound into policy provenance.
   [[nodiscard]] model::OrganizationRevision organization_revision() const noexcept {
     return organization_revision_;
   }
 
   // --------------------------------------------------------
+  // Return the exact route revision against which complete scope coverage was checked.
   [[nodiscard]] model::RouteRevision route_revision() const noexcept { return route_revision_; }
 
   // --------------------------------------------------------
+  // Return the single quote-notional scale used by all policy calculations.
   [[nodiscard]] std::uint8_t notional_scale() const noexcept { return notional_scale_; }
 
   // --------------------------------------------------------
+  // Return the required rounding mode for every quote-notional calculation.
   [[nodiscard]] model::RoundingMode notional_rounding() const noexcept {
     return notional_rounding_;
   }
 
   // --------------------------------------------------------
+  // Borrow metadata revisions in canonical normalized-instrument order.
   [[nodiscard]] const std::vector<configuration::InstrumentMetadataRevisionEntry>&
   metadata_revisions() const noexcept {
     return metadata_revisions_;
   }
 
   // --------------------------------------------------------
+  // Borrow validated limit rows in canonical complete-key order.
   [[nodiscard]] const std::vector<RiskLimitSet>& limit_sets() const noexcept { return limit_sets_; }
 
   // --------------------------------------------------------
+  // Borrow the exact schema-one bytes from which the policy fingerprint was derived.
   [[nodiscard]] const std::vector<std::byte>& canonical_bytes() const noexcept {
     return canonical_bytes_;
   }
 
   // --------------------------------------------------------
+  // Borrow the SHA-256 identity of the complete canonical policy.
   [[nodiscard]] const RiskPolicyFingerprint& fingerprint() const noexcept { return fingerprint_; }
 
   // --------------------------------------------------------
@@ -247,6 +276,7 @@ public:
 private:
 
   // --------------------------------------------------------
+  // Publish only mutually validated provenance, canonical rows, bytes, and fingerprint.
   RiskPolicySnapshot(model::RiskPolicyRevision revision,
                      configuration::ConfigurationFingerprint configuration_fingerprint,
                      model::ConfigurationRevision configuration_revision,

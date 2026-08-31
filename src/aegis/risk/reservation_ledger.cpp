@@ -24,14 +24,16 @@ using model::DomainError;
 using model::DomainErrorCode;
 
 // ########################################################################
-// CountKey qualifies every mutable bucket by authoritative firm, scope kind, and scope subject.
-struct CountKey {
+// RiskScopeCountKey qualifies every mutable bucket by authoritative firm, scope kind, and scope
+// subject.
+struct RiskScopeCountKey {
   model::FirmId firm_id;
   RiskScopeKind scope;
   std::string subject;
 
   // --------------------------------------------------------
-  friend bool operator==(const CountKey&, const CountKey&) = default;
+  // Structural equality compares the complete firm, scope-kind, and subject bucket identity.
+  friend bool operator==(const RiskScopeCountKey&, const RiskScopeCountKey&) = default;
 
   // --------------------------------------------------------
 };
@@ -39,13 +41,16 @@ struct CountKey {
 // ########################################################################
 
 // ########################################################################
-// QuantityKey prevents directional contract quantities from aggregating across instruments.
-struct QuantityKey {
-  CountKey count;
+// RiskScopeInstrumentQuantityKey prevents directional contract quantities from aggregating across
+// instruments.
+struct RiskScopeInstrumentQuantityKey {
+  RiskScopeCountKey count;
   model::InstrumentId instrument_id;
 
   // --------------------------------------------------------
-  friend bool operator==(const QuantityKey&, const QuantityKey&) = default;
+  // Structural equality compares the complete scope and normalized-instrument bucket identity.
+  friend bool operator==(const RiskScopeInstrumentQuantityKey&,
+                         const RiskScopeInstrumentQuantityKey&) = default;
 
   // --------------------------------------------------------
 };
@@ -53,13 +58,15 @@ struct QuantityKey {
 // ########################################################################
 
 // ########################################################################
-// NotionalKey qualifies gross and aggregate worst exposure by quote currency.
-struct NotionalKey {
-  CountKey count;
+// RiskScopeQuoteNotionalKey qualifies gross and aggregate worst exposure by quote currency.
+struct RiskScopeQuoteNotionalKey {
+  RiskScopeCountKey count;
   std::string quote_currency;
 
   // --------------------------------------------------------
-  friend bool operator==(const NotionalKey&, const NotionalKey&) = default;
+  // Structural equality compares the complete scope and quote-currency bucket identity.
+  friend bool operator==(const RiskScopeQuoteNotionalKey&,
+                         const RiskScopeQuoteNotionalKey&) = default;
 
   // --------------------------------------------------------
 };
@@ -67,14 +74,18 @@ struct NotionalKey {
 // ########################################################################
 
 // ########################################################################
-// DirectionalNotionalKey retains each instrument contribution before quote-currency aggregation.
-struct DirectionalNotionalKey {
-  CountKey count;
+// RiskScopeInstrumentDirectionalNotionalKey retains each instrument contribution before
+// quote-currency aggregation.
+struct RiskScopeInstrumentDirectionalNotionalKey {
+  RiskScopeCountKey count;
   model::InstrumentId instrument_id;
   std::string quote_currency;
 
   // --------------------------------------------------------
-  friend bool operator==(const DirectionalNotionalKey&, const DirectionalNotionalKey&) = default;
+  // Structural equality compares the complete scope, instrument, and quote-currency bucket
+  // identity.
+  friend bool operator==(const RiskScopeInstrumentDirectionalNotionalKey&,
+                         const RiskScopeInstrumentDirectionalNotionalKey&) = default;
 
   // --------------------------------------------------------
 };
@@ -82,28 +93,30 @@ struct DirectionalNotionalKey {
 // ########################################################################
 
 // --------------------------------------------------------
-// Compare the common CountKey prefix without constructing a temporary owning identifier.
-[[nodiscard]] auto key_tuple(const CountKey& key) noexcept {
+// Compare the common RiskScopeCountKey prefix without constructing a temporary owning identifier.
+[[nodiscard]] auto sort_tuple_from_reservation_key(const RiskScopeCountKey& key) noexcept {
   return std::tuple{key.firm_id.value(), key.scope, std::string_view{key.subject}};
 }
 
 // --------------------------------------------------------
 // Compare quantity buckets by their complete ADR-0008 key.
-[[nodiscard]] auto key_tuple(const QuantityKey& key) noexcept {
+[[nodiscard]] auto
+sort_tuple_from_reservation_key(const RiskScopeInstrumentQuantityKey& key) noexcept {
   return std::tuple{key.count.firm_id.value(), key.count.scope, std::string_view{key.count.subject},
                     key.instrument_id.value()};
 }
 
 // --------------------------------------------------------
 // Compare quote-currency aggregates by their complete ADR-0008 key.
-[[nodiscard]] auto key_tuple(const NotionalKey& key) noexcept {
+[[nodiscard]] auto sort_tuple_from_reservation_key(const RiskScopeQuoteNotionalKey& key) noexcept {
   return std::tuple{key.count.firm_id.value(), key.count.scope, std::string_view{key.count.subject},
                     std::string_view{key.quote_currency}};
 }
 
 // --------------------------------------------------------
 // Compare per-instrument quote contributions by their complete ADR-0008 key.
-[[nodiscard]] auto key_tuple(const DirectionalNotionalKey& key) noexcept {
+[[nodiscard]] auto
+sort_tuple_from_reservation_key(const RiskScopeInstrumentDirectionalNotionalKey& key) noexcept {
   return std::tuple{key.count.firm_id.value(), key.count.scope, std::string_view{key.count.subject},
                     key.instrument_id.value(), std::string_view{key.quote_currency}};
 }
@@ -111,8 +124,9 @@ struct DirectionalNotionalKey {
 // --------------------------------------------------------
 // Canonicalize and deduplicate one startup key collection before cells are allocated.
 template <typename Key> void canonicalize_keys(std::vector<Key>& keys) {
-  std::sort(keys.begin(), keys.end(),
-            [](const Key& left, const Key& right) { return key_tuple(left) < key_tuple(right); });
+  std::sort(keys.begin(), keys.end(), [](const Key& left, const Key& right) {
+    return sort_tuple_from_reservation_key(left) < sort_tuple_from_reservation_key(right);
+  });
   keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
 }
 
@@ -154,21 +168,23 @@ template <typename Decimal> [[nodiscard]] Decimal greater(Decimal left, Decimal 
 
 // --------------------------------------------------------
 // Build one ordinary rejection with no mutation or reservation identity.
-[[nodiscard]] RiskCheckResult rejected(execution::SubmissionReason reason) noexcept {
-  return RiskCheckResult::rejected(reason);
+[[nodiscard]] RiskCheckResult
+create_rejected_risk_check_result(execution::SubmissionReason reason) noexcept {
+  return RiskCheckResult::create_rejected_risk_check_result(reason);
 }
 
 // --------------------------------------------------------
 // Build one ordinary first-limit rejection with its exact typed evidence.
-[[nodiscard]] RiskCheckResult rejected(execution::SubmissionReason reason,
-                                       execution::RiskLimitEvidence evidence) noexcept {
-  return RiskCheckResult::rejected(reason, std::move(evidence));
+[[nodiscard]] RiskCheckResult
+create_rejected_risk_check_result(execution::SubmissionReason reason,
+                                  execution::RiskLimitEvidence evidence) noexcept {
+  return RiskCheckResult::create_rejected_risk_check_result(reason, std::move(evidence));
 }
 
 // --------------------------------------------------------
 // Map invalid or repeated release to the sole persisted reservation-state invariant error.
-[[nodiscard]] model::Result<void> invalid_reservation() {
-  return model::Result<void>::failure(DomainError::at_field(
+[[nodiscard]] model::Result<void> create_invalid_reservation_result() {
+  return model::Result<void>::create_failure(DomainError::create_at_field(
       DomainErrorCode::InvalidRiskReservationState, "risk_reservation.state"));
 }
 
@@ -177,20 +193,21 @@ template <typename Decimal> [[nodiscard]] Decimal greater(Decimal left, Decimal 
 } // namespace
 
 // ########################################################################
-// Impl owns every mutable cell behind a stable-address move-only ReservationLedger façade.
-struct ReservationLedger::Impl {
+// ReservationLedgerStorage owns every mutable cell behind a stable-address move-only ledger
+// façade.
+struct ReservationLedger::ReservationLedgerStorage {
 
   // ########################################################################
-  // CountCell stores only currently held open-order count for one CountKey.
+  // CountCell stores only currently held open-order count for one RiskScopeCountKey.
   struct CountCell {
-    CountKey key;
+    RiskScopeCountKey key;
     std::uint64_t open_order_count{0U};
   };
 
   // ########################################################################
   // QuantityCell keeps buy and sell reservations separate for exact directional maximum.
   struct QuantityCell {
-    QuantityKey key;
+    RiskScopeInstrumentQuantityKey key;
     model::Quantity reserved_buy;
     model::Quantity reserved_sell;
   };
@@ -198,7 +215,7 @@ struct ReservationLedger::Impl {
   // ########################################################################
   // NotionalCell owns gross sum and the aggregate of per-instrument directional maxima.
   struct NotionalCell {
-    NotionalKey key;
+    RiskScopeQuoteNotionalKey key;
     model::Notional gross_reserved;
     model::Notional aggregate_worst;
   };
@@ -206,7 +223,7 @@ struct ReservationLedger::Impl {
   // ########################################################################
   // DirectionalNotionalCell preserves one instrument's buy, sell, and current maximum contribution.
   struct DirectionalNotionalCell {
-    DirectionalNotionalKey key;
+    RiskScopeInstrumentDirectionalNotionalKey key;
     model::Notional reserved_buy;
     model::Notional reserved_sell;
     model::Notional instrument_worst;
@@ -244,26 +261,28 @@ struct ReservationLedger::Impl {
     std::array<ScopeIndices, 7U> scopes;
   };
 
+  // ########################################################################
+
   // --------------------------------------------------------
   // Prebuild every shared cell key and exactly capacity optional reusable reservation slots.
-  Impl(RiskPolicySnapshot accepted_policy, std::uint32_t accepted_capacity)
+  ReservationLedgerStorage(RiskPolicySnapshot accepted_policy, std::uint32_t accepted_capacity)
       : policy{std::move(accepted_policy)}, capacity{accepted_capacity} {
-    std::vector<CountKey> count_keys;
-    std::vector<QuantityKey> quantity_keys;
-    std::vector<NotionalKey> notional_keys;
-    std::vector<DirectionalNotionalKey> directional_keys;
+    std::vector<RiskScopeCountKey> count_keys;
+    std::vector<RiskScopeInstrumentQuantityKey> quantity_keys;
+    std::vector<RiskScopeQuoteNotionalKey> notional_keys;
+    std::vector<RiskScopeInstrumentDirectionalNotionalKey> directional_keys;
     count_keys.reserve(policy.limit_sets().size());
     quantity_keys.reserve(policy.limit_sets().size());
     notional_keys.reserve(policy.limit_sets().size());
     directional_keys.reserve(policy.limit_sets().size());
 
     for (const auto& row : policy.limit_sets()) {
-      CountKey count{row.firm_id(), row.scope(), std::string{row.scope_subject()}};
+      RiskScopeCountKey count{row.firm_id(), row.scope(), std::string{row.scope_subject()}};
       count_keys.push_back(count);
-      quantity_keys.push_back(QuantityKey{count, row.instrument_id()});
-      notional_keys.push_back(NotionalKey{count, std::string{row.quote_currency()}});
-      directional_keys.push_back(DirectionalNotionalKey{std::move(count), row.instrument_id(),
-                                                        std::string{row.quote_currency()}});
+      quantity_keys.push_back(RiskScopeInstrumentQuantityKey{count, row.instrument_id()});
+      notional_keys.push_back(RiskScopeQuoteNotionalKey{count, std::string{row.quote_currency()}});
+      directional_keys.push_back(RiskScopeInstrumentDirectionalNotionalKey{
+          std::move(count), row.instrument_id(), std::string{row.quote_currency()}});
     }
     canonicalize_keys(count_keys);
     canonicalize_keys(quantity_keys);
@@ -299,9 +318,9 @@ struct ReservationLedger::Impl {
                                                             const KeyTuple& key) noexcept {
     const auto found =
         std::lower_bound(cells.begin(), cells.end(), key, [](const Cell& cell, const auto& target) {
-          return key_tuple(cell.key) < target;
+          return sort_tuple_from_reservation_key(cell.key) < target;
         });
-    if (found == cells.end() || key_tuple(found->key) != key) {
+    if (found == cells.end() || sort_tuple_from_reservation_key(found->key) != key) {
       return std::nullopt;
     }
     return static_cast<std::size_t>(found - cells.begin());
@@ -334,45 +353,49 @@ struct ReservationLedger::Impl {
 
   // --------------------------------------------------------
   // Calculate one scope's post-order cells with no mutation and checked exact arithmetic.
-  [[nodiscard]] model::Result<ScopeCandidate> candidate(const ScopeIndices& indices,
-                                                        execution::OrderSide side,
-                                                        const OrderExposure& exposure) const {
+  [[nodiscard]] model::Result<ScopeCandidate>
+  calculate_scope_candidate(const ScopeIndices& indices, execution::OrderSide side,
+                            const OrderExposure& exposure) const {
     const auto& count = count_cells[indices.count];
     const auto& quantity = quantity_cells[indices.quantity];
     const auto& notional = notional_cells[indices.notional];
     const auto& directional = directional_notional_cells[indices.directional_notional];
     if (count.open_order_count == std::numeric_limits<std::uint64_t>::max()) {
-      return model::Result<ScopeCandidate>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "risk.open_order_count"));
+      return model::Result<ScopeCandidate>::create_failure(DomainError::create_at_field(
+          DomainErrorCode::ArithmeticOverflow, "risk.open_order_count"));
     }
     auto gross = notional.gross_reserved.checked_add(exposure.quote_notional);
     auto buy_quantity = side == execution::OrderSide::Buy
                             ? quantity.reserved_buy.checked_add(exposure.quantity)
-                            : model::Result<model::Quantity>::success(quantity.reserved_buy);
-    auto sell_quantity = side == execution::OrderSide::Sell
-                             ? quantity.reserved_sell.checked_add(exposure.quantity)
-                             : model::Result<model::Quantity>::success(quantity.reserved_sell);
-    auto buy_notional = side == execution::OrderSide::Buy
-                            ? directional.reserved_buy.checked_add(exposure.quote_notional)
-                            : model::Result<model::Notional>::success(directional.reserved_buy);
-    auto sell_notional = side == execution::OrderSide::Sell
-                             ? directional.reserved_sell.checked_add(exposure.quote_notional)
-                             : model::Result<model::Notional>::success(directional.reserved_sell);
+                            : model::Result<model::Quantity>::create_success(quantity.reserved_buy);
+    auto sell_quantity =
+        side == execution::OrderSide::Sell
+            ? quantity.reserved_sell.checked_add(exposure.quantity)
+            : model::Result<model::Quantity>::create_success(quantity.reserved_sell);
+    auto buy_notional =
+        side == execution::OrderSide::Buy
+            ? directional.reserved_buy.checked_add(exposure.quote_notional)
+            : model::Result<model::Notional>::create_success(directional.reserved_buy);
+    auto sell_notional =
+        side == execution::OrderSide::Sell
+            ? directional.reserved_sell.checked_add(exposure.quote_notional)
+            : model::Result<model::Notional>::create_success(directional.reserved_sell);
     if (!gross || !buy_quantity || !sell_quantity || !buy_notional || !sell_notional) {
-      return model::Result<ScopeCandidate>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "risk.exposure_accumulator"));
+      return model::Result<ScopeCandidate>::create_failure(DomainError::create_at_field(
+          DomainErrorCode::ArithmeticOverflow, "risk.exposure_accumulator"));
     }
     const auto instrument_worst = greater(buy_notional.value(), sell_notional.value());
     auto aggregate_without_old =
         notional.aggregate_worst.checked_subtract(directional.instrument_worst);
     if (!aggregate_without_old) {
-      return model::Result<ScopeCandidate>::failure(std::move(aggregate_without_old).error());
+      return model::Result<ScopeCandidate>::create_failure(
+          std::move(aggregate_without_old).error());
     }
     auto aggregate = aggregate_without_old.value().checked_add(instrument_worst);
     if (!aggregate) {
-      return model::Result<ScopeCandidate>::failure(std::move(aggregate).error());
+      return model::Result<ScopeCandidate>::create_failure(std::move(aggregate).error());
     }
-    return model::Result<ScopeCandidate>::success(ScopeCandidate{
+    return model::Result<ScopeCandidate>::create_success(ScopeCandidate{
         indices, count.open_order_count + 1U, gross.value(), buy_quantity.value(),
         sell_quantity.value(), greater(buy_quantity.value(), sell_quantity.value()),
         buy_notional.value(), sell_notional.value(), instrument_worst, aggregate.value()});
@@ -392,19 +415,20 @@ struct ReservationLedger::Impl {
 
 // --------------------------------------------------------
 // Capture the stable-address private implementation only after its type is complete.
-ReservationLedger::ReservationLedger(std::unique_ptr<Impl> implementation) noexcept
+ReservationLedger::ReservationLedger(
+    std::unique_ptr<ReservationLedgerStorage> implementation) noexcept
     : implementation_{std::move(implementation)} {}
 
 // --------------------------------------------------------
 // Reject zero capacity before allocating the owner-local ledger implementation.
-model::Result<ReservationLedger> ReservationLedger::create(RiskPolicySnapshot policy,
-                                                           std::uint32_t capacity) {
+model::Result<ReservationLedger>
+ReservationLedger::create_reservation_ledger(RiskPolicySnapshot policy, std::uint32_t capacity) {
   if (capacity == 0U) {
-    return model::Result<ReservationLedger>::failure(DomainError::at_field(
+    return model::Result<ReservationLedger>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidSubmissionPolicy, "submission_policy.reservation_capacity"));
   }
-  return model::Result<ReservationLedger>::success(
-      ReservationLedger{std::make_unique<Impl>(std::move(policy), capacity)});
+  return model::Result<ReservationLedger>::create_success(
+      ReservationLedger{std::make_unique<ReservationLedgerStorage>(std::move(policy), capacity)});
 }
 
 // --------------------------------------------------------
@@ -431,22 +455,23 @@ ReservationLedger::check_and_reserve(model::SubmissionAttemptId attempt_id,
   auto calculated = calculate_order_exposure(economics, route.metadata(),
                                              implementation_->policy.notional_scale());
   if (!calculated) {
-    return rejected(execution::SubmissionReason::RiskArithmeticFailure);
+    return create_rejected_risk_check_result(execution::SubmissionReason::RiskArithmeticFailure);
   }
   const auto exposure = calculated.value();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 2: resolve and calculate all seven-by-five cells in fixed stack scratch without mutation.
-  std::array<std::optional<Impl::ScopeCandidate>, 7U> candidates;
+  std::array<std::optional<ReservationLedgerStorage::ScopeCandidate>, 7U> candidates;
   for (std::size_t index = 0U; index < candidates.size(); ++index) {
     const auto scope = static_cast<RiskScopeKind>(index + 1U);
     const auto indices = implementation_->resolve_scope(route, scope);
     if (!indices) {
-      return rejected(execution::SubmissionReason::SubmissionRuntimeFaulted);
+      return create_rejected_risk_check_result(
+          execution::SubmissionReason::SubmissionRuntimeFaulted);
     }
-    auto candidate = implementation_->candidate(*indices, economics.side, exposure);
+    auto candidate = implementation_->calculate_scope_candidate(*indices, economics.side, exposure);
     if (!candidate) {
-      return rejected(execution::SubmissionReason::RiskArithmeticFailure);
+      return create_rejected_risk_check_result(execution::SubmissionReason::RiskArithmeticFailure);
     }
     candidates[index].emplace(std::move(candidate).value());
   }
@@ -458,56 +483,61 @@ ReservationLedger::check_and_reserve(model::SubmissionAttemptId attempt_id,
     const auto& limits = *candidate.indices.limits;
     const auto scope = limits.scope();
     if (exposure.quantity > limits.maximum_single_order_quantity()) {
-      return rejected(execution::SubmissionReason::SingleOrderQuantityExceeded,
-                      execution::RiskLimitEvidence::quantity(
-                          scope, exposure.quantity, limits.maximum_single_order_quantity()));
+      return create_rejected_risk_check_result(
+          execution::SubmissionReason::SingleOrderQuantityExceeded,
+          execution::RiskLimitEvidence::create_quantity_evidence(
+              scope, exposure.quantity, limits.maximum_single_order_quantity()));
     }
     if (exposure.quote_notional > limits.maximum_single_order_quote_notional()) {
-      return rejected(
+      return create_rejected_risk_check_result(
           execution::SubmissionReason::SingleOrderNotionalExceeded,
-          execution::RiskLimitEvidence::quote_notional(
+          execution::RiskLimitEvidence::create_quote_notional_evidence(
               scope, exposure.quote_notional, limits.maximum_single_order_quote_notional()));
     }
     if (candidate.open_order_count > limits.maximum_open_order_count()) {
-      return rejected(execution::SubmissionReason::OpenOrderCountExceeded,
-                      execution::RiskLimitEvidence::order_count(scope, candidate.open_order_count,
-                                                                limits.maximum_open_order_count()));
+      return create_rejected_risk_check_result(
+          execution::SubmissionReason::OpenOrderCountExceeded,
+          execution::RiskLimitEvidence::create_order_count_evidence(
+              scope, candidate.open_order_count, limits.maximum_open_order_count()));
     }
     if (candidate.gross_reserved > limits.maximum_gross_reserved_quote_notional()) {
-      return rejected(
+      return create_rejected_risk_check_result(
           execution::SubmissionReason::GrossReservedNotionalExceeded,
-          execution::RiskLimitEvidence::quote_notional(
+          execution::RiskLimitEvidence::create_quote_notional_evidence(
               scope, candidate.gross_reserved, limits.maximum_gross_reserved_quote_notional()));
     }
     if (candidate.worst_quantity > limits.maximum_worst_case_position_quantity()) {
-      return rejected(
+      return create_rejected_risk_check_result(
           execution::SubmissionReason::WorstCasePositionQuantityExceeded,
-          execution::RiskLimitEvidence::quantity(scope, candidate.worst_quantity,
-                                                 limits.maximum_worst_case_position_quantity()));
+          execution::RiskLimitEvidence::create_quantity_evidence(
+              scope, candidate.worst_quantity, limits.maximum_worst_case_position_quantity()));
     }
     if (candidate.aggregate_worst_notional > limits.maximum_worst_case_position_quote_notional()) {
-      return rejected(execution::SubmissionReason::WorstCasePositionNotionalExceeded,
-                      execution::RiskLimitEvidence::quote_notional(
-                          scope, candidate.aggregate_worst_notional,
-                          limits.maximum_worst_case_position_quote_notional()));
+      return create_rejected_risk_check_result(
+          execution::SubmissionReason::WorstCasePositionNotionalExceeded,
+          execution::RiskLimitEvidence::create_quote_notional_evidence(
+              scope, candidate.aggregate_worst_notional,
+              limits.maximum_worst_case_position_quote_notional()));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 4: capacity is checked only after all fixed limits and still mutates no candidate cell.
   if (implementation_->held_count >= implementation_->capacity) {
-    return rejected(execution::SubmissionReason::ReservationCapacityExceeded);
+    return create_rejected_risk_check_result(
+        execution::SubmissionReason::ReservationCapacityExceeded);
   }
   const auto reservation_id_result = model::ReservationId::from_value(attempt_id.value());
   if (!reservation_id_result) {
-    return rejected(execution::SubmissionReason::SubmissionRuntimeFaulted);
+    return create_rejected_risk_check_result(execution::SubmissionReason::SubmissionRuntimeFaulted);
   }
   const auto reservation_id = reservation_id_result.value();
   auto available = implementation_->reservation_slots.end();
   for (auto slot = implementation_->reservation_slots.begin();
        slot != implementation_->reservation_slots.end(); ++slot) {
     if (slot->has_value() && slot->value().evidence.reservation_id == reservation_id) {
-      return rejected(execution::SubmissionReason::SubmissionRuntimeFaulted);
+      return create_rejected_risk_check_result(
+          execution::SubmissionReason::SubmissionRuntimeFaulted);
     }
     if (available == implementation_->reservation_slots.end() &&
         (!slot->has_value() || (slot->value().evidence.state == ReservationState::Released &&
@@ -516,15 +546,15 @@ ReservationLedger::check_and_reserve(model::SubmissionAttemptId attempt_id,
     }
   }
   if (available == implementation_->reservation_slots.end()) {
-    return rejected(execution::SubmissionReason::SubmissionRuntimeFaulted);
+    return create_rejected_risk_check_result(execution::SubmissionReason::SubmissionRuntimeFaulted);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 5: commit every scratch value, then publish the matching reservation as one owner action.
-  std::array<Impl::ScopeIndices, 7U> scope_indices{candidates[0U]->indices, candidates[1U]->indices,
-                                                   candidates[2U]->indices, candidates[3U]->indices,
-                                                   candidates[4U]->indices, candidates[5U]->indices,
-                                                   candidates[6U]->indices};
+  std::array<ReservationLedgerStorage::ScopeIndices, 7U> scope_indices{
+      candidates[0U]->indices, candidates[1U]->indices, candidates[2U]->indices,
+      candidates[3U]->indices, candidates[4U]->indices, candidates[5U]->indices,
+      candidates[6U]->indices};
   for (const auto& optional_candidate : candidates) {
     const auto& candidate = optional_candidate.value();
     implementation_->count_cells[candidate.indices.count].open_order_count =
@@ -541,7 +571,7 @@ ReservationLedger::check_and_reserve(model::SubmissionAttemptId attempt_id,
     directional.reserved_sell = candidate.reserved_sell_notional;
     directional.instrument_worst = candidate.instrument_worst_notional;
   }
-  available->emplace(Impl::ReservationSlot{
+  available->emplace(ReservationLedgerStorage::ReservationSlot{
       ReservationEvidence{reservation_id, ReservationState::Held, economics.side, exposure},
       scope_indices});
   ++implementation_->held_count;
@@ -552,7 +582,7 @@ ReservationLedger::check_and_reserve(model::SubmissionAttemptId attempt_id,
 
 // --------------------------------------------------------
 // Validate identity/state, compute all inverse deltas in scratch, then transition exactly once.
-model::Result<void> ReservationLedger::release(model::ReservationId reservation_id) {
+model::Result<void> ReservationLedger::release_reservation(model::ReservationId reservation_id) {
   const auto found =
       std::find_if(implementation_->reservation_slots.begin(),
                    implementation_->reservation_slots.end(), [reservation_id](const auto& slot) {
@@ -560,10 +590,10 @@ model::Result<void> ReservationLedger::release(model::ReservationId reservation_
                    });
   if (found == implementation_->reservation_slots.end() ||
       found->value().evidence.state != ReservationState::Held) {
-    return invalid_reservation();
+    return create_invalid_reservation_result();
   }
   const auto& record = found->value();
-  std::array<std::optional<Impl::ScopeCandidate>, 7U> released;
+  std::array<std::optional<ReservationLedgerStorage::ScopeCandidate>, 7U> released;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 1: calculate all exact inverse deltas without changing a cell.
@@ -575,42 +605,42 @@ model::Result<void> ReservationLedger::release(model::ReservationId reservation_
     const auto& directional =
         implementation_->directional_notional_cells[indices.directional_notional];
     if (count.open_order_count == 0U) {
-      return invalid_reservation();
+      return create_invalid_reservation_result();
     }
     auto gross = notional.gross_reserved.checked_subtract(record.evidence.exposure.quote_notional);
     auto buy_quantity =
         record.evidence.side == execution::OrderSide::Buy
             ? quantity.reserved_buy.checked_subtract(record.evidence.exposure.quantity)
-            : model::Result<model::Quantity>::success(quantity.reserved_buy);
+            : model::Result<model::Quantity>::create_success(quantity.reserved_buy);
     auto sell_quantity =
         record.evidence.side == execution::OrderSide::Sell
             ? quantity.reserved_sell.checked_subtract(record.evidence.exposure.quantity)
-            : model::Result<model::Quantity>::success(quantity.reserved_sell);
+            : model::Result<model::Quantity>::create_success(quantity.reserved_sell);
     auto buy_notional =
         record.evidence.side == execution::OrderSide::Buy
             ? directional.reserved_buy.checked_subtract(record.evidence.exposure.quote_notional)
-            : model::Result<model::Notional>::success(directional.reserved_buy);
+            : model::Result<model::Notional>::create_success(directional.reserved_buy);
     auto sell_notional =
         record.evidence.side == execution::OrderSide::Sell
             ? directional.reserved_sell.checked_subtract(record.evidence.exposure.quote_notional)
-            : model::Result<model::Notional>::success(directional.reserved_sell);
+            : model::Result<model::Notional>::create_success(directional.reserved_sell);
     if (!gross || !buy_quantity || !sell_quantity || !buy_notional || !sell_notional ||
         gross.value().coefficient() < 0 || buy_quantity.value().coefficient() < 0 ||
         sell_quantity.value().coefficient() < 0 || buy_notional.value().coefficient() < 0 ||
         sell_notional.value().coefficient() < 0) {
-      return invalid_reservation();
+      return create_invalid_reservation_result();
     }
     const auto instrument_worst = greater(buy_notional.value(), sell_notional.value());
     auto aggregate_without_old =
         notional.aggregate_worst.checked_subtract(directional.instrument_worst);
     if (!aggregate_without_old) {
-      return invalid_reservation();
+      return create_invalid_reservation_result();
     }
     auto aggregate = aggregate_without_old.value().checked_add(instrument_worst);
     if (!aggregate || aggregate.value().coefficient() < 0) {
-      return invalid_reservation();
+      return create_invalid_reservation_result();
     }
-    released[index].emplace(Impl::ScopeCandidate{
+    released[index].emplace(ReservationLedgerStorage::ScopeCandidate{
         indices, count.open_order_count - 1U, gross.value(), buy_quantity.value(),
         sell_quantity.value(), greater(buy_quantity.value(), sell_quantity.value()),
         buy_notional.value(), sell_notional.value(), instrument_worst, aggregate.value()});
@@ -636,7 +666,7 @@ model::Result<void> ReservationLedger::release(model::ReservationId reservation_
   }
   found->value().evidence.state = ReservationState::Released;
   --implementation_->held_count;
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -714,15 +744,15 @@ std::optional<RiskScopeExposure> ReservationLedger::scope_exposure(
     const model::InstrumentId& instrument_id, std::string_view quote_currency) const noexcept {
   const auto firm = firm_id.value();
   const auto instrument = instrument_id.value();
-  const auto count =
-      Impl::find_cell(implementation_->count_cells, std::tuple{firm, scope, subject});
-  const auto quantity = Impl::find_cell(implementation_->quantity_cells,
-                                        std::tuple{firm, scope, subject, instrument});
-  const auto notional = Impl::find_cell(implementation_->notional_cells,
-                                        std::tuple{firm, scope, subject, quote_currency});
-  const auto directional =
-      Impl::find_cell(implementation_->directional_notional_cells,
-                      std::tuple{firm, scope, subject, instrument, quote_currency});
+  const auto count = ReservationLedgerStorage::find_cell(implementation_->count_cells,
+                                                         std::tuple{firm, scope, subject});
+  const auto quantity = ReservationLedgerStorage::find_cell(
+      implementation_->quantity_cells, std::tuple{firm, scope, subject, instrument});
+  const auto notional = ReservationLedgerStorage::find_cell(
+      implementation_->notional_cells, std::tuple{firm, scope, subject, quote_currency});
+  const auto directional = ReservationLedgerStorage::find_cell(
+      implementation_->directional_notional_cells,
+      std::tuple{firm, scope, subject, instrument, quote_currency});
   if (!count || !quantity || !notional || !directional) {
     return std::nullopt;
   }

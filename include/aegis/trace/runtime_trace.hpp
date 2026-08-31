@@ -91,20 +91,25 @@ public:
   [[nodiscard]] static RuntimeTraceSource from_runtime_source(const runtime::RuntimeSource& source);
 
   // --------------------------------------------------------
+  // Borrow the configured source identity represented by this trace value.
   [[nodiscard]] const model::MarketSourceId& source_id() const noexcept { return source_id_; }
 
   // --------------------------------------------------------
+  // Return the policy-assigned one-based source position encoded by runtime records.
   [[nodiscard]] model::MarketSourceOrdinal source_ordinal() const noexcept {
     return source_ordinal_;
   }
 
   // --------------------------------------------------------
+  // Borrow the venue component of the complete configured source identity.
   [[nodiscard]] const model::VenueId& venue_id() const noexcept { return venue_id_; }
 
   // --------------------------------------------------------
+  // Borrow the normalized instrument component of the configured source identity.
   [[nodiscard]] const model::InstrumentId& instrument_id() const noexcept { return instrument_id_; }
 
   // --------------------------------------------------------
+  // Borrow the venue-native instrument component of the configured source identity.
   [[nodiscard]] const model::VenueInstrumentId& venue_instrument_id() const noexcept {
     return venue_instrument_id_;
   }
@@ -117,6 +122,7 @@ public:
 private:
 
   // --------------------------------------------------------
+  // Retain one complete identity copied from a validated runtime-policy source.
   RuntimeTraceSource(model::MarketSourceId source_id, model::MarketSourceOrdinal source_ordinal,
                      model::VenueId venue_id, model::InstrumentId instrument_id,
                      model::VenueInstrumentId venue_instrument_id)
@@ -146,12 +152,14 @@ public:
   from_runtime_policy(const runtime::RuntimePolicy& policy);
 
   // --------------------------------------------------------
+  // Borrow the sealed startup-configuration identity attached to every runtime record.
   [[nodiscard]] const configuration::ConfigurationFingerprint&
   configuration_fingerprint() const noexcept {
     return configuration_fingerprint_;
   }
 
   // --------------------------------------------------------
+  // Borrow the immutable runtime-policy identity attached to every runtime record.
   [[nodiscard]] const runtime::RuntimePolicyFingerprint&
   runtime_policy_fingerprint() const noexcept {
     return runtime_policy_fingerprint_;
@@ -165,6 +173,7 @@ public:
 private:
 
   // --------------------------------------------------------
+  // Retain the two identities derived together from one validated runtime policy.
   RuntimeTraceProvenance(configuration::ConfigurationFingerprint configuration_fingerprint,
                          runtime::RuntimePolicyFingerprint runtime_policy_fingerprint)
       : configuration_fingerprint_{std::move(configuration_fingerprint)},
@@ -317,16 +326,17 @@ public:
 
   // --------------------------------------------------------
   // Prove that a complete turn's critical record count fits before any external state commit.
-  [[nodiscard]] model::Result<void> preflight(std::uint32_t additional_records) const;
+  [[nodiscard]] model::Result<void> preflight_trace_append(std::uint32_t additional_records) const;
 
   // --------------------------------------------------------
   // Validate one fully constructed record shape without assigning an ordinal or changing capacity.
-  [[nodiscard]] model::Result<void> validate(RuntimeTraceEventKind kind,
-                                             const RuntimeTraceFields& fields) const;
+  [[nodiscard]] model::Result<void> validate_trace_record(RuntimeTraceEventKind kind,
+                                                          const RuntimeTraceFields& fields) const;
 
   // --------------------------------------------------------
   // Validate and append one fixed-field observation without changing the prefix on failure.
-  [[nodiscard]] model::Result<void> append(RuntimeTraceEventKind kind, RuntimeTraceFields fields);
+  [[nodiscard]] model::Result<void> append_trace_record(RuntimeTraceEventKind kind,
+                                                        RuntimeTraceFields fields);
 
   // --------------------------------------------------------
   // Borrow the complete accepted prefix in canonical append order.
@@ -334,7 +344,7 @@ public:
 
   // --------------------------------------------------------
   // Return the number of accepted records.
-  [[nodiscard]] std::uint32_t size() const noexcept {
+  [[nodiscard]] std::uint32_t record_count() const noexcept {
     return static_cast<std::uint32_t>(records_.size());
   }
 
@@ -348,15 +358,17 @@ public:
 
   // --------------------------------------------------------
   // Return the number of records that a successful preflight could still reserve.
-  [[nodiscard]] std::uint32_t remaining_capacity() const noexcept { return capacity_ - size(); }
+  [[nodiscard]] std::uint32_t remaining_capacity() const noexcept {
+    return capacity_ - record_count();
+  }
 
   // --------------------------------------------------------
   // Project the accepted prefix into the independent AEGISRTS schema-1 byte stream.
-  [[nodiscard]] model::Result<std::vector<std::byte>> canonical_bytes() const;
+  [[nodiscard]] model::Result<std::vector<std::byte>> encode_canonical_bytes() const;
 
   // --------------------------------------------------------
   // Hash exactly the canonical AEGISRTS byte stream with the M1 SHA-256 implementation.
-  [[nodiscard]] model::Result<model::Sha256Digest> digest() const;
+  [[nodiscard]] model::Result<model::Sha256Digest> derive_digest() const;
 
   // --------------------------------------------------------
 private:

@@ -1,5 +1,5 @@
 // Purpose: implement dedicated serialized-owner lifecycle, blocking wakeup, and terminal error
-// publication around the executor's shared run_one processor.
+// publication around the executor's shared execute-next-turn processor.
 
 #include "aegis/runtime/dedicated_executor_driver.hpp"
 
@@ -31,14 +31,14 @@ DedicatedExecutorDriver::~DedicatedExecutorDriver() {
 
 // --------------------------------------------------------
 // Startup success records only the initial binding outcome and remains stable after later shutdown.
-bool DedicatedExecutorDriver::started_successfully() const noexcept {
+bool DedicatedExecutorDriver::has_started_successfully() const noexcept {
   std::lock_guard lock{status_mutex_};
   return startup_succeeded_;
 }
 
 // --------------------------------------------------------
 // Running state is synchronized with terminal publication and owner release.
-bool DedicatedExecutorDriver::running() const noexcept {
+bool DedicatedExecutorDriver::is_running() const noexcept {
   std::lock_guard lock{status_mutex_};
   return running_;
 }
@@ -100,7 +100,7 @@ void DedicatedExecutorDriver::worker_loop() noexcept {
   // Process exactly one shared turn per wake-loop iteration; close drains the merged command/fence
   // prefix before the wait predicate terminates, while an open stop exits between turns.
   while (executor_.wait_for_runnable_work(stop_requested_)) {
-    const auto turn = executor_.run_one_for_driver(stop_requested_);
+    const auto turn = executor_.execute_next_turn_for_driver(stop_requested_);
     if (!turn) {
       std::lock_guard lock{status_mutex_};
       terminal_error_.emplace(turn.error());
@@ -116,7 +116,7 @@ void DedicatedExecutorDriver::worker_loop() noexcept {
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // A terminal fault may wake wait_for_runnable_work without entering run_one. Release and copy it
+  // A terminal fault may wake wait_for_runnable_work without executing a turn. Release and copy it
   // under one executor lock so a producer cannot publish a fault in an unobservable handoff gap.
   const auto release = executor_.release_from_current_thread_for_driver();
   {

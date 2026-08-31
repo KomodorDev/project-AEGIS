@@ -51,20 +51,20 @@ namespace {
 
 // --------------------------------------------------------
 // Reject the empty locator while retaining either or both exact identity values.
-model::Result<PrivateOrderLocator>
-PrivateOrderLocator::create(std::optional<model::OrderId> local_order_id,
-                            std::optional<ExchangeOrderId> exchange_order_id) {
+model::Result<PrivateOrderLocator> PrivateOrderLocator::create_private_order_locator(
+    std::optional<model::OrderId> local_order_id,
+    std::optional<ExchangeOrderId> exchange_order_id) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Absence of both identities cannot correlate or retain an authoritative unknown locator.
   if (!local_order_id.has_value() && !exchange_order_id.has_value()) {
-    return model::Result<PrivateOrderLocator>::failure(model::DomainError::at_field(
+    return model::Result<PrivateOrderLocator>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::InvalidPrivateEvent, "private_event.order_locator"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the exact nonempty presence shape without interpreting opaque exchange bytes.
-  return model::Result<PrivateOrderLocator>::success(
+  return model::Result<PrivateOrderLocator>::create_success(
       PrivateOrderLocator{std::move(local_order_id), std::move(exchange_order_id)});
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -73,20 +73,21 @@ PrivateOrderLocator::create(std::optional<model::OrderId> local_order_id,
 // --------------------------------------------------------
 // Copy a bounded opaque byte sequence, accepting an exact empty reason.
 model::Result<PrivateRejectionDetail>
-PrivateRejectionDetail::create(std::span<const std::byte> bytes) {
+PrivateRejectionDetail::create_private_rejection_detail(std::span<const std::byte> bytes) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject over-bound evidence before copying any caller bytes.
   if (bytes.size() > maximum_size) {
-    return model::Result<PrivateRejectionDetail>::failure(model::DomainError::at_field(
-        model::DomainErrorCode::InvalidPrivateEvent, "private_event.rejection_detail"));
+    return model::Result<PrivateRejectionDetail>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                            "private_event.rejection_detail"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy the active prefix into zero-initialized inline storage for deterministic spare bytes.
   std::array<std::byte, maximum_size> storage{};
   std::copy(bytes.begin(), bytes.end(), storage.begin());
-  return model::Result<PrivateRejectionDetail>::success(
+  return model::Result<PrivateRejectionDetail>::create_success(
       PrivateRejectionDetail{storage, static_cast<std::uint16_t>(bytes.size())});
 
   // ++++++++++++++++++++++++++++++++++++++++

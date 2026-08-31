@@ -190,7 +190,7 @@ struct TurnReport {
 // ########################################################################
 // Bounded drive reports distinguish turns completed by this call from lifetime completion and
 // expose both forms of remaining runnable work.
-struct DriveReport {
+struct PendingTurnExecutionReport {
   std::size_t turns_executed;
   std::size_t pending_commands;
   std::size_t pending_fences;
@@ -200,7 +200,8 @@ struct DriveReport {
 
   // --------------------------------------------------------
   // Structural equality supports exact bounded-stop assertions.
-  friend bool operator==(const DriveReport&, const DriveReport&) = default;
+  friend bool operator==(const PendingTurnExecutionReport&,
+                         const PendingTurnExecutionReport&) = default;
 
   // --------------------------------------------------------
 };
@@ -210,7 +211,7 @@ struct DriveReport {
 // ########################################################################
 // A synchronized snapshot exposes bounded ingress and terminal lifecycle state without publishing
 // queue slots, fence storage, or owner-local commands.
-struct QueueSnapshot {
+struct ExecutorQueueSnapshot {
   std::size_t pending_commands;
   std::size_t pending_fences;
   std::size_t in_flight_fences;
@@ -225,7 +226,7 @@ struct QueueSnapshot {
 
   // --------------------------------------------------------
   // Structural equality keeps diagnostic observations deterministic.
-  friend bool operator==(const QueueSnapshot&, const QueueSnapshot&) = default;
+  friend bool operator==(const ExecutorQueueSnapshot&, const ExecutorQueueSnapshot&) = default;
 
   // --------------------------------------------------------
 };
@@ -262,10 +263,11 @@ struct ExecutorCounterSeed {
 // ########################################################################
 
 // ########################################################################
-// WorkItem owns one immutable, trivially copyable command in fixed inline storage. Pointer-like
-// members may only be stable runtime handles whose lifetime encloses the executor; temporary caller
-// payload addresses are forbidden. A handler failure certifies no data-plane mutation occurred.
-class WorkItem final {
+// InlineCommandWorkItem owns one immutable, trivially copyable command in fixed inline storage.
+// Pointer-like members may only be stable runtime handles whose lifetime encloses the executor;
+// temporary caller payload addresses are forbidden. A handler failure certifies no data-plane
+// mutation occurred.
+class InlineCommandWorkItem final {
 public:
   static constexpr std::size_t inline_capacity_bytes = 192U;
 
@@ -277,11 +279,12 @@ public:
         std::is_trivially_copyable_v<Command> && sizeof(Command) <= inline_capacity_bytes &&
         std::same_as<decltype(Handler),
                      model::Result<void> (*)(const Command&, const AcceptedTurnContext&) noexcept>)
-  [[nodiscard]] static WorkItem make(Command command) noexcept {
+  [[nodiscard]] static InlineCommandWorkItem
+  create_inline_command_work_item(Command command) noexcept {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Copy the complete immutable command into zero-initialized bounded storage.
-    WorkItem work;
+    InlineCommandWorkItem work;
     std::memcpy(work.storage_.data(), &command, sizeof(Command));
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -294,33 +297,33 @@ public:
 
   // --------------------------------------------------------
   // Value semantics move or copy only bounded inline bytes and one function pointer.
-  WorkItem(const WorkItem&) noexcept = default;
-  WorkItem& operator=(const WorkItem&) noexcept = default;
-  WorkItem(WorkItem&&) noexcept = default;
-  WorkItem& operator=(WorkItem&&) noexcept = default;
-  ~WorkItem() = default;
+  InlineCommandWorkItem(const InlineCommandWorkItem&) noexcept = default;
+  InlineCommandWorkItem& operator=(const InlineCommandWorkItem&) noexcept = default;
+  InlineCommandWorkItem(InlineCommandWorkItem&&) noexcept = default;
+  InlineCommandWorkItem& operator=(InlineCommandWorkItem&&) noexcept = default;
+  ~InlineCommandWorkItem() = default;
 
   // --------------------------------------------------------
 private:
 
   // ########################################################################
   // Shared aliases keep every queue slot's storage and invocation shape identical.
-  using Storage = std::array<std::byte, inline_capacity_bytes>;
-  using InvokeFunction = model::Result<void> (*)(const Storage&,
-                                                 const AcceptedTurnContext&) noexcept;
+  using InlineCommandStorage = std::array<std::byte, inline_capacity_bytes>;
+  using WorkInvocationFunction = model::Result<void> (*)(const InlineCommandStorage&,
+                                                         const AcceptedTurnContext&) noexcept;
 
   // ########################################################################
 
   // --------------------------------------------------------
   // Only the typed factory may create a publishable work item.
-  WorkItem() noexcept = default;
+  InlineCommandWorkItem() noexcept = default;
 
   // --------------------------------------------------------
   // Reconstitute a local command value and forward stack-scoped turn authority without retaining
   // either reference.
   template <auto Handler, typename Command>
   [[nodiscard]] static model::Result<void>
-  invoke_typed(const Storage& storage, const AcceptedTurnContext& context) noexcept {
+  invoke_typed(const InlineCommandStorage& storage, const AcceptedTurnContext& context) noexcept {
     std::array<std::byte, sizeof(Command)> command_bytes{};
     std::memcpy(command_bytes.data(), storage.data(), sizeof(Command));
     const auto command = std::bit_cast<Command>(command_bytes);
@@ -329,13 +332,14 @@ private:
 
   // --------------------------------------------------------
   // Invocation is restricted to the executor after it establishes the owner-turn boundary.
-  [[nodiscard]] model::Result<void> execute(const AcceptedTurnContext& context) const noexcept {
+  [[nodiscard]] model::Result<void>
+  execute_work(const AcceptedTurnContext& context) const noexcept {
     return invoke_(storage_, context);
   }
 
   // --------------------------------------------------------
-  Storage storage_{};
-  InvokeFunction invoke_{nullptr};
+  InlineCommandStorage storage_{};
+  WorkInvocationFunction invoke_{nullptr};
 
   friend class SerializedExecutor;
 };
@@ -375,7 +379,8 @@ public:
   // Decide one non-blocking attempt. Every configured attempt gated by pending/in-flight loss
   // returns CapacityExceeded and records or extends that source's bounded fence.
   [[nodiscard]] model::Result<AdmissionDecision>
-  try_admit(WorkItem work, std::optional<model::MarketSourceOrdinal> source_ordinal = std::nullopt);
+  try_admit(InlineCommandWorkItem work,
+            std::optional<model::MarketSourceOrdinal> source_ordinal = std::nullopt);
 
   // --------------------------------------------------------
   // Permanently reject later work while preserving the already established command/fence prefix.
@@ -396,19 +401,21 @@ public:
 
   // --------------------------------------------------------
   // Execute zero or one oldest command/fence to completion without waiting for future work.
-  [[nodiscard]] model::Result<std::optional<TurnReport>> run_one();
+  [[nodiscard]] model::Result<std::optional<TurnReport>> execute_next_turn();
 
   // --------------------------------------------------------
-  // Execute no more than max_turns through run_one, stopping early when both stores are empty.
-  [[nodiscard]] model::Result<DriveReport> drive(std::size_t max_turns);
+  // Execute no more than max_turns through execute_next_turn, stopping early when both stores are
+  // empty.
+  [[nodiscard]] model::Result<PendingTurnExecutionReport>
+  execute_pending_turns(std::size_t max_turns);
 
   // --------------------------------------------------------
   // Return one synchronized ingress, ownership, and terminal-state observation.
-  [[nodiscard]] QueueSnapshot snapshot() const noexcept;
+  [[nodiscard]] ExecutorQueueSnapshot queue_snapshot() const noexcept;
 
   // --------------------------------------------------------
   // Report whether the calling thread is the currently bound owner without exposing its identity.
-  [[nodiscard]] bool current_thread_is_owner() const noexcept;
+  [[nodiscard]] bool is_current_thread_owner() const noexcept;
 
   // --------------------------------------------------------
   // Return one configured source's synchronized loss state, or nullopt when it is unconfigured.
@@ -425,8 +432,8 @@ private:
   // ########################################################################
   // Queue entries pair immutable work with a complete accepted receipt in construction-time
   // storage; optionals mark ring occupancy without allocating.
-  struct QueueEntry {
-    std::optional<WorkItem> work;
+  struct QueuedWorkEntry {
+    std::optional<InlineCommandWorkItem> work;
     std::optional<AdmissionReceipt> receipt;
   };
 
@@ -434,7 +441,7 @@ private:
 
   // ########################################################################
   // Each configured one-based source ordinal indexes one persistent merge slot.
-  struct FenceState {
+  struct SourceFenceState {
     std::optional<model::AdmissionOrdinal> earliest_failed_attempt;
     std::uint64_t lost_attempt_count{0U};
     bool in_flight{false};
@@ -444,7 +451,7 @@ private:
 
   // ########################################################################
   // Candidate selection names either the FIFO head or one source-fence slot.
-  struct RunnableCandidate {
+  struct RunnableTurnCandidate {
     TurnKind kind;
     std::size_t fence_index;
   };
@@ -473,12 +480,12 @@ private:
   // --------------------------------------------------------
   // Begin a dedicated turn only if synchronized stop has not won the same owner-start mutex.
   [[nodiscard]] model::Result<std::optional<TurnReport>>
-  run_one_for_driver(const std::atomic_bool& stop_requested);
+  execute_next_turn_for_driver(const std::atomic_bool& stop_requested);
 
   // --------------------------------------------------------
   // Share selection and execution while optionally applying the dedicated synchronized stop gate.
   [[nodiscard]] model::Result<std::optional<TurnReport>>
-  run_one_impl(const std::atomic_bool* stop_requested);
+  execute_next_turn_impl(const std::atomic_bool* stop_requested);
 
   // --------------------------------------------------------
   // Validate owner identity and non-reentry with deterministic error precedence.
@@ -486,9 +493,9 @@ private:
 
   // --------------------------------------------------------
   // Return the next representable ordinal without committing it to executor state.
-  [[nodiscard]] model::Result<model::AdmissionOrdinal> next_admission_ordinal_locked() const;
-  [[nodiscard]] model::Result<model::ReceiveSequence> next_receive_sequence_locked() const;
-  [[nodiscard]] model::Result<model::TurnOrdinal> next_turn_ordinal_locked() const;
+  [[nodiscard]] model::Result<model::AdmissionOrdinal> derive_next_admission_ordinal_locked() const;
+  [[nodiscard]] model::Result<model::ReceiveSequence> derive_next_receive_sequence_locked() const;
+  [[nodiscard]] model::Result<model::TurnOrdinal> derive_next_turn_ordinal_locked() const;
 
   // --------------------------------------------------------
   // Compare one injected clock observation with every earlier observation before publishing it.
@@ -501,13 +508,13 @@ private:
 
   // --------------------------------------------------------
   // Resolve an attributable source only when its canonical one-based ordinal is configured.
-  [[nodiscard]] FenceState*
+  [[nodiscard]] SourceFenceState*
   configured_fence_locked(std::optional<model::MarketSourceOrdinal> source_ordinal) noexcept;
 
   // --------------------------------------------------------
   // Record one attributable lost attempt in the current or successor preallocated fence.
   [[nodiscard]] model::Result<void>
-  record_source_loss_locked(FenceState& fence, model::AdmissionOrdinal attempt_ordinal);
+  record_source_loss_locked(SourceFenceState& fence, model::AdmissionOrdinal attempt_ordinal);
 
   // --------------------------------------------------------
   // Restore a failed in-flight fence ahead of any successor losses without unchecked addition.
@@ -516,7 +523,7 @@ private:
 
   // --------------------------------------------------------
   // Find the globally oldest runnable queue head or source fence.
-  [[nodiscard]] std::optional<RunnableCandidate> oldest_runnable_locked() const noexcept;
+  [[nodiscard]] std::optional<RunnableTurnCandidate> oldest_runnable_locked() const noexcept;
 
   // --------------------------------------------------------
   // Return whether either construction-time store currently contains an owner turn.
@@ -527,8 +534,8 @@ private:
   SourceDiscontinuityHandler* discontinuity_handler_;
   mutable std::mutex mutex_;
   std::condition_variable work_available_;
-  std::vector<QueueEntry> queue_;
-  std::vector<FenceState> fences_;
+  std::vector<QueuedWorkEntry> queue_;
+  std::vector<SourceFenceState> fences_;
   std::size_t head_{0U};
   std::size_t tail_{0U};
   std::size_t pending_commands_{0U};
@@ -551,7 +558,7 @@ private:
 
 // ########################################################################
 // DeterministicExecutorDriver gives one caller explicit owner binding and bounded manual
-// progression through exactly the same run_one implementation as the dedicated thread.
+// progression through exactly the same execute_next_turn implementation as the dedicated thread.
 class DeterministicExecutorDriver final {
 public:
 
@@ -569,11 +576,12 @@ public:
 
   // --------------------------------------------------------
   // Delegate one optional owner turn to the shared processor.
-  [[nodiscard]] model::Result<std::optional<TurnReport>> run_one();
+  [[nodiscard]] model::Result<std::optional<TurnReport>> execute_next_turn();
 
   // --------------------------------------------------------
   // Delegate bounded owner progression to the shared processor.
-  [[nodiscard]] model::Result<DriveReport> drive(std::size_t max_turns);
+  [[nodiscard]] model::Result<PendingTurnExecutionReport>
+  execute_pending_turns(std::size_t max_turns);
 
   // --------------------------------------------------------
 private:

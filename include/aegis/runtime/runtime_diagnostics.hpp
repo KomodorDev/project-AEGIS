@@ -83,23 +83,24 @@ public:
 
   // --------------------------------------------------------
   // Validate the fixed-field profile and configured source without changing prefix or counters.
-  [[nodiscard]] model::Result<void> validate(RuntimeDiagnosticKind kind,
-                                             const RuntimeDiagnosticFields& fields) const;
+  [[nodiscard]] model::Result<void>
+  validate_diagnostic(RuntimeDiagnosticKind kind, const RuntimeDiagnosticFields& fields) const;
 
   // --------------------------------------------------------
   // Validate one observation and retain it only while prefix capacity remains. A valid observation
   // arriving after saturation increments dropped_count and succeeds so telemetry cannot abort a
   // canonical owner turn.
-  [[nodiscard]] model::Result<void> append(RuntimeDiagnosticKind kind,
-                                           RuntimeDiagnosticFields fields);
+  [[nodiscard]] model::Result<void> append_diagnostic(RuntimeDiagnosticKind kind,
+                                                      RuntimeDiagnosticFields fields);
 
   // --------------------------------------------------------
   // Resolve one retained record in oldest-to-newest order; out-of-range positions return null.
-  [[nodiscard]] const RuntimeDiagnosticRecord* at(std::size_t chronological_index) const noexcept;
+  [[nodiscard]] const RuntimeDiagnosticRecord*
+  diagnostic_at(std::size_t chronological_index) const noexcept;
 
   // --------------------------------------------------------
   // Return the number of records retained in the immutable prefix.
-  [[nodiscard]] std::uint32_t size() const noexcept {
+  [[nodiscard]] std::uint32_t diagnostic_count() const noexcept {
     return static_cast<std::uint32_t>(records_.size());
   }
 
@@ -123,7 +124,7 @@ public:
   // --------------------------------------------------------
   // Report whether the retained prefix has reached its policy-fixed capacity, independently of
   // whether a later observation has already been dropped.
-  [[nodiscard]] bool saturated() const noexcept { return records_.size() == capacity_; }
+  [[nodiscard]] bool is_saturated() const noexcept { return records_.size() == capacity_; }
 
   // --------------------------------------------------------
   // Count valid details dropped after saturation; the counter never silently wraps.

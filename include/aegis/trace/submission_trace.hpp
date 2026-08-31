@@ -72,6 +72,7 @@ struct SubmissionTraceAttribution {
   model::StrategyId strategy_id;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete runtime-minted organizational attribution.
   friend bool operator==(const SubmissionTraceAttribution&,
                          const SubmissionTraceAttribution&) = default;
 
@@ -94,6 +95,7 @@ struct SubmissionTraceProvenance {
   model::Sha256Digest submission_policy_fingerprint;
 
   // --------------------------------------------------------
+  // Structural equality compares every canonical policy identity and retained revision.
   friend bool operator==(const SubmissionTraceProvenance&,
                          const SubmissionTraceProvenance&) = default;
 
@@ -114,6 +116,7 @@ struct SubmissionTraceContext {
   execution::OrderRequest request;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete outer-attempt identity, attribution, and request.
   friend bool operator==(const SubmissionTraceContext&, const SubmissionTraceContext&) = default;
 
   // --------------------------------------------------------
@@ -133,6 +136,7 @@ struct AuthorizedSubmissionProjection {
   model::InstrumentMetadataRevision metadata_revision;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete authorized route, account, and instrument projection.
   friend bool operator==(const AuthorizedSubmissionProjection&,
                          const AuthorizedSubmissionProjection&) = default;
 
@@ -150,6 +154,7 @@ struct SubmissionEncodingEvidence {
   model::Sha256Digest encoded_order_fingerprint;
 
   // --------------------------------------------------------
+  // Structural equality compares the invocation, byte length, and exact encoded-order identity.
   friend bool operator==(const SubmissionEncodingEvidence&,
                          const SubmissionEncodingEvidence&) = default;
 
@@ -167,6 +172,7 @@ struct SubmissionInitiationEvidence {
   std::optional<model::FakeWriteOrdinal> accepted_write_ordinal;
 
   // --------------------------------------------------------
+  // Structural equality compares the invocation, outcome, and optional accepted-write identity.
   friend bool operator==(const SubmissionInitiationEvidence&,
                          const SubmissionInitiationEvidence&) = default;
 
@@ -191,6 +197,7 @@ struct SubmissionFinalResult {
   }
 
   // --------------------------------------------------------
+  // Structural equality compares the complete persisted canonical result subset.
   friend bool operator==(const SubmissionFinalResult&, const SubmissionFinalResult&) = default;
 
   // --------------------------------------------------------
@@ -215,6 +222,7 @@ struct SubmissionTraceFields {
   std::optional<SubmissionFinalResult> final_result;
 
   // --------------------------------------------------------
+  // Structural equality compares every cumulative field and optional-presence decision.
   friend bool operator==(const SubmissionTraceFields&, const SubmissionTraceFields&) = default;
 
   // --------------------------------------------------------
@@ -228,9 +236,11 @@ class SubmissionTraceOrdinal final {
 public:
 
   // --------------------------------------------------------
+  // Return the sink-issued one-based accepted-prefix position.
   [[nodiscard]] constexpr std::uint64_t value() const noexcept { return value_; }
 
   // --------------------------------------------------------
+  // Compare accepted-prefix positions structurally and numerically.
   friend constexpr bool operator==(SubmissionTraceOrdinal, SubmissionTraceOrdinal) = default;
   friend constexpr auto operator<=>(SubmissionTraceOrdinal, SubmissionTraceOrdinal) = default;
 
@@ -244,6 +254,7 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
+  // Retain one ordinal already issued by the sole append authority.
   explicit constexpr SubmissionTraceOrdinal(std::uint64_t value) noexcept : value_{value} {}
 
   // --------------------------------------------------------
@@ -259,29 +270,36 @@ class SubmissionTraceRecord final {
 public:
 
   // --------------------------------------------------------
+  // Preserve an already validated immutable observation through explicit copy or move.
   SubmissionTraceRecord(const SubmissionTraceRecord&) = default;
   SubmissionTraceRecord& operator=(const SubmissionTraceRecord&) = default;
   SubmissionTraceRecord(SubmissionTraceRecord&&) noexcept = default;
   SubmissionTraceRecord& operator=(SubmissionTraceRecord&&) noexcept = default;
 
   // --------------------------------------------------------
+  // Return the independent AEGISSTS schema version.
   [[nodiscard]] constexpr std::uint16_t schema_version() const noexcept {
     return submission_trace_schema_version;
   }
 
   // --------------------------------------------------------
+  // Return the sink-issued accepted-prefix position.
   [[nodiscard]] constexpr SubmissionTraceOrdinal ordinal() const noexcept { return ordinal_; }
 
   // --------------------------------------------------------
+  // Return the stable submission observation kind.
   [[nodiscard]] constexpr SubmissionTraceEventKind kind() const noexcept { return kind_; }
 
   // --------------------------------------------------------
+  // Borrow the immutable policy provenance copied into this record.
   [[nodiscard]] const SubmissionTraceProvenance& provenance() const noexcept { return provenance_; }
 
   // --------------------------------------------------------
+  // Borrow the complete validated cumulative submission snapshot.
   [[nodiscard]] const SubmissionTraceFields& fields() const noexcept { return fields_; }
 
   // --------------------------------------------------------
+  // Structural equality compares the complete schema-significant record state.
   friend bool operator==(const SubmissionTraceRecord&, const SubmissionTraceRecord&) = default;
 
   // --------------------------------------------------------
@@ -294,6 +312,7 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
+  // Assemble only fields, provenance, and an ordinal already validated by the sink.
   SubmissionTraceRecord(SubmissionTraceOrdinal ordinal, SubmissionTraceEventKind kind,
                         SubmissionTraceProvenance provenance, SubmissionTraceFields fields)
       : ordinal_{ordinal}, kind_{kind}, provenance_{std::move(provenance)},
@@ -319,6 +338,7 @@ public:
   SubmissionTraceSink(SubmissionTraceProvenance provenance, std::uint32_t capacity);
 
   // --------------------------------------------------------
+  // Keep one non-copyable and non-movable append authority for the canonical prefix.
   SubmissionTraceSink(const SubmissionTraceSink&) = delete;
   SubmissionTraceSink& operator=(const SubmissionTraceSink&) = delete;
   SubmissionTraceSink(SubmissionTraceSink&&) = delete;
@@ -326,40 +346,49 @@ public:
 
   // --------------------------------------------------------
   // Prove a complete attempt's maximum evidence fits before identity or risk mutation.
-  [[nodiscard]] model::Result<void> preflight(std::uint32_t additional_records) const;
+  [[nodiscard]] model::Result<void> preflight_trace_append(std::uint32_t additional_records) const;
 
   // --------------------------------------------------------
   // Validate profile, cumulative snapshot, and causal sequence without assigning an ordinal.
-  [[nodiscard]] model::Result<void> validate(SubmissionTraceEventKind kind,
-                                             const SubmissionTraceFields& fields) const;
+  [[nodiscard]] model::Result<void>
+  validate_trace_record(SubmissionTraceEventKind kind, const SubmissionTraceFields& fields) const;
 
   // --------------------------------------------------------
   // Append one valid event to the immutable prefix or leave the prefix unchanged on failure.
-  [[nodiscard]] model::Result<void> append(SubmissionTraceEventKind kind,
-                                           SubmissionTraceFields fields);
+  [[nodiscard]] model::Result<void> append_trace_record(SubmissionTraceEventKind kind,
+                                                        SubmissionTraceFields fields);
 
   // --------------------------------------------------------
+  // Borrow the complete immutable accepted prefix in canonical append order.
   [[nodiscard]] std::span<const SubmissionTraceRecord> records() const noexcept { return records_; }
 
   // --------------------------------------------------------
-  [[nodiscard]] std::uint32_t size() const noexcept {
+  // Return the number of records in the accepted prefix.
+  [[nodiscard]] std::uint32_t record_count() const noexcept {
     return static_cast<std::uint32_t>(records_.size());
   }
 
   // --------------------------------------------------------
+  // Return the fixed accepted-record limit reserved at construction.
   [[nodiscard]] constexpr std::uint32_t capacity() const noexcept { return capacity_; }
 
   // --------------------------------------------------------
-  [[nodiscard]] std::uint32_t remaining_capacity() const noexcept { return capacity_ - size(); }
+  // Return the number of records a successful preflight could still reserve.
+  [[nodiscard]] std::uint32_t remaining_capacity() const noexcept {
+    return capacity_ - record_count();
+  }
 
   // --------------------------------------------------------
+  // Borrow the immutable policy identities encoded into every retained record.
   [[nodiscard]] const SubmissionTraceProvenance& provenance() const noexcept { return provenance_; }
 
   // --------------------------------------------------------
-  [[nodiscard]] model::Result<std::vector<std::byte>> canonical_bytes() const;
+  // Project the accepted prefix into the positional AEGISSTS schema-one byte stream.
+  [[nodiscard]] model::Result<std::vector<std::byte>> encode_canonical_bytes() const;
 
   // --------------------------------------------------------
-  [[nodiscard]] model::Result<model::Sha256Digest> digest() const;
+  // Hash exactly the canonical AEGISSTS byte stream with SHA-256.
+  [[nodiscard]] model::Result<model::Sha256Digest> derive_digest() const;
 
   // --------------------------------------------------------
 private:

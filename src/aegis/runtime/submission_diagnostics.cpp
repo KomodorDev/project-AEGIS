@@ -198,16 +198,17 @@ using model::DomainErrorCode;
 
 // --------------------------------------------------------
 // Return the stable programmer-contract failure for a malformed internal profile.
-[[nodiscard]] model::Result<void> invalid(std::string_view field) {
-  return model::Result<void>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidValue, std::string{field}));
+[[nodiscard]] model::Result<void>
+create_invalid_submission_diagnostic_result(std::string_view field) {
+  return model::Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidValue, std::string{field}));
 }
 
 // --------------------------------------------------------
 // Match the immutable identity and classification of repeated callback-local submission re-entry;
 // occurrence count is deliberately excluded because it is the saturating aggregate.
-[[nodiscard]] bool same_reentry_observation(const SubmissionDiagnosticFields& lhs,
-                                            const SubmissionDiagnosticFields& rhs) noexcept {
+[[nodiscard]] bool is_same_reentry_observation(const SubmissionDiagnosticFields& lhs,
+                                               const SubmissionDiagnosticFields& rhs) noexcept {
   return lhs.attempt_id == rhs.attempt_id && lhs.owner_turn_ordinal == rhs.owner_turn_ordinal &&
          lhs.callback_ordinal == rhs.callback_ordinal && lhs.order_id == rhs.order_id &&
          lhs.reservation_id == rhs.reservation_id && lhs.stage == rhs.stage &&
@@ -229,22 +230,22 @@ SubmissionDiagnosticSink::SubmissionDiagnosticSink(SubmissionDiagnosticProvenanc
 // --------------------------------------------------------
 // Validate the common dependency graph and the selected kind profile without mutation.
 model::Result<void>
-SubmissionDiagnosticSink::validate(SubmissionDiagnosticKind kind,
-                                   const SubmissionDiagnosticFields& fields) const {
+SubmissionDiagnosticSink::validate_diagnostic(SubmissionDiagnosticKind kind,
+                                              const SubmissionDiagnosticFields& fields) const {
   if (!is_valid_profile(kind, fields)) {
-    return invalid("submission_diagnostic.fields");
+    return create_invalid_submission_diagnostic_result("submission_diagnostic.fields");
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Preserve the earliest valid observations and account for all later observations without failure.
-model::Result<void> SubmissionDiagnosticSink::append(SubmissionDiagnosticKind kind,
-                                                     SubmissionDiagnosticFields fields) {
+model::Result<void> SubmissionDiagnosticSink::append_diagnostic(SubmissionDiagnosticKind kind,
+                                                                SubmissionDiagnosticFields fields) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Invalid observations remain programmer errors even when diagnostic storage is saturated.
-  auto valid = validate(kind, fields);
+  auto valid = validate_diagnostic(kind, fields);
   if (!valid) {
     return valid;
   }
@@ -254,14 +255,14 @@ model::Result<void> SubmissionDiagnosticSink::append(SubmissionDiagnosticKind ki
   // consuming another prefix position.
   if (kind == SubmissionDiagnosticKind::ReentryDetected) {
     for (auto record = records_.rbegin(); record != records_.rend(); ++record) {
-      if (record->kind == kind && same_reentry_observation(record->fields, fields)) {
+      if (record->kind == kind && is_same_reentry_observation(record->fields, fields)) {
         if (fields.occurrence_count >
             std::numeric_limits<std::uint64_t>::max() - record->fields.occurrence_count) {
           record->fields.occurrence_count = std::numeric_limits<std::uint64_t>::max();
         } else {
           record->fields.occurrence_count += fields.occurrence_count;
         }
-        return model::Result<void>::success();
+        return model::Result<void>::create_success();
       }
     }
   }
@@ -272,7 +273,7 @@ model::Result<void> SubmissionDiagnosticSink::append(SubmissionDiagnosticKind ki
     if (dropped_count_ != std::numeric_limits<std::uint64_t>::max()) {
       ++dropped_count_;
     }
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -280,7 +281,7 @@ model::Result<void> SubmissionDiagnosticSink::append(SubmissionDiagnosticKind ki
   ++accepted_count_;
   records_.push_back(
       SubmissionDiagnosticRecord{accepted_count_, kind, provenance_, std::move(fields)});
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -288,7 +289,7 @@ model::Result<void> SubmissionDiagnosticSink::append(SubmissionDiagnosticKind ki
 // --------------------------------------------------------
 // Borrow one retained prefix position without exposing mutable storage.
 const SubmissionDiagnosticRecord*
-SubmissionDiagnosticSink::at(std::size_t chronological_index) const noexcept {
+SubmissionDiagnosticSink::diagnostic_at(std::size_t chronological_index) const noexcept {
   if (chronological_index >= records_.size()) {
     return nullptr;
   }

@@ -104,9 +104,10 @@ public:
   // inconsistent authority or invalid capacities return InvalidM4Policy in the Result without
   // publishing a policy.
   [[nodiscard]] static model::Result<M4Policy>
-  create(const configuration::StartupConfiguration& configuration,
-         const RuntimePolicy& runtime_policy, const risk::RiskPolicySnapshot& risk_policy,
-         const execution::SubmissionPolicy& submission_policy, M4PolicyCapacities capacities);
+  create_m4_policy(const configuration::StartupConfiguration& configuration,
+                   const RuntimePolicy& runtime_policy, const risk::RiskPolicySnapshot& risk_policy,
+                   const execution::SubmissionPolicy& submission_policy,
+                   M4PolicyCapacities capacities);
 
   // --------------------------------------------------------
   // Expose the complete immutable owner-capacity contract.

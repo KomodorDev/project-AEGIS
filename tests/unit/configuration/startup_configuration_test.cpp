@@ -62,8 +62,9 @@ static_assert(!HasVenueAccountId<configuration::LogicalAccountVenueBinding>);
 
 // --------------------------------------------------------
 // Typed identifier parsers fail fast on broken fixtures rather than creating incidental test cases.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto result = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto result = Identifier::parse_identifier(text);
   if (!result) {
     throw std::logic_error{"invalid identifier in configuration test"};
   }
@@ -72,7 +73,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Typed decimal parsers apply the same fail-fast policy to numeric fixture literals.
-template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text) {
+template <typename Decimal> [[nodiscard]] Decimal parse_decimal_or_throw(std::string_view text) {
   auto result = Decimal::parse_ascii(text);
   if (!result) {
     throw std::logic_error{"invalid decimal in configuration test"};
@@ -82,7 +83,7 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
 
 // --------------------------------------------------------
 // Hexadecimal rendering makes canonical byte failures exact and reviewable.
-[[nodiscard]] std::string hexadecimal(const std::vector<std::byte>& bytes) {
+[[nodiscard]] std::string bytes_to_hexadecimal(const std::vector<std::byte>& bytes) {
   constexpr std::string_view digits = "0123456789abcdef";
   std::string result;
   result.reserve(bytes.size() * 2U);
@@ -96,17 +97,19 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
 
 // --------------------------------------------------------
 // Multiple values in every relevant collection ensure reversal genuinely exercises canonical order.
-[[nodiscard]] configuration::StartupConfigurationParams reordered_configuration_params() {
+[[nodiscard]] configuration::StartupConfigurationParams
+create_reordered_configuration_params_or_throw() {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Begin with two independent firms and define a second venue-owned instrument path.
-  auto params = test_support::two_firm_configuration_params();
+  auto params = test_support::create_two_firm_configuration_params_or_throw();
 
-  const auto venue_id = id<model::VenueId>("kraken");
-  const auto instrument_id = id<model::InstrumentId>("ETH-USD-PERPETUAL");
-  const auto account_id = id<model::LogicalAccountId>("account.kraken-testnet-subsidiary");
-  const auto firm_id = id<model::FirmId>("firm.aegis-subsidiary");
-  const auto bot_id = id<model::BotId>("bot.subsidiary-reference");
+  const auto venue_id = parse_identifier_or_throw<model::VenueId>("kraken");
+  const auto instrument_id = parse_identifier_or_throw<model::InstrumentId>("ETH-USD-PERPETUAL");
+  const auto account_id =
+      parse_identifier_or_throw<model::LogicalAccountId>("account.kraken-testnet-subsidiary");
+  const auto firm_id = parse_identifier_or_throw<model::FirmId>("firm.aegis-subsidiary");
+  const auto bot_id = parse_identifier_or_throw<model::BotId>("bot.subsidiary-reference");
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Add the venue and its subsidiary-owned logical account.
@@ -120,24 +123,25 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
   auto metadata = params.instrument_metadata.front();
   metadata.venue_id = venue_id;
   metadata.instrument_id = instrument_id;
-  metadata.venue_instrument_id = id<model::VenueInstrumentId>("ETH-PERPETUAL");
+  metadata.venue_instrument_id =
+      parse_identifier_or_throw<model::VenueInstrumentId>("ETH-PERPETUAL");
   metadata.base_currency = "ETH";
   metadata.settlement_currency = "USD";
   metadata.contract_style = model::ContractStyle::Linear;
   metadata.contract_multiplier_unit = model::ContractMultiplierUnit::BaseCurrencyPerContract;
   metadata.price_scale = 2U;
-  metadata.tick_size = decimal<model::Price>("0.01");
-  metadata.contract_multiplier = decimal<model::Notional>("0.001");
+  metadata.tick_size = parse_decimal_or_throw<model::Price>("0.01");
+  metadata.contract_multiplier = parse_decimal_or_throw<model::Notional>("0.001");
   params.instrument_metadata.push_back(std::move(metadata));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Complete the second path with matching observation and disabled execution grants.
   params.subscriptions.push_back(market_data::Subscription{
-      id<model::SubscriptionId>("subscription.kraken-eth-perpetual-book"), bot_id, venue_id,
-      instrument_id, market_data::SubscriptionChannel::OrderBook});
+      parse_identifier_or_throw<model::SubscriptionId>("subscription.kraken-eth-perpetual-book"),
+      bot_id, venue_id, instrument_id, market_data::SubscriptionChannel::OrderBook});
   params.routes.push_back(execution::ExecutionRoute{
-      id<model::RouteId>("route.kraken-testnet-subsidiary-eth-perpetual"), bot_id, venue_id,
-      account_id, instrument_id, execution::ExecutionRouteState::Disabled});
+      parse_identifier_or_throw<model::RouteId>("route.kraken-testnet-subsidiary-eth-perpetual"),
+      bot_id, venue_id, account_id, instrument_id, execution::ExecutionRouteState::Disabled});
   return params;
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -151,8 +155,8 @@ TEST_CASE("the accepted reference configuration is sealed and carries exact prov
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal the complete single-firm reference configuration atomically.
-  const auto result =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  const auto result = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
 
   REQUIRE(result);
   const auto& configured = result.value();
@@ -162,32 +166,34 @@ TEST_CASE("the accepted reference configuration is sealed and carries exact prov
   REQUIRE(configured.organization().firms().size() == 1U);
   REQUIRE(configured.organization().bot_attributions().size() == 1U);
   CHECK(configured.organization().bot_attributions().front().firm_id ==
-        id<model::FirmId>("firm.aegis-lab"));
+        parse_identifier_or_throw<model::FirmId>("firm.aegis-lab"));
   REQUIRE(configured.routes().routes().size() == 1U);
   CHECK_FALSE(configured.routes().routes().front().is_enabled());
   REQUIRE(configured.subscriptions().subscriptions().size() == 1U);
-  CHECK(configured.find_venue(id<model::VenueId>("deribit")) != nullptr);
-  CHECK(
-      configured.find_logical_account(id<model::LogicalAccountId>("account.deribit-testnet-aegis"))
-          ->firm_id == id<model::FirmId>("firm.aegis-lab"));
+  CHECK(configured.find_venue(parse_identifier_or_throw<model::VenueId>("deribit")) != nullptr);
+  CHECK(configured
+            .find_logical_account(
+                parse_identifier_or_throw<model::LogicalAccountId>("account.deribit-testnet-aegis"))
+            ->firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-lab"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Verify the sealed fingerprint and every section revision are captured in provenance.
   const auto& provenance = configured.provenance();
   CHECK(provenance.fingerprint() == configured.fingerprint());
-  CHECK(provenance.configuration_revision() == model::ConfigurationRevision::initial());
-  CHECK(provenance.organization_revision() == model::OrganizationRevision::initial());
+  CHECK(provenance.configuration_revision() == model::ConfigurationRevision::create_initial());
+  CHECK(provenance.organization_revision() == model::OrganizationRevision::create_initial());
   CHECK(provenance.strategy_configuration_revision() ==
-        model::StrategyConfigurationRevision::initial());
-  CHECK(provenance.subscription_revision() == model::SubscriptionRevision::initial());
-  CHECK(provenance.route_revision() == model::RouteRevision::initial());
+        model::StrategyConfigurationRevision::create_initial());
+  CHECK(provenance.subscription_revision() == model::SubscriptionRevision::create_initial());
+  CHECK(provenance.route_revision() == model::RouteRevision::create_initial());
   const auto* const metadata_revision = provenance.find_instrument_metadata_revision(
-      id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"));
+      parse_identifier_or_throw<model::VenueId>("deribit"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"));
   REQUIRE(metadata_revision != nullptr);
-  CHECK(*metadata_revision == model::InstrumentMetadataRevision::initial());
+  CHECK(*metadata_revision == model::InstrumentMetadataRevision::create_initial());
   CHECK(provenance.find_instrument_metadata_revision(
-            id<model::VenueId>("deribit"), id<model::InstrumentId>("ETH-USD-PERPETUAL")) ==
-        nullptr);
+            parse_identifier_or_throw<model::VenueId>("deribit"),
+            parse_identifier_or_throw<model::InstrumentId>("ETH-USD-PERPETUAL")) == nullptr);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -199,22 +205,23 @@ TEST_CASE("peer firms retain independent bot attribution and account ownership",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal the subsidiary-aware fixture as one immutable configuration.
-  const auto result =
-      configuration::StartupConfiguration::create(test_support::two_firm_configuration_params());
+  const auto result = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_two_firm_configuration_params_or_throw());
 
   REQUIRE(result);
   CHECK(result.value().organization().firms().size() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve the subsidiary bot and account back to the same firm root.
-  const auto* const subsidiary =
-      result.value().organization().find_bot(id<model::BotId>("bot.subsidiary-reference"));
+  const auto* const subsidiary = result.value().organization().find_bot(
+      parse_identifier_or_throw<model::BotId>("bot.subsidiary-reference"));
   REQUIRE(subsidiary != nullptr);
-  CHECK(subsidiary->firm_id == id<model::FirmId>("firm.aegis-subsidiary"));
+  CHECK(subsidiary->firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-subsidiary"));
   const auto* const subsidiary_account = result.value().find_logical_account(
-      id<model::LogicalAccountId>("account.deribit-testnet-subsidiary"));
+      parse_identifier_or_throw<model::LogicalAccountId>("account.deribit-testnet-subsidiary"));
   REQUIRE(subsidiary_account != nullptr);
-  CHECK(subsidiary_account->firm_id == id<model::FirmId>("firm.aegis-subsidiary"));
+  CHECK(subsidiary_account->firm_id ==
+        parse_identifier_or_throw<model::FirmId>("firm.aegis-subsidiary"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Both peer-firm routes remain explicitly disabled in the accepted snapshot.
@@ -231,11 +238,12 @@ TEST_CASE("peer firms retain independent bot attribution and account ownership",
 // roots.
 TEST_CASE("a route cannot cross from its bot firm into a subsidiary account",
           "[configuration][m1][organization]") {
-  auto params = test_support::two_firm_configuration_params();
+  auto params = test_support::create_two_firm_configuration_params_or_throw();
   params.routes.back().logical_account_id =
-      id<model::LogicalAccountId>("account.deribit-testnet-aegis");
+      parse_identifier_or_throw<model::LogicalAccountId>("account.deribit-testnet-aegis");
 
-  const auto result = configuration::StartupConfiguration::create(std::move(params));
+  const auto result =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
 
   REQUIRE_FALSE(result);
   CHECK(result.error().code == model::DomainErrorCode::InvalidRelationship);
@@ -250,7 +258,7 @@ TEST_CASE("canonical configuration identity is independent of every input collec
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reverse every collection in a fixture that contains multiple values per relevant section.
-  auto ordered_params = reordered_configuration_params();
+  auto ordered_params = create_reordered_configuration_params_or_throw();
   auto reversed_params = ordered_params;
   std::reverse(reversed_params.firms.begin(), reversed_params.firms.end());
   std::reverse(reversed_params.desks.begin(), reversed_params.desks.end());
@@ -265,8 +273,10 @@ TEST_CASE("canonical configuration identity is independent of every input collec
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal both authoring orders through independent validation paths.
-  const auto ordered = configuration::StartupConfiguration::create(std::move(ordered_params));
-  const auto reversed = configuration::StartupConfiguration::create(std::move(reversed_params));
+  const auto ordered =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(ordered_params));
+  const auto reversed =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(reversed_params));
 
   REQUIRE(ordered);
   REQUIRE(reversed);
@@ -286,73 +296,80 @@ TEST_CASE("decision semantics and every revision participate in the fingerprint"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Establish the accepted fingerprint against which every isolated mutation is compared.
-  const auto baseline =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  const auto baseline = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
   REQUIRE(baseline);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Route state is decision-bearing even when every identity remains unchanged.
-  auto semantic_params = test_support::reference_configuration_params();
+  auto semantic_params = test_support::create_reference_configuration_params_or_throw();
   semantic_params.routes.front().state = execution::ExecutionRouteState::Enabled;
-  const auto semantic = configuration::StartupConfiguration::create(std::move(semantic_params));
+  const auto semantic =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(semantic_params));
   REQUIRE(semantic);
   CHECK(semantic.value().fingerprint() != baseline.value().fingerprint());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Configuration revision participates in the canonical evidence.
-  auto configuration_revision_params = test_support::reference_configuration_params();
+  auto configuration_revision_params =
+      test_support::create_reference_configuration_params_or_throw();
   configuration_revision_params.revision = model::ConfigurationRevision::from_value(2U).value();
   const auto configuration_revision =
-      configuration::StartupConfiguration::create(std::move(configuration_revision_params));
+      configuration::StartupConfiguration::create_startup_configuration(
+          std::move(configuration_revision_params));
   REQUIRE(configuration_revision);
   CHECK(configuration_revision.value().fingerprint() != baseline.value().fingerprint());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Organization revision participates independently in the canonical evidence.
-  auto organization_revision_params = test_support::reference_configuration_params();
+  auto organization_revision_params =
+      test_support::create_reference_configuration_params_or_throw();
   organization_revision_params.organization_revision =
       model::OrganizationRevision::from_value(2U).value();
   const auto organization_revision =
-      configuration::StartupConfiguration::create(std::move(organization_revision_params));
+      configuration::StartupConfiguration::create_startup_configuration(
+          std::move(organization_revision_params));
   REQUIRE(organization_revision);
   CHECK(organization_revision.value().fingerprint() != baseline.value().fingerprint());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Strategy revision participates independently in the canonical evidence.
-  auto strategy_revision_params = test_support::reference_configuration_params();
+  auto strategy_revision_params = test_support::create_reference_configuration_params_or_throw();
   strategy_revision_params.strategy_configuration_revision =
       model::StrategyConfigurationRevision::from_value(2U).value();
-  const auto strategy_revision =
-      configuration::StartupConfiguration::create(std::move(strategy_revision_params));
+  const auto strategy_revision = configuration::StartupConfiguration::create_startup_configuration(
+      std::move(strategy_revision_params));
   REQUIRE(strategy_revision);
   CHECK(strategy_revision.value().fingerprint() != baseline.value().fingerprint());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Instrument metadata revision participates independently in the canonical evidence.
-  auto metadata_revision_params = test_support::reference_configuration_params();
+  auto metadata_revision_params = test_support::create_reference_configuration_params_or_throw();
   metadata_revision_params.instrument_metadata.front().revision =
       model::InstrumentMetadataRevision::from_value(2U).value();
-  const auto metadata_revision =
-      configuration::StartupConfiguration::create(std::move(metadata_revision_params));
+  const auto metadata_revision = configuration::StartupConfiguration::create_startup_configuration(
+      std::move(metadata_revision_params));
   REQUIRE(metadata_revision);
   CHECK(metadata_revision.value().fingerprint() != baseline.value().fingerprint());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Subscription revision participates independently in the canonical evidence.
-  auto subscription_revision_params = test_support::reference_configuration_params();
+  auto subscription_revision_params =
+      test_support::create_reference_configuration_params_or_throw();
   subscription_revision_params.subscription_revision =
       model::SubscriptionRevision::from_value(2U).value();
   const auto subscription_revision =
-      configuration::StartupConfiguration::create(std::move(subscription_revision_params));
+      configuration::StartupConfiguration::create_startup_configuration(
+          std::move(subscription_revision_params));
   REQUIRE(subscription_revision);
   CHECK(subscription_revision.value().fingerprint() != baseline.value().fingerprint());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Route revision completes the set of section revisions covered by the fingerprint.
-  auto route_revision_params = test_support::reference_configuration_params();
+  auto route_revision_params = test_support::create_reference_configuration_params_or_throw();
   route_revision_params.route_revision = model::RouteRevision::from_value(2U).value();
-  const auto route_revision =
-      configuration::StartupConfiguration::create(std::move(route_revision_params));
+  const auto route_revision = configuration::StartupConfiguration::create_startup_configuration(
+      std::move(route_revision_params));
   REQUIRE(route_revision);
   CHECK(route_revision.value().fingerprint() != baseline.value().fingerprint());
 
@@ -366,8 +383,8 @@ TEST_CASE("the reference configuration has a published schema-one golden vector"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal the exact reference fixture whose canonical bytes are published below.
-  const auto result =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  const auto result = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
   REQUIRE(result);
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -402,7 +419,7 @@ TEST_CASE("the reference configuration has a published schema-one golden vector"
       "650003000000076465726962697400040000001d6163636f756e742e646572696269742d7465"
       "73746e65742d61656769730005000000114254432d5553442d50455250455455414c00060000"
       "000100";
-  CHECK(hexadecimal(result.value().canonical_bytes()) == expected_bytes);
+  CHECK(bytes_to_hexadecimal(result.value().canonical_bytes()) == expected_bytes);
   CHECK(result.value().fingerprint().to_hex() ==
         "e869459e338687fe372c4ee1c490a147e3c88261d3c2b89af4520cf990e35310");
 
@@ -417,21 +434,24 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Every registered bot requires one matching strategy-settings entry.
   SECTION("missing strategy settings") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.strategy_settings.clear();
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error() ==
-          model::DomainError::at_index(model::DomainErrorCode::InvalidRelationship,
-                                       "strategy_settings.missing_bot", 0U));
+          model::DomainError::create_at_index(model::DomainErrorCode::InvalidRelationship,
+                                              "strategy_settings.missing_bot", 0U));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A settings entry cannot change the strategy assigned by organization registration.
   SECTION("mismatched bot strategy settings") {
-    auto params = test_support::reference_configuration_params();
-    params.strategy_settings.front().strategy_id = id<model::StrategyId>("strategy.wrong");
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    auto params = test_support::create_reference_configuration_params_or_throw();
+    params.strategy_settings.front().strategy_id =
+        parse_identifier_or_throw<model::StrategyId>("strategy.wrong");
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().context.field == "strategy_settings.strategy_id");
   }
@@ -439,33 +459,37 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Each bot can own only one strategy-settings entry.
   SECTION("duplicate bot strategy settings") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.strategy_settings.push_back(params.strategy_settings.front());
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error() ==
-          model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
-                                       "strategy_settings.bot_id", 1U));
+          model::DomainError::create_at_index(model::DomainErrorCode::DuplicateIdentifier,
+                                              "strategy_settings.bot_id", 1U));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Venue environments fail closed when their representation is unassigned.
   SECTION("invalid environment") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.venues.front().environment =
         static_cast<configuration::VenueEnvironment>(std::uint8_t{99U});
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
-    CHECK(result.error() == model::DomainError::at_index(model::DomainErrorCode::InvalidValue,
-                                                         "venues.environment", 0U));
+    CHECK(result.error() == model::DomainError::create_at_index(
+                                model::DomainErrorCode::InvalidValue, "venues.environment", 0U));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Logical account ownership must resolve to a configured firm root.
   SECTION("dangling account firm") {
-    auto params = test_support::reference_configuration_params();
-    params.logical_accounts.front().firm_id = id<model::FirmId>("firm.unknown");
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    auto params = test_support::create_reference_configuration_params_or_throw();
+    params.logical_accounts.front().firm_id =
+        parse_identifier_or_throw<model::FirmId>("firm.unknown");
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().context.field == "logical_accounts.firm_id");
   }
@@ -473,32 +497,35 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Venue definitions remain unique after canonical sorting.
   SECTION("duplicate venue definition") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.venues.push_back(params.venues.front());
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
-    CHECK(result.error() == model::DomainError::at_index(
+    CHECK(result.error() == model::DomainError::create_at_index(
                                 model::DomainErrorCode::DuplicateIdentifier, "venues.id", 1U));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Logical account identifiers remain unique after canonical sorting.
   SECTION("duplicate logical account") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.logical_accounts.push_back(params.logical_accounts.front());
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error() ==
-          model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
-                                       "logical_accounts.id", 1U));
+          model::DomainError::create_at_index(model::DomainErrorCode::DuplicateIdentifier,
+                                              "logical_accounts.id", 1U));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Logical account bindings must resolve to a configured venue.
   SECTION("dangling account venue") {
-    auto params = test_support::reference_configuration_params();
-    params.logical_accounts.front().venue_id = id<model::VenueId>("unknown");
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    auto params = test_support::create_reference_configuration_params_or_throw();
+    params.logical_accounts.front().venue_id = parse_identifier_or_throw<model::VenueId>("unknown");
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().context.field == "logical_accounts.venue_id");
   }
@@ -506,24 +533,27 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Metadata cannot duplicate one normalized instrument at the same venue.
   SECTION("duplicate venue and instrument metadata") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.instrument_metadata.push_back(params.instrument_metadata.front());
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error() ==
-          model::DomainError::at_index(model::DomainErrorCode::DuplicateIdentifier,
-                                       "instrument_metadata.venue_instrument", 1U));
+          model::DomainError::create_at_index(model::DomainErrorCode::DuplicateIdentifier,
+                                              "instrument_metadata.venue_instrument", 1U));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Distinct normalized IDs cannot disguise a duplicate venue-native instrument identity.
   SECTION("duplicate venue-native semantic key") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     auto duplicate_native = params.instrument_metadata.front();
-    duplicate_native.instrument_id = id<model::InstrumentId>("ETH-USD-PERPETUAL");
+    duplicate_native.instrument_id =
+        parse_identifier_or_throw<model::InstrumentId>("ETH-USD-PERPETUAL");
     duplicate_native.base_currency = "ETH";
     params.instrument_metadata.push_back(std::move(duplicate_native));
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().context.field == "instrument_metadata.venue_native_instrument");
   }
@@ -531,9 +561,11 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Every metadata record must resolve to a configured venue definition.
   SECTION("metadata references an undefined venue") {
-    auto params = test_support::reference_configuration_params();
-    params.instrument_metadata.front().venue_id = id<model::VenueId>("unknown");
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    auto params = test_support::create_reference_configuration_params_or_throw();
+    params.instrument_metadata.front().venue_id =
+        parse_identifier_or_throw<model::VenueId>("unknown");
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().context.field == "instrument_metadata.venue_id");
   }
@@ -541,9 +573,10 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Nested metadata failures preserve their field and enclosing collection index atomically.
   SECTION("invalid metadata remains inside the atomic failure") {
-    auto params = test_support::reference_configuration_params();
+    auto params = test_support::create_reference_configuration_params_or_throw();
     params.instrument_metadata.front().base_currency = "btc";
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().code == model::DomainErrorCode::InvalidMetadata);
     CHECK(result.error().context.field == "instrument.base_currency");
@@ -553,9 +586,10 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
   // ++++++++++++++++++++++++++++++++++++++++
   // Subscription validation remains part of the same all-or-nothing startup operation.
   SECTION("existing subscription validation participates in startup") {
-    auto params = test_support::reference_configuration_params();
-    params.subscriptions.front().bot_id = id<model::BotId>("bot.unknown");
-    const auto result = configuration::StartupConfiguration::create(std::move(params));
+    auto params = test_support::create_reference_configuration_params_or_throw();
+    params.subscriptions.front().bot_id = parse_identifier_or_throw<model::BotId>("bot.unknown");
+    const auto result =
+        configuration::StartupConfiguration::create_startup_configuration(std::move(params));
     REQUIRE_FALSE(result);
     CHECK(result.error().context.field == "subscriptions.bot_id");
   }
@@ -567,16 +601,17 @@ TEST_CASE("startup validation rejects incomplete and inconsistent sections atomi
 // When multiple sections are corrupt, validation reports the documented earliest section.
 TEST_CASE("startup sections fail in their documented canonical order",
           "[configuration][validation]") {
-  auto params = test_support::reference_configuration_params();
+  auto params = test_support::create_reference_configuration_params_or_throw();
   params.firms.clear();
   params.venues.front().environment =
       static_cast<configuration::VenueEnvironment>(std::uint8_t{99U});
 
-  const auto result = configuration::StartupConfiguration::create(std::move(params));
+  const auto result =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
 
   REQUIRE_FALSE(result);
-  CHECK(result.error() == model::DomainError::at_field(model::DomainErrorCode::EmptyCollection,
-                                                       "organization.firms"));
+  CHECK(result.error() == model::DomainError::create_at_field(
+                              model::DomainErrorCode::EmptyCollection, "organization.firms"));
 }
 
 // --------------------------------------------------------

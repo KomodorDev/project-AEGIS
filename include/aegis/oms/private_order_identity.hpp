@@ -147,10 +147,10 @@ public:
   // Validate the ordinal before composing all three identity components in fixed-width order.
   template <model::detail::CheckedIntegerInput Counter>
   [[nodiscard]] static model::Result<CancelAttemptId>
-  from_parts(const recovery::RuntimeEpochId& runtime_epoch_id, const model::OrderId& order_id,
-             Counter counter) {
+  cancel_attempt_id_from_components(const recovery::RuntimeEpochId& runtime_epoch_id,
+                                    const model::OrderId& order_id, Counter counter) {
     if (!std::in_range<std::uint64_t>(counter) || counter == 0) {
-      return model::Result<CancelAttemptId>::failure(model::DomainError::at_field(
+      return model::Result<CancelAttemptId>::create_failure(model::DomainError::create_at_field(
           model::DomainErrorCode::InvalidPrivateIdentity, "cancel_attempt_id"));
     }
     const auto validated_counter = static_cast<std::uint64_t>(counter);
@@ -163,7 +163,7 @@ public:
       bytes[recovery::RuntimeEpochId::byte_size + model::OrderId::byte_size + index] =
           static_cast<std::uint8_t>((validated_counter >> shift) & 0xffU);
     }
-    return model::Result<CancelAttemptId>::success(
+    return model::Result<CancelAttemptId>::create_success(
         CancelAttemptId{runtime_epoch_id, order_id, validated_counter, bytes});
   }
 
@@ -220,22 +220,23 @@ public:
   // --------------------------------------------------------
   // Start one order's current-runtime cancel stream at ordinal one.
   [[nodiscard]] static model::Result<CancelAttemptIdProvider>
-  create(recovery::RuntimeEpochId runtime_epoch_id, model::OrderId order_id) {
-    return create(runtime_epoch_id, order_id, 1U);
+  create_cancel_attempt_id_provider(recovery::RuntimeEpochId runtime_epoch_id,
+                                    model::OrderId order_id) {
+    return create_cancel_attempt_id_provider(runtime_epoch_id, order_id, 1U);
   }
 
   // --------------------------------------------------------
   // Restore or inject a checked first unissued ordinal without signed narrowing.
   template <model::detail::CheckedIntegerInput Counter>
   [[nodiscard]] static model::Result<CancelAttemptIdProvider>
-  create(recovery::RuntimeEpochId runtime_epoch_id, model::OrderId order_id,
-         Counter initial_counter) {
-    const auto validation =
-        CancelAttemptId::from_parts(runtime_epoch_id, order_id, initial_counter);
+  create_cancel_attempt_id_provider(recovery::RuntimeEpochId runtime_epoch_id,
+                                    model::OrderId order_id, Counter initial_counter) {
+    const auto validation = CancelAttemptId::cancel_attempt_id_from_components(
+        runtime_epoch_id, order_id, initial_counter);
     if (!validation) {
-      return model::Result<CancelAttemptIdProvider>::failure(validation.error());
+      return model::Result<CancelAttemptIdProvider>::create_failure(validation.error());
     }
-    return model::Result<CancelAttemptIdProvider>::success(CancelAttemptIdProvider{
+    return model::Result<CancelAttemptIdProvider>::create_success(CancelAttemptIdProvider{
         runtime_epoch_id, order_id, static_cast<std::uint64_t>(initial_counter)});
   }
 
@@ -267,12 +268,13 @@ public:
 
   // --------------------------------------------------------
   // Emit the current ordinal exactly once, then advance or enter sticky exhaustion.
-  [[nodiscard]] model::Result<CancelAttemptId> next() {
+  [[nodiscard]] model::Result<CancelAttemptId> generate_next_cancel_attempt_id() {
     if (exhausted_) {
-      return model::Result<CancelAttemptId>::failure(model::DomainError::at_field(
+      return model::Result<CancelAttemptId>::create_failure(model::DomainError::create_at_field(
           CancelAttemptId::exhaustion_code, std::string{CancelAttemptId::field}));
     }
-    auto identity = CancelAttemptId::from_parts(runtime_epoch_id_, order_id_, next_counter_);
+    auto identity = CancelAttemptId::cancel_attempt_id_from_components(runtime_epoch_id_, order_id_,
+                                                                       next_counter_);
     if (next_counter_ == std::numeric_limits<std::uint64_t>::max()) {
       exhausted_ = true;
     } else {

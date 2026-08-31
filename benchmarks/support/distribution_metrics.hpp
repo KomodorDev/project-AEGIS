@@ -24,22 +24,22 @@ struct LatencySummary {
 // --------------------------------------------------------
 // Convert one monotonic clock interval into its unsigned nanosecond duration.
 [[nodiscard]] std::uint64_t
-elapsed_nanoseconds(std::chrono::steady_clock::time_point started,
-                    std::chrono::steady_clock::time_point finished) noexcept;
+calculate_elapsed_nanoseconds(std::chrono::steady_clock::time_point started,
+                              std::chrono::steady_clock::time_point finished) noexcept;
 
 // --------------------------------------------------------
 // Convert integer nanoseconds to the seconds required by Google Benchmark manual timing.
-[[nodiscard]] double seconds(std::uint64_t nanoseconds) noexcept;
+[[nodiscard]] double nanoseconds_to_seconds(std::uint64_t nanoseconds) noexcept;
 
 // --------------------------------------------------------
 // Sort one owned distribution and return its fixed nearest-rank percentiles.
-[[nodiscard]] LatencySummary summarize(std::vector<std::uint64_t>& samples);
+[[nodiscard]] LatencySummary summarize_latency_samples(std::vector<std::uint64_t>& samples);
 
 // --------------------------------------------------------
 // Publish the common distribution, throughput, sample, and scoped-allocation counters.
-void publish_distribution(benchmark::State& state, std::vector<std::uint64_t>& samples,
-                          std::uint64_t allocation_count, std::string_view throughput_name,
-                          std::string_view allocation_name);
+void publish_latency_distribution(benchmark::State& state, std::vector<std::uint64_t>& samples,
+                                  std::uint64_t allocation_count, std::string_view throughput_name,
+                                  std::string_view allocation_name);
 
 // --------------------------------------------------------
 

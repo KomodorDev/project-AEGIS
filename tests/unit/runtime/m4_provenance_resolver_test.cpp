@@ -30,12 +30,12 @@ static_assert(!std::is_aggregate_v<oms::NormalizedPrivateOrderInput>);
 TEST_CASE("M4 provenance resolver publishes every configuration-proved subject shape",
           "[m4][provenance]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& resolver = fixture.resolver();
+  const auto& resolver = fixture.provenance_resolver();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Lineage provenance carries the complete root and no sentinel subject.
   const auto root_only = resolver.create_root_only_provenance();
-  REQUIRE(root_only.root() == fixture.authority().m4_policy.root_provenance());
+  REQUIRE(root_only.root() == fixture.test_authority().m4_policy.root_provenance());
   REQUIRE_FALSE(root_only.subject().has_value());
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -63,7 +63,7 @@ TEST_CASE("M4 provenance resolver publishes every configuration-proved subject s
   REQUIRE(instrument.value().subject()->instrument().has_value());
   REQUIRE(instrument.value().subject()->instrument()->instrument_id == fixture.instrument_id());
   REQUIRE(instrument.value().subject()->instrument()->metadata_revision ==
-          fixture.record().provenance().metadata_revision);
+          fixture.outbound_order_record().provenance().metadata_revision);
   REQUIRE_FALSE(instrument.value().subject()->route().has_value());
   REQUIRE(account.value() != instrument.value());
 
@@ -75,7 +75,7 @@ TEST_CASE("M4 provenance resolver publishes every configuration-proved subject s
 // locators or visual similarity.
 TEST_CASE("M4 authoritative provenance remains source-limited", "[m4][provenance]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& resolver = fixture.resolver();
+  const auto& resolver = fixture.provenance_resolver();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A supported configured source may retain firm plus instrument/metadata, never local ownership.
@@ -116,7 +116,7 @@ TEST_CASE("M4 authoritative provenance remains source-limited", "[m4][provenance
 TEST_CASE("M4 configured provenance rejects missing or contradictory account authority",
           "[m4][provenance]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& resolver = fixture.resolver();
+  const auto& resolver = fixture.provenance_resolver();
   const auto unknown_account =
       test_support::parse_m4_identifier_or_throw<model::LogicalAccountId>("account.not-configured");
   const auto wrong_venue = test_support::parse_m4_identifier_or_throw<model::VenueId>("other");
@@ -144,12 +144,13 @@ TEST_CASE("M4 configured provenance rejects missing or contradictory account aut
 // Resolver creation rejects a valid configuration that does not match the sealed M4 root.
 TEST_CASE("M4 provenance resolver rejects a different sealed configuration", "[m4][provenance]") {
   const auto authority = test_support::create_m4_test_authority_or_throw();
-  auto other =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  auto other = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
   REQUIRE(other);
   REQUIRE(other.value().fingerprint() != authority.configuration.fingerprint());
 
-  const auto rejected = runtime::M4ProvenanceResolver::create(other.value(), authority.m4_policy);
+  const auto rejected = runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+      other.value(), authority.m4_policy);
   REQUIRE_FALSE(rejected);
   REQUIRE(rejected.error().code == model::DomainErrorCode::InvalidPrivateEvent);
   REQUIRE(rejected.error().context.field == "m4_provenance.configuration_fingerprint");
@@ -165,8 +166,8 @@ TEST_CASE("M4 provenance resolver owns its complete normalization authority", "[
   // Copy a sealed configuration into the resolver and destroy the policy-bearing fixture scope.
   auto resolver = [] {
     auto authority = test_support::create_m4_test_authority_or_throw();
-    auto created =
-        runtime::M4ProvenanceResolver::create(authority.configuration, authority.m4_policy);
+    auto created = runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+        authority.configuration, authority.m4_policy);
     if (!created) {
       throw std::logic_error{"invalid owning M4 resolver fixture"};
     }

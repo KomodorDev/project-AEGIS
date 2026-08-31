@@ -63,13 +63,14 @@ struct CallbackObservation {
 // ########################################################################
 
 // ########################################################################
-// CapturingStrategy records only bounded immutable values from each synchronous callback.
-class CapturingStrategy final : public runtime::Strategy {
+// MarketCallbackCapturingStrategy records only bounded immutable values from each synchronous
+// callback.
+class MarketCallbackCapturingStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
   // Borrow a construction-time-reserved observation vector that outlives this strategy.
-  explicit CapturingStrategy(std::vector<CallbackObservation>& observations) noexcept
+  explicit MarketCallbackCapturingStrategy(std::vector<CallbackObservation>& observations) noexcept
       : observations_{&observations} {}
 
   // --------------------------------------------------------
@@ -156,8 +157,9 @@ struct OwnerCloseControl {
 // ########################################################################
 
 // ########################################################################
-// OwnerDriveControl publishes the result of one deliberately recursive over-bound drive request.
-struct OwnerDriveControl {
+// OwnerReentrantExecutionControl publishes the result of one deliberately recursive over-bound
+// drive request.
+struct OwnerReentrantExecutionControl {
   std::atomic<runtime::MarketRuntime*> runtime{nullptr};
   std::atomic_bool armed{false};
   std::atomic_bool returned{false};
@@ -179,14 +181,14 @@ public:
   // Exercise the same close path if a Ready update is the first armed callback.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext&) noexcept override {
-    close_once();
+    close_runtime_once();
   }
 
   // --------------------------------------------------------
   // The bootstrap state callback is the deterministic self-close trigger in the regression test.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext&) noexcept override {
-    close_once();
+    close_runtime_once();
   }
 
   // --------------------------------------------------------
@@ -194,7 +196,7 @@ private:
 
   // --------------------------------------------------------
   // Consume the arm once, close through the stable external handle, and prove the call returned.
-  void close_once() noexcept {
+  void close_runtime_once() noexcept {
     if (!control_->armed.exchange(false, std::memory_order_acq_rel)) {
       return;
     }
@@ -214,26 +216,28 @@ private:
 // ########################################################################
 
 // ########################################################################
-// OwnerDrivingStrategy proves active-owner reentry takes precedence over an invalid drive bound.
-class OwnerDrivingStrategy final : public runtime::Strategy {
+// OwnerReentrantExecutionStrategy proves active-owner reentry takes precedence over an invalid
+// drive bound.
+class OwnerReentrantExecutionStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
   // Borrow control storage whose stable runtime handle is published after factory return.
-  explicit OwnerDrivingStrategy(OwnerDriveControl& control) noexcept : control_{&control} {}
+  explicit OwnerReentrantExecutionStrategy(OwnerReentrantExecutionControl& control) noexcept
+      : control_{&control} {}
 
   // --------------------------------------------------------
   // A market callback is an equivalent reentry boundary if it is the first armed callback.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext&) noexcept override {
-    drive_once();
+    request_reentrant_drive_once();
   }
 
   // --------------------------------------------------------
   // Bootstrap supplies the deterministic callback used by the composed reentry test.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext&) noexcept override {
-    drive_once();
+    request_reentrant_drive_once();
   }
 
   // --------------------------------------------------------
@@ -241,13 +245,13 @@ private:
 
   // --------------------------------------------------------
   // Request one more turn than policy allows and retain only the stable assigned error code.
-  void drive_once() noexcept {
+  void request_reentrant_drive_once() noexcept {
     if (!control_->armed.exchange(false, std::memory_order_acq_rel)) {
       return;
     }
     auto* const runtime = control_->runtime.load(std::memory_order_acquire);
     if (runtime != nullptr) {
-      const auto driven = runtime->drive(33U);
+      const auto driven = runtime->execute_pending_turns(33U);
       if (!driven) {
         control_->error_code.store(static_cast<std::uint32_t>(driven.error().code),
                                    std::memory_order_release);
@@ -257,7 +261,7 @@ private:
   }
 
   // --------------------------------------------------------
-  OwnerDriveControl* control_;
+  OwnerReentrantExecutionControl* control_;
 };
 
 // ########################################################################
@@ -270,7 +274,7 @@ public:
 
   // --------------------------------------------------------
   // Publish the regression script only after bootstrap has completed successfully.
-  void arm() noexcept {
+  void arm_regression_script() noexcept {
     reading_.store(0U, std::memory_order_relaxed);
     armed_.store(true, std::memory_order_release);
   }
@@ -303,7 +307,7 @@ public:
 
   // --------------------------------------------------------
   // Begin a deterministic alternating callback start/finish script.
-  void arm() noexcept {
+  void arm_budget_script() noexcept {
     reading_.store(0U, std::memory_order_relaxed);
     armed_.store(true, std::memory_order_release);
   }
@@ -329,8 +333,9 @@ private:
 // ########################################################################
 
 // ########################################################################
-// Compile-time probes prove a caller-authored order has no organization, account, venue, or local
-// identity fields with which a strategy could forge runtime-bound submission attribution.
+// Interesting syntax: requires-expression probes prove a caller-authored order has no organization,
+// account, venue, or local identity fields with which a strategy could forge runtime-bound
+// submission attribution.
 template <typename Request>
 concept HasCallerFirm = requires(Request request) { request.firm_id; };
 
@@ -395,14 +400,14 @@ public:
   // A Ready callback is an equivalent submission boundary if it is the first delivered callback.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext& context) noexcept override {
-    submit_once(context);
+    submit_request_once(context);
   }
 
   // --------------------------------------------------------
   // Bootstrap is the deterministic first callback used by the composition tests.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext& context) noexcept override {
-    submit_once(context);
+    submit_request_once(context);
   }
 
   // --------------------------------------------------------
@@ -410,7 +415,7 @@ private:
 
   // --------------------------------------------------------
   // Copy authoritative context identity, call submit directly, and retain the result before return.
-  void submit_once(runtime::BotContext& context) noexcept {
+  void submit_request_once(runtime::BotContext& context) noexcept {
     if (capture_->callbacks != 0U) {
       return;
     }
@@ -420,7 +425,7 @@ private:
     capture_->bot_id = std::string{context.bot_id().value()};
     capture_->strategy_id = std::string{context.strategy_id().value()};
     capture_->callback_ordinal = context.callback_ordinal();
-    const auto result = context.submit(request_);
+    const auto result = context.submit_order(request_);
     capture_->disposition = result.disposition();
     capture_->stage = result.stage();
     capture_->reason = result.reason();
@@ -454,18 +459,21 @@ class SubmissionGateStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
+  // Borrow control storage whose lifetime encloses the dedicated callback and test thread.
   explicit SubmissionGateStrategy(SubmissionGateControl& control) noexcept : control_{&control} {}
 
   // --------------------------------------------------------
+  // Hold the first market-data callback open without consuming submission authority.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext& context) noexcept override {
-    hold_once(context);
+    hold_callback_open_once(context);
   }
 
   // --------------------------------------------------------
+  // Hold the first readiness callback open without consuming submission authority.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext& context) noexcept override {
-    hold_once(context);
+    hold_callback_open_once(context);
   }
 
   // --------------------------------------------------------
@@ -473,7 +481,7 @@ private:
 
   // --------------------------------------------------------
   // Publish the persistent context while active, then wait until the test has exercised WrongOwner.
-  void hold_once(runtime::BotContext& context) noexcept {
+  void hold_callback_open_once(runtime::BotContext& context) noexcept {
     if (entered_) {
       return;
     }
@@ -494,8 +502,9 @@ private:
 
 // --------------------------------------------------------
 // Invalid identifier literals are fixture-authoring defects rather than coordinator behavior.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in market-runtime test fixture"};
   }
@@ -504,7 +513,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Parse exact prices without binary floating-point fixture drift.
-[[nodiscard]] model::Price price(std::string_view text) {
+[[nodiscard]] model::Price parse_price_or_throw(std::string_view text) {
   auto parsed = model::Price::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid price in market-runtime test fixture"};
@@ -514,7 +523,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Parse exact quantities without binary floating-point fixture drift.
-[[nodiscard]] model::Quantity quantity(std::string_view text) {
+[[nodiscard]] model::Quantity parse_quantity_or_throw(std::string_view text) {
   auto parsed = model::Quantity::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid quantity in market-runtime test fixture"};
@@ -524,7 +533,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Parse exact quote notionals without binary floating-point fixture drift.
-[[nodiscard]] model::Notional notional(std::string_view text) {
+[[nodiscard]] model::Notional parse_notional_or_throw(std::string_view text) {
   auto parsed = model::Notional::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid notional in market-runtime test fixture"};
@@ -534,10 +543,11 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Derive the one-bot M3 authority without changing the accepted observation-only reference fixture.
-[[nodiscard]] configuration::StartupConfiguration m3_configuration() {
-  auto params = test_support::reference_configuration_params();
+[[nodiscard]] configuration::StartupConfiguration create_m3_configuration_or_throw() {
+  auto params = test_support::create_reference_configuration_params_or_throw();
   params.routes.front().state = execution::ExecutionRouteState::Enabled;
-  auto created = configuration::StartupConfiguration::create(std::move(params));
+  auto created =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
   if (!created) {
     throw std::logic_error{"invalid M3 market-runtime configuration"};
   }
@@ -546,10 +556,9 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Resolve one heterogeneous scope subject from the same sealed route and attribution authority.
-[[nodiscard]] std::string m3_scope_subject(const execution::ExecutionRoute& route,
-                                           const organization::BotAttribution& attribution,
-                                           const model::InstrumentMetadata& metadata,
-                                           risk::RiskScopeKind scope) {
+[[nodiscard]] std::string derive_m3_scope_subject_or_throw(
+    const execution::ExecutionRoute& route, const organization::BotAttribution& attribution,
+    const model::InstrumentMetadata& metadata, risk::RiskScopeKind scope) {
   switch (scope) {
   case risk::RiskScopeKind::Bot:
     return std::string{attribution.bot_id.value()};
@@ -573,7 +582,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 // --------------------------------------------------------
 // Author one complete immutable seven-scope policy with generous exact limits for one fake order.
 [[nodiscard]] risk::RiskPolicyParams
-m3_risk_policy(const configuration::StartupConfiguration& configuration) {
+create_m3_risk_policy_params_or_throw(const configuration::StartupConfiguration& configuration) {
   std::vector<configuration::InstrumentMetadataRevisionEntry> metadata_revisions;
   std::vector<risk::RiskLimitSetParams> limits;
   for (const auto& route : configuration.routes().routes()) {
@@ -594,15 +603,15 @@ m3_risk_policy(const configuration::StartupConfiguration& configuration) {
       limits.push_back(risk::RiskLimitSetParams{
           attribution->firm_id,
           scope,
-          m3_scope_subject(route, *attribution, *metadata, scope),
+          derive_m3_scope_subject_or_throw(route, *attribution, *metadata, scope),
           metadata->instrument_id(),
           std::string{metadata->quote_currency()},
-          quantity("1000"),
-          notional("100000"),
+          parse_quantity_or_throw("1000"),
+          parse_notional_or_throw("100000"),
           8U,
-          notional("1000000"),
-          quantity("10000"),
-          notional("1000000"),
+          parse_notional_or_throw("1000000"),
+          parse_quantity_or_throw("10000"),
+          parse_notional_or_throw("1000000"),
       });
     }
   }
@@ -614,7 +623,7 @@ m3_risk_policy(const configuration::StartupConfiguration& configuration) {
   metadata_revisions.erase(std::unique(metadata_revisions.begin(), metadata_revisions.end()),
                            metadata_revisions.end());
   return risk::RiskPolicyParams{
-      model::RiskPolicyRevision::initial(),
+      model::RiskPolicyRevision::create_initial(),
       configuration.fingerprint(),
       configuration.revision(),
       configuration.organization().revision(),
@@ -628,21 +637,22 @@ m3_risk_policy(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Build one deterministic fake-only stack with enough preallocated state for four submissions.
-[[nodiscard]] runtime::FakeSubmissionRuntimeParams m3_submission_params(
+[[nodiscard]] runtime::FakeSubmissionRuntimeParams create_m3_submission_params_or_throw(
     const configuration::StartupConfiguration& configuration,
     execution::FakeInitiationOutcome outcome =
         execution::FakeInitiationOutcome::AcceptedAndInitiated,
     std::unique_ptr<execution::SubmissionMeasurementClock> measurement_clock = nullptr) {
   constexpr std::uint64_t maximum_attempts = 4U;
-  auto encoder_script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode,
-                                                             maximum_attempts, {});
-  auto initiator_script = execution::FakeInitiatorScript::create(outcome, maximum_attempts, {});
+  auto encoder_script = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, maximum_attempts, {});
+  auto initiator_script =
+      execution::FakeInitiatorScript::create_fake_initiator_script(outcome, maximum_attempts, {});
   model::OrderNamespace::Bytes namespace_bytes{};
   for (std::size_t index = 0U; index < namespace_bytes.size(); ++index) {
     namespace_bytes[index] = static_cast<std::uint8_t>(0x40U + index);
   }
-  auto order_ids =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{namespace_bytes});
+  auto order_ids = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{namespace_bytes});
   if (!encoder_script || !initiator_script || !order_ids) {
     throw std::logic_error{"invalid M3 market-runtime fake script"};
   }
@@ -650,7 +660,7 @@ m3_risk_policy(const configuration::StartupConfiguration& configuration) {
     measurement_clock = std::make_unique<execution::SteadySubmissionMeasurementClock>();
   }
   return runtime::FakeSubmissionRuntimeParams{
-      m3_risk_policy(configuration),
+      create_m3_risk_policy_params_or_throw(configuration),
       execution::SubmissionPolicyCapacities{maximum_attempts, 4U, 4U, 1'024U, 4U, 44U, 16U},
       std::move(encoder_script).value(),
       std::move(initiator_script).value(),
@@ -661,23 +671,23 @@ m3_risk_policy(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Use the sole enabled route and exact limit/GTC values accepted by reference metadata.
-[[nodiscard]] execution::OrderRequest m3_order_request() {
+[[nodiscard]] execution::OrderRequest create_m3_order_request_or_throw() {
   return execution::OrderRequest{
-      id<model::RouteId>("route.deribit-testnet-btc-perpetual"),
-      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
       execution::OrderSide::Buy,
       execution::OrderType::Limit,
       execution::TimeInForce::GoodTilCancelled,
-      price("30000.5"),
-      quantity("2"),
+      parse_price_or_throw("30000.5"),
+      parse_quantity_or_throw("2"),
   };
 }
 
 // --------------------------------------------------------
 // Seal one reference configuration before policy and runtime construction borrow its provenance.
-[[nodiscard]] configuration::StartupConfiguration reference_configuration() {
-  auto created =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+[[nodiscard]] configuration::StartupConfiguration create_reference_configuration_or_throw() {
+  auto created = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
   if (!created) {
     throw std::logic_error{"invalid startup configuration in market-runtime test fixture"};
   }
@@ -686,26 +696,27 @@ m3_risk_policy(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Define the sole credential-free public source used by the deterministic reference scenario.
-[[nodiscard]] runtime::RuntimeSourceDefinition reference_source() {
+[[nodiscard]] runtime::RuntimeSourceDefinition create_reference_source_or_throw() {
   return runtime::RuntimeSourceDefinition{
-      id<model::MarketSourceId>("source.deribit-btc-perpetual"),
-      id<model::VenueId>("deribit"),
-      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-      id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-      model::InstrumentMetadataRevision::initial(),
+      parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+      parse_identifier_or_throw<model::VenueId>("deribit"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+      model::InstrumentMetadataRevision::create_initial(),
   };
 }
 
 // --------------------------------------------------------
 // Keep unit-test bounds small while leaving enough callback and trace headroom for every turn.
 [[nodiscard]] runtime::RuntimePolicy
-reference_policy(const configuration::StartupConfiguration& configuration,
-                 std::uint32_t ingress_capacity, std::uint32_t trace_capacity = 256U) {
-  auto created = runtime::RuntimePolicy::create(
+create_reference_policy_or_throw(const configuration::StartupConfiguration& configuration,
+                                 std::uint32_t ingress_capacity,
+                                 std::uint32_t trace_capacity = 256U) {
+  auto created = runtime::RuntimePolicy::create_runtime_policy(
       configuration, runtime::RuntimePolicyParams{
                          runtime::RuntimePolicyLimits{ingress_capacity, 4096U, 64U, 20U, 1'000U, 2U,
                                                       64U, trace_capacity, 32U, 100'000U},
-                         {reference_source()},
+                         {create_reference_source_or_throw()},
                      });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in market-runtime test fixture"};
@@ -716,17 +727,18 @@ reference_policy(const configuration::StartupConfiguration& configuration,
 // --------------------------------------------------------
 // Compose one stable runtime whose sole configured strategy submits through the named M3 factory.
 [[nodiscard]] std::unique_ptr<runtime::MarketRuntime>
-m3_runtime(model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
-           SubmissionCapture& capture,
-           execution::FakeInitiationOutcome outcome =
-               execution::FakeInitiationOutcome::AcceptedAndInitiated) {
-  auto configuration = m3_configuration();
-  auto policy = reference_policy(configuration, 4U);
-  auto submission_params = m3_submission_params(configuration, outcome);
+create_m3_runtime_or_throw(model::ClockProvider& executor_clock,
+                           model::ClockProvider& callback_measurement_clock,
+                           SubmissionCapture& capture,
+                           execution::FakeInitiationOutcome outcome =
+                               execution::FakeInitiationOutcome::AcceptedAndInitiated) {
+  auto configuration = create_m3_configuration_or_throw();
+  auto policy = create_reference_policy_or_throw(configuration, 4U);
+  auto submission_params = create_m3_submission_params_or_throw(configuration, outcome);
   std::vector<runtime::BotStrategyRegistration> strategies;
   strategies.push_back(runtime::BotStrategyRegistration{
-      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-      std::make_unique<SubmittingStrategy>(m3_order_request(), capture),
+      parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmittingStrategy>(create_m3_order_request_or_throw(), capture),
   });
   auto created = runtime::MarketRuntime::create_with_fake_submission(
       std::move(configuration), std::move(policy), executor_clock, callback_measurement_clock,
@@ -740,14 +752,13 @@ m3_runtime(model::ClockProvider& executor_clock, model::ClockProvider& callback_
 
 // --------------------------------------------------------
 // Own one caller attempt while leaving its optional attribution untrusted until runtime admission.
-[[nodiscard]] market_data::IngressFrameAttempt
-attempt(std::string frame,
-        std::optional<std::string_view> source_id = "source.deribit-btc-perpetual") {
+[[nodiscard]] market_data::IngressFrameAttempt create_ingress_attempt_or_throw(
+    std::string frame, std::optional<std::string_view> source_id = "source.deribit-btc-perpetual") {
   std::optional<model::MarketSourceId> typed_source;
   if (source_id.has_value()) {
-    typed_source = id<model::MarketSourceId>(source_id.value());
+    typed_source = parse_identifier_or_throw<model::MarketSourceId>(source_id.value());
   }
-  auto created = market_data::IngressFrameAttempt::create(
+  auto created = market_data::IngressFrameAttempt::create_ingress_frame_attempt(
       std::move(typed_source), model::SessionEpoch{1U}, std::move(frame));
   if (!created) {
     throw std::logic_error{"invalid ingress attempt in market-runtime test fixture"};
@@ -757,38 +768,38 @@ attempt(std::string frame,
 
 // --------------------------------------------------------
 // Return the complete valid snapshot used to establish generation one.
-[[nodiscard]] std::string snapshot_frame() {
+[[nodiscard]] std::string create_snapshot_frame() {
   return "AEGISMD|1|source.deribit-btc-perpetual|snapshot|100|none|1000|1|ok:book100|4|"
          "B,30000.5,2|B,30000.0,4|A,30001.0,3|A,30001.5,5";
 }
 
 // --------------------------------------------------------
 // Return a complete delta whose deletions and replacements expose a partial-apply bug immediately.
-[[nodiscard]] std::string delta_frame() {
+[[nodiscard]] std::string create_delta_frame() {
   return "AEGISMD|1|source.deribit-btc-perpetual|delta|101|100|1100|1|ok:book101|4|"
          "B,30000.5,0|B,30000.0,6|A,30001.0,0|A,30002.0,8";
 }
 
 // ########################################################################
 // One harness keeps observations and borrowed clocks alive until after the runtime is destroyed.
-class RuntimeHarness final {
+class MarketRuntimeHarness final {
 public:
 
   // --------------------------------------------------------
   // Create one manual-driver runtime with a pre-reserved, single reference strategy.
-  explicit RuntimeHarness(std::uint32_t ingress_capacity)
+  explicit MarketRuntimeHarness(std::uint32_t ingress_capacity)
       : executor_clock_{100U}, callback_measurement_clock_{1'000U} {
     observations_.reserve(32U);
-    auto configuration = reference_configuration();
-    auto policy = reference_policy(configuration, ingress_capacity);
+    auto configuration = create_reference_configuration_or_throw();
+    auto policy = create_reference_policy_or_throw(configuration, ingress_capacity);
     std::vector<runtime::BotStrategyRegistration> strategies;
     strategies.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-        std::make_unique<CapturingStrategy>(observations_),
+        parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+        std::make_unique<MarketCallbackCapturingStrategy>(observations_),
     });
-    auto created =
-        runtime::MarketRuntime::create(std::move(configuration), std::move(policy), executor_clock_,
-                                       callback_measurement_clock_, std::move(strategies));
+    auto created = runtime::MarketRuntime::create_market_runtime(
+        std::move(configuration), std::move(policy), executor_clock_, callback_measurement_clock_,
+        std::move(strategies));
     if (!created) {
       throw std::logic_error{"invalid market runtime in test fixture"};
     }
@@ -796,10 +807,12 @@ public:
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] runtime::MarketRuntime& runtime() noexcept { return *runtime_; }
+  // Borrow the manual-driver runtime while the harness retains its clocks and strategy storage.
+  [[nodiscard]] runtime::MarketRuntime& market_runtime() noexcept { return *runtime_; }
 
   // --------------------------------------------------------
-  [[nodiscard]] const std::vector<CallbackObservation>& observations() const noexcept {
+  // Borrow the complete copied callback sequence retained by the harness strategy.
+  [[nodiscard]] const std::vector<CallbackObservation>& callback_observations() const noexcept {
     return observations_;
   }
 
@@ -815,19 +828,19 @@ private:
 
 // --------------------------------------------------------
 // Compose one runtime around a caller-selected strategy and clocks for lifecycle fault regressions.
-[[nodiscard]] std::unique_ptr<runtime::MarketRuntime>
-runtime_with_strategy(std::uint32_t ingress_capacity, model::ClockProvider& executor_clock,
-                      model::ClockProvider& callback_measurement_clock,
-                      std::unique_ptr<runtime::Strategy> strategy,
-                      std::uint32_t trace_capacity = 256U) {
-  auto configuration = reference_configuration();
-  auto policy = reference_policy(configuration, ingress_capacity, trace_capacity);
+[[nodiscard]] std::unique_ptr<runtime::MarketRuntime> create_runtime_with_strategy_or_throw(
+    std::uint32_t ingress_capacity, model::ClockProvider& executor_clock,
+    model::ClockProvider& callback_measurement_clock, std::unique_ptr<runtime::Strategy> strategy,
+    std::uint32_t trace_capacity = 256U) {
+  auto configuration = create_reference_configuration_or_throw();
+  auto policy = create_reference_policy_or_throw(configuration, ingress_capacity, trace_capacity);
   std::vector<runtime::BotStrategyRegistration> strategies;
   strategies.push_back(runtime::BotStrategyRegistration{
-      id<model::BotId>("bot.deribit-btc-perpetual-reference"), std::move(strategy)});
-  auto created =
-      runtime::MarketRuntime::create(std::move(configuration), std::move(policy), executor_clock,
-                                     callback_measurement_clock, std::move(strategies));
+      parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::move(strategy)});
+  auto created = runtime::MarketRuntime::create_market_runtime(
+      std::move(configuration), std::move(policy), executor_clock, callback_measurement_clock,
+      std::move(strategies));
   if (!created) {
     throw std::logic_error{"invalid controlled market runtime in test fixture"};
   }
@@ -836,25 +849,26 @@ runtime_with_strategy(std::uint32_t ingress_capacity, model::ClockProvider& exec
 
 // --------------------------------------------------------
 // Run the genuine queued bootstrap as the first manually owned turn.
-void bind_and_bootstrap(RuntimeHarness& harness) {
-  REQUIRE(harness.runtime().bind_to_current_thread());
-  auto turn = harness.runtime().run_one();
+void require_bound_and_bootstrapped_runtime(MarketRuntimeHarness& harness) {
+  REQUIRE(harness.market_runtime().bind_to_current_thread());
+  auto turn = harness.market_runtime().execute_next_turn();
   REQUIRE(turn);
   REQUIRE(turn.value().has_value());
   CHECK(turn.value()->kind == runtime::TurnKind::Command);
-  CHECK(turn.value()->turn_ordinal == model::TurnOrdinal::initial());
-  CHECK(turn.value()->attempt_ordinal == model::AdmissionOrdinal::initial());
+  CHECK(turn.value()->turn_ordinal == model::TurnOrdinal::create_initial());
+  CHECK(turn.value()->attempt_ordinal == model::AdmissionOrdinal::create_initial());
 }
 
 // --------------------------------------------------------
 // Close, release deterministic ownership, and copy final evidence without Catch control flow.
-[[nodiscard]] runtime::MarketRuntimeEvidence close_and_collect(runtime::MarketRuntime& runtime) {
+[[nodiscard]] runtime::MarketRuntimeEvidence
+close_and_collect_evidence_or_throw(runtime::MarketRuntime& runtime) {
   runtime.close();
   const auto released = runtime.release_from_current_thread();
   if (!released) {
     throw std::logic_error{"failed to release market-runtime owner in test fixture"};
   }
-  auto evidence = runtime.quiescent_evidence();
+  auto evidence = runtime.collect_quiescent_evidence();
   if (!evidence) {
     throw std::logic_error{"failed to collect quiescent market-runtime evidence"};
   }
@@ -863,8 +877,8 @@ void bind_and_bootstrap(RuntimeHarness& harness) {
 
 // --------------------------------------------------------
 // Admit one frame and require ordinary bounded acceptance before its owner turn runs.
-void require_accepted(runtime::MarketRuntime& runtime,
-                      market_data::IngressFrameAttempt frame_attempt) {
+void require_accepted_frame(runtime::MarketRuntime& runtime,
+                            market_data::IngressFrameAttempt frame_attempt) {
   const auto decision = runtime.try_admit(std::move(frame_attempt));
   REQUIRE(decision);
   CHECK(decision.value().outcome == runtime::AdmissionOutcome::Accepted);
@@ -912,8 +926,8 @@ TEST_CASE("market runtime bootstraps one source through the manual serialized ow
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Construction enqueues exactly one genuine bootstrap command without binding an owner.
-  RuntimeHarness harness{4U};
-  const auto starting = harness.runtime().status();
+  MarketRuntimeHarness harness{4U};
+  const auto starting = harness.market_runtime().status();
   CHECK(starting.lifecycle == runtime::MarketRuntimeLifecycle::Starting);
   CHECK(starting.initialized_sources == 0U);
   CHECK(starting.executor.pending_commands == 1U);
@@ -924,26 +938,26 @@ TEST_CASE("market runtime bootstraps one source through the manual serialized ow
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The first owner turn publishes Synchronizing to the one canonical reference subscription.
-  bind_and_bootstrap(harness);
-  const auto running = harness.runtime().status();
+  require_bound_and_bootstrapped_runtime(harness);
+  const auto running = harness.market_runtime().status();
   CHECK(running.lifecycle == runtime::MarketRuntimeLifecycle::Running);
   CHECK(running.initialized_sources == 1U);
   CHECK(running.executor.pending_commands == 0U);
   CHECK(running.executor.owner_bound);
   REQUIRE(running.last_completed_turn.has_value());
-  REQUIRE(harness.observations().size() == 1U);
-  const auto& synchronizing = harness.observations().front();
+  REQUIRE(harness.callback_observations().size() == 1U);
+  const auto& synchronizing = harness.callback_observations().front();
   CHECK(synchronizing.kind == ObservedCallbackKind::State);
   CHECK(synchronizing.reference_route);
-  CHECK(synchronizing.callback_ordinal == model::CallbackOrdinal::initial());
+  CHECK(synchronizing.callback_ordinal == model::CallbackOrdinal::create_initial());
   CHECK(synchronizing.readiness == market_data::MarketReadiness::Synchronizing);
   CHECK_FALSE(synchronizing.book_generation.has_value());
   CHECK_FALSE(synchronizing.book_revision.has_value());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Closed and released evidence owns the final source summary and drained executor state.
-  const auto evidence = close_and_collect(harness.runtime());
-  CHECK(harness.runtime().status().lifecycle == runtime::MarketRuntimeLifecycle::Closed);
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
+  CHECK(harness.market_runtime().status().lifecycle == runtime::MarketRuntimeLifecycle::Closed);
   CHECK_FALSE(evidence.canonical_trace_bytes.empty());
   REQUIRE(evidence.trace_records.size() == 2U);
   CHECK(evidence.trace_records[0U].kind() == trace::RuntimeTraceEventKind::MarketStateTransition);
@@ -951,7 +965,7 @@ TEST_CASE("market runtime bootstraps one source through the manual serialized ow
   CHECK(evidence.diagnostics.empty());
   CHECK(evidence.dropped_diagnostics == 0U);
   REQUIRE(evidence.sources.size() == 1U);
-  CHECK(evidence.sources.front().source_ordinal == model::MarketSourceOrdinal::initial());
+  CHECK(evidence.sources.front().source_ordinal == model::MarketSourceOrdinal::create_initial());
   CHECK(evidence.sources.front().readiness == market_data::MarketReadiness::Synchronizing);
   CHECK_FALSE(evidence.sources.front().book_identity.has_value());
   CHECK_FALSE(evidence.sources.front().active_session.has_value());
@@ -973,55 +987,64 @@ TEST_CASE("market runtime routes snapshot and delta only after complete book com
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Bootstrap, then establish Ready with one complete authoritative snapshot.
-  RuntimeHarness harness{4U};
-  bind_and_bootstrap(harness);
-  require_accepted(harness.runtime(), attempt(snapshot_frame()));
-  const auto snapshot_turn = harness.runtime().run_one();
+  MarketRuntimeHarness harness{4U};
+  require_bound_and_bootstrapped_runtime(harness);
+  require_accepted_frame(harness.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  const auto snapshot_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(snapshot_turn);
   REQUIRE(snapshot_turn.value().has_value());
-  REQUIRE(harness.observations().size() == 3U);
-  CHECK(harness.observations()[1U].kind == ObservedCallbackKind::State);
-  CHECK(harness.observations()[1U].readiness == market_data::MarketReadiness::Ready);
-  const auto& snapshot = harness.observations()[2U];
+  REQUIRE(harness.callback_observations().size() == 3U);
+  CHECK(harness.callback_observations()[1U].kind == ObservedCallbackKind::State);
+  CHECK(harness.callback_observations()[1U].readiness == market_data::MarketReadiness::Ready);
+  const auto& snapshot = harness.callback_observations()[2U];
   CHECK(snapshot.kind == ObservedCallbackKind::Market);
   CHECK(snapshot.reference_route);
   CHECK(snapshot.callback_ordinal.value() == 3U);
-  CHECK(snapshot.book_generation == model::BookGeneration::initial());
-  CHECK(snapshot.book_revision == model::BookRevision::initial());
-  CHECK(snapshot.best_bid == price("30000.5"));
-  CHECK(snapshot.best_ask == price("30001.0"));
+  CHECK(snapshot.book_generation == model::BookGeneration::create_initial());
+  CHECK(snapshot.book_revision == model::BookRevision::create_initial());
+  CHECK(snapshot.best_bid == parse_price_or_throw("30000.5"));
+  CHECK(snapshot.best_ask == parse_price_or_throw("30001.0"));
   CHECK(snapshot.bid_count == 2U);
   CHECK(snapshot.ask_count == 2U);
-  CHECK((snapshot.bids[0U] == market_data::BookLevel{price("30000.5"), quantity("2")}));
-  CHECK((snapshot.bids[1U] == market_data::BookLevel{price("30000.0"), quantity("4")}));
-  CHECK((snapshot.asks[0U] == market_data::BookLevel{price("30001.0"), quantity("3")}));
-  CHECK((snapshot.asks[1U] == market_data::BookLevel{price("30001.5"), quantity("5")}));
+  CHECK((snapshot.bids[0U] ==
+         market_data::BookLevel{parse_price_or_throw("30000.5"), parse_quantity_or_throw("2")}));
+  CHECK((snapshot.bids[1U] ==
+         market_data::BookLevel{parse_price_or_throw("30000.0"), parse_quantity_or_throw("4")}));
+  CHECK((snapshot.asks[0U] ==
+         market_data::BookLevel{parse_price_or_throw("30001.0"), parse_quantity_or_throw("3")}));
+  CHECK((snapshot.asks[1U] ==
+         market_data::BookLevel{parse_price_or_throw("30001.5"), parse_quantity_or_throw("5")}));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One delta callback sees every deletion and replacement together, never an intermediate book.
-  require_accepted(harness.runtime(), attempt(delta_frame()));
-  const auto delta_turn = harness.runtime().run_one();
+  require_accepted_frame(harness.market_runtime(),
+                         create_ingress_attempt_or_throw(create_delta_frame()));
+  const auto delta_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(delta_turn);
   REQUIRE(delta_turn.value().has_value());
-  REQUIRE(harness.observations().size() == 4U);
-  const auto& delta = harness.observations()[3U];
+  REQUIRE(harness.callback_observations().size() == 4U);
+  const auto& delta = harness.callback_observations()[3U];
   CHECK(delta.kind == ObservedCallbackKind::Market);
   CHECK(delta.reference_route);
   CHECK(delta.callback_ordinal.value() == 4U);
-  CHECK(delta.book_generation == model::BookGeneration::initial());
+  CHECK(delta.book_generation == model::BookGeneration::create_initial());
   REQUIRE(delta.book_revision.has_value());
   CHECK(delta.book_revision->value() == 2U);
-  CHECK(delta.best_bid == price("30000.0"));
-  CHECK(delta.best_ask == price("30001.5"));
+  CHECK(delta.best_bid == parse_price_or_throw("30000.0"));
+  CHECK(delta.best_ask == parse_price_or_throw("30001.5"));
   CHECK(delta.bid_count == 1U);
   CHECK(delta.ask_count == 2U);
-  CHECK((delta.bids[0U] == market_data::BookLevel{price("30000.0"), quantity("6")}));
-  CHECK((delta.asks[0U] == market_data::BookLevel{price("30001.5"), quantity("5")}));
-  CHECK((delta.asks[1U] == market_data::BookLevel{price("30002.0"), quantity("8")}));
+  CHECK((delta.bids[0U] ==
+         market_data::BookLevel{parse_price_or_throw("30000.0"), parse_quantity_or_throw("6")}));
+  CHECK((delta.asks[0U] ==
+         market_data::BookLevel{parse_price_or_throw("30001.5"), parse_quantity_or_throw("5")}));
+  CHECK((delta.asks[1U] ==
+         market_data::BookLevel{parse_price_or_throw("30002.0"), parse_quantity_or_throw("8")}));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Quiescent state retains the last complete commit and exact stream anchor.
-  const auto evidence = close_and_collect(harness.runtime());
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
   REQUIRE(evidence.sources.size() == 1U);
   const auto& source = evidence.sources.front();
   CHECK(source.readiness == market_data::MarketReadiness::Ready);
@@ -1054,14 +1077,15 @@ TEST_CASE("market runtime resynchronizes one ready source through an owner turn"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Establish one committed book before admitting the source-scoped control command.
-  RuntimeHarness harness{4U};
-  bind_and_bootstrap(harness);
-  require_accepted(harness.runtime(), attempt(snapshot_frame()));
-  const auto snapshot_turn = harness.runtime().run_one();
+  MarketRuntimeHarness harness{4U};
+  require_bound_and_bootstrapped_runtime(harness);
+  require_accepted_frame(harness.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  const auto snapshot_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(snapshot_turn);
   REQUIRE(snapshot_turn.value().has_value());
-  const auto resynchronization = harness.runtime().try_resynchronize(
-      id<model::MarketSourceId>("source.deribit-btc-perpetual"));
+  const auto resynchronization = harness.market_runtime().try_resynchronize(
+      parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"));
   REQUIRE(resynchronization);
   CHECK(resynchronization.value().outcome == runtime::AdmissionOutcome::Accepted);
   REQUIRE(resynchronization.value().receipt.has_value());
@@ -1069,25 +1093,27 @@ TEST_CASE("market runtime resynchronizes one ready source through an owner turn"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The control turn publishes only Synchronizing while retaining identity counters internally.
-  const auto control_turn = harness.runtime().run_one();
+  const auto control_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(control_turn);
   REQUIRE(control_turn.value().has_value());
   CHECK(control_turn.value()->kind == runtime::TurnKind::Command);
-  REQUIRE(harness.observations().size() == 4U);
-  const auto& synchronizing = harness.observations().back();
+  REQUIRE(harness.callback_observations().size() == 4U);
+  const auto& synchronizing = harness.callback_observations().back();
   CHECK(synchronizing.kind == ObservedCallbackKind::State);
   CHECK(synchronizing.readiness == market_data::MarketReadiness::Synchronizing);
-  CHECK(synchronizing.book_generation == model::BookGeneration::initial());
-  CHECK(synchronizing.book_revision == model::BookRevision::initial());
+  CHECK(synchronizing.book_generation == model::BookGeneration::create_initial());
+  CHECK(synchronizing.book_revision == model::BookRevision::create_initial());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Cold evidence exposes cleared continuity and the retained identity without a market callback.
-  const auto evidence = close_and_collect(harness.runtime());
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
   REQUIRE(evidence.sources.size() == 1U);
   CHECK(evidence.sources.front().readiness == market_data::MarketReadiness::Synchronizing);
   REQUIRE(evidence.sources.front().book_identity.has_value());
-  CHECK(evidence.sources.front().book_identity->generation() == model::BookGeneration::initial());
-  CHECK(evidence.sources.front().book_identity->revision() == model::BookRevision::initial());
+  CHECK(evidence.sources.front().book_identity->generation() ==
+        model::BookGeneration::create_initial());
+  CHECK(evidence.sources.front().book_identity->revision() ==
+        model::BookRevision::create_initial());
   CHECK_FALSE(evidence.sources.front().active_session.has_value());
   CHECK_FALSE(evidence.sources.front().last_source_sequence.has_value());
   REQUIRE(evidence.trace_records.size() == 8U);
@@ -1104,41 +1130,43 @@ TEST_CASE("market runtime contains malformed input and recovers on a later valid
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A malformed quantity produces only one sanitized Invalid state callback.
-  RuntimeHarness harness{4U};
-  bind_and_bootstrap(harness);
-  require_accepted(
-      harness.runtime(),
-      attempt("AEGISMD|1|source.deribit-btc-perpetual|snapshot|100|none|1000|1|ok:bad|1|"
-              "B,30000.5,broken"));
-  const auto malformed_turn = harness.runtime().run_one();
+  MarketRuntimeHarness harness{4U};
+  require_bound_and_bootstrapped_runtime(harness);
+  require_accepted_frame(
+      harness.market_runtime(),
+      create_ingress_attempt_or_throw(
+          "AEGISMD|1|source.deribit-btc-perpetual|snapshot|100|none|1000|1|ok:bad|1|"
+          "B,30000.5,broken"));
+  const auto malformed_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(malformed_turn);
   REQUIRE(malformed_turn.value().has_value());
-  REQUIRE(harness.observations().size() == 2U);
-  CHECK(harness.observations()[1U].kind == ObservedCallbackKind::State);
-  CHECK(harness.observations()[1U].readiness == market_data::MarketReadiness::Invalid);
-  CHECK_FALSE(harness.observations()[1U].best_bid.has_value());
-  CHECK_FALSE(harness.observations()[1U].best_ask.has_value());
+  REQUIRE(harness.callback_observations().size() == 2U);
+  CHECK(harness.callback_observations()[1U].kind == ObservedCallbackKind::State);
+  CHECK(harness.callback_observations()[1U].readiness == market_data::MarketReadiness::Invalid);
+  CHECK_FALSE(harness.callback_observations()[1U].best_bid.has_value());
+  CHECK_FALSE(harness.callback_observations()[1U].best_ask.has_value());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The next valid snapshot starts the first generation from clean temporary parser state.
-  require_accepted(harness.runtime(), attempt(snapshot_frame()));
-  const auto recovery_turn = harness.runtime().run_one();
+  require_accepted_frame(harness.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  const auto recovery_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(recovery_turn);
   REQUIRE(recovery_turn.value().has_value());
-  REQUIRE(harness.observations().size() == 4U);
-  CHECK(harness.observations()[2U].kind == ObservedCallbackKind::State);
-  CHECK(harness.observations()[2U].readiness == market_data::MarketReadiness::Ready);
-  CHECK(harness.observations()[3U].kind == ObservedCallbackKind::Market);
-  CHECK(harness.observations()[3U].best_bid == price("30000.5"));
-  CHECK(harness.observations()[3U].best_ask == price("30001.0"));
+  REQUIRE(harness.callback_observations().size() == 4U);
+  CHECK(harness.callback_observations()[2U].kind == ObservedCallbackKind::State);
+  CHECK(harness.callback_observations()[2U].readiness == market_data::MarketReadiness::Ready);
+  CHECK(harness.callback_observations()[3U].kind == ObservedCallbackKind::Market);
+  CHECK(harness.callback_observations()[3U].best_bid == parse_price_or_throw("30000.5"));
+  CHECK(harness.callback_observations()[3U].best_ask == parse_price_or_throw("30001.0"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The bounded diagnostic exposes only assigned parse metadata, while state reflects recovery.
-  const auto evidence = close_and_collect(harness.runtime());
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
   REQUIRE(evidence.diagnostics.size() == 1U);
   const auto& diagnostic = evidence.diagnostics.front();
   CHECK(diagnostic.kind == runtime::RuntimeDiagnosticKind::MalformedInput);
-  CHECK(diagnostic.fields.source_ordinal == model::MarketSourceOrdinal::initial());
+  CHECK(diagnostic.fields.source_ordinal == model::MarketSourceOrdinal::create_initial());
   CHECK(diagnostic.fields.detail_code ==
         (0x00010000U |
          static_cast<std::uint32_t>(market_data::RecordedFixtureParseCode::InvalidQuantity)));
@@ -1168,39 +1196,42 @@ TEST_CASE("market runtime rejects zero source sequence before book publication",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The syntactically valid zero sequence yields only a sanitized Invalid state callback.
-  RuntimeHarness harness{4U};
-  bind_and_bootstrap(harness);
-  require_accepted(
-      harness.runtime(),
-      attempt("AEGISMD|1|source.deribit-btc-perpetual|snapshot|0|none|1000|1|ok:zero|2|"
-              "B,30000.5,2|A,30001.0,3"));
-  const auto rejected_turn = harness.runtime().run_one();
+  MarketRuntimeHarness harness{4U};
+  require_bound_and_bootstrapped_runtime(harness);
+  require_accepted_frame(
+      harness.market_runtime(),
+      create_ingress_attempt_or_throw(
+          "AEGISMD|1|source.deribit-btc-perpetual|snapshot|0|none|1000|1|ok:zero|2|"
+          "B,30000.5,2|A,30001.0,3"));
+  const auto rejected_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(rejected_turn);
   REQUIRE(rejected_turn.value().has_value());
-  REQUIRE(harness.observations().size() == 2U);
-  CHECK(harness.observations()[1U].kind == ObservedCallbackKind::State);
-  CHECK(harness.observations()[1U].readiness == market_data::MarketReadiness::Invalid);
-  CHECK_FALSE(harness.observations()[1U].book_generation.has_value());
-  CHECK_FALSE(harness.observations()[1U].book_revision.has_value());
+  REQUIRE(harness.callback_observations().size() == 2U);
+  CHECK(harness.callback_observations()[1U].kind == ObservedCallbackKind::State);
+  CHECK(harness.callback_observations()[1U].readiness == market_data::MarketReadiness::Invalid);
+  CHECK_FALSE(harness.callback_observations()[1U].book_generation.has_value());
+  CHECK_FALSE(harness.callback_observations()[1U].book_revision.has_value());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A later valid snapshot creates generation one from untouched book storage.
-  require_accepted(harness.runtime(), attempt(snapshot_frame()));
-  const auto recovery_turn = harness.runtime().run_one();
+  require_accepted_frame(harness.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  const auto recovery_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(recovery_turn);
   REQUIRE(recovery_turn.value().has_value());
-  REQUIRE(harness.observations().size() == 4U);
-  CHECK(harness.observations()[2U].kind == ObservedCallbackKind::State);
-  CHECK(harness.observations()[2U].readiness == market_data::MarketReadiness::Ready);
-  CHECK(harness.observations()[3U].kind == ObservedCallbackKind::Market);
-  CHECK(harness.observations()[3U].book_generation == model::BookGeneration::initial());
-  CHECK(harness.observations()[3U].book_revision == model::BookRevision::initial());
-  CHECK(harness.observations()[3U].best_bid == price("30000.5"));
-  CHECK(harness.observations()[3U].best_ask == price("30001.0"));
+  REQUIRE(harness.callback_observations().size() == 4U);
+  CHECK(harness.callback_observations()[2U].kind == ObservedCallbackKind::State);
+  CHECK(harness.callback_observations()[2U].readiness == market_data::MarketReadiness::Ready);
+  CHECK(harness.callback_observations()[3U].kind == ObservedCallbackKind::Market);
+  CHECK(harness.callback_observations()[3U].book_generation ==
+        model::BookGeneration::create_initial());
+  CHECK(harness.callback_observations()[3U].book_revision == model::BookRevision::create_initial());
+  CHECK(harness.callback_observations()[3U].best_bid == parse_price_or_throw("30000.5"));
+  CHECK(harness.callback_observations()[3U].best_ask == parse_price_or_throw("30001.0"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Cold evidence preserves the semantic rejection and only the later valid book identity.
-  const auto evidence = close_and_collect(harness.runtime());
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
   REQUIRE(evidence.diagnostics.size() == 1U);
   CHECK(evidence.diagnostics.front().kind == runtime::RuntimeDiagnosticKind::MalformedInput);
   CHECK(evidence.diagnostics.front().fields.detail_code ==
@@ -1208,8 +1239,10 @@ TEST_CASE("market runtime rejects zero source sequence before book publication",
   REQUIRE(evidence.sources.size() == 1U);
   CHECK(evidence.sources.front().readiness == market_data::MarketReadiness::Ready);
   REQUIRE(evidence.sources.front().book_identity.has_value());
-  CHECK(evidence.sources.front().book_identity->generation() == model::BookGeneration::initial());
-  CHECK(evidence.sources.front().book_identity->revision() == model::BookRevision::initial());
+  CHECK(evidence.sources.front().book_identity->generation() ==
+        model::BookGeneration::create_initial());
+  CHECK(evidence.sources.front().book_identity->revision() ==
+        model::BookRevision::create_initial());
   CHECK(evidence.sources.front().last_source_sequence == model::SequenceNumber{100U});
   REQUIRE(evidence.trace_records.size() == 9U);
   CHECK(evidence.trace_records[2U].fields().input_disposition ==
@@ -1228,46 +1261,49 @@ TEST_CASE("market runtime orders a capacity fence after older accepted work",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // With one pending slot, the snapshot is accepted and the following attributable delta is not.
-  RuntimeHarness harness{1U};
-  bind_and_bootstrap(harness);
-  require_accepted(harness.runtime(), attempt(snapshot_frame()));
-  const auto rejected = harness.runtime().try_admit(attempt(delta_frame()));
+  MarketRuntimeHarness harness{1U};
+  require_bound_and_bootstrapped_runtime(harness);
+  require_accepted_frame(harness.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  const auto rejected =
+      harness.market_runtime().try_admit(create_ingress_attempt_or_throw(create_delta_frame()));
   REQUIRE(rejected);
   CHECK(rejected.value().outcome == runtime::AdmissionOutcome::CapacityExceeded);
   CHECK(rejected.value().attempt_ordinal.value() == 3U);
   CHECK_FALSE(rejected.value().receipt.has_value());
   CHECK(rejected.value().discontinuity_recorded);
-  const auto queued = harness.runtime().status();
+  const auto queued = harness.market_runtime().status();
   CHECK(queued.executor.pending_commands == 1U);
   CHECK(queued.executor.pending_fences == 1U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Global attempt ordering commits the older snapshot before consuming its later loss fence.
-  const auto snapshot_turn = harness.runtime().run_one();
+  const auto snapshot_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(snapshot_turn);
   REQUIRE(snapshot_turn.value().has_value());
   CHECK(snapshot_turn.value()->kind == runtime::TurnKind::Command);
   CHECK(snapshot_turn.value()->attempt_ordinal.value() == 2U);
-  REQUIRE(harness.observations().size() == 3U);
-  CHECK(harness.observations()[1U].readiness == market_data::MarketReadiness::Ready);
-  CHECK(harness.observations()[2U].kind == ObservedCallbackKind::Market);
+  REQUIRE(harness.callback_observations().size() == 3U);
+  CHECK(harness.callback_observations()[1U].readiness == market_data::MarketReadiness::Ready);
+  CHECK(harness.callback_observations()[2U].kind == ObservedCallbackKind::Market);
 
-  const auto fence_turn = harness.runtime().run_one();
+  const auto fence_turn = harness.market_runtime().execute_next_turn();
   REQUIRE(fence_turn);
   REQUIRE(fence_turn.value().has_value());
   CHECK(fence_turn.value()->kind == runtime::TurnKind::SourceDiscontinuity);
   CHECK(fence_turn.value()->attempt_ordinal.value() == 3U);
   REQUIRE(fence_turn.value()->discontinuity.has_value());
-  CHECK(fence_turn.value()->discontinuity->source_ordinal == model::MarketSourceOrdinal::initial());
+  CHECK(fence_turn.value()->discontinuity->source_ordinal ==
+        model::MarketSourceOrdinal::create_initial());
   CHECK(fence_turn.value()->discontinuity->earliest_failed_attempt.value() == 3U);
   CHECK(fence_turn.value()->discontinuity->lost_attempt_count == 1U);
-  REQUIRE(harness.observations().size() == 4U);
-  CHECK(harness.observations()[3U].kind == ObservedCallbackKind::State);
-  CHECK(harness.observations()[3U].readiness == market_data::MarketReadiness::Invalid);
+  REQUIRE(harness.callback_observations().size() == 4U);
+  CHECK(harness.callback_observations()[3U].kind == ObservedCallbackKind::State);
+  CHECK(harness.callback_observations()[3U].readiness == market_data::MarketReadiness::Invalid);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Final evidence preserves both the last valid book identity and the non-ready loss state.
-  const auto evidence = close_and_collect(harness.runtime());
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
   REQUIRE(evidence.sources.size() == 1U);
   CHECK(evidence.sources.front().readiness == market_data::MarketReadiness::Invalid);
   REQUIRE(evidence.sources.front().book_identity.has_value());
@@ -1295,14 +1331,17 @@ TEST_CASE("market runtime contains source-less and unconfigured accepted attempt
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Both bounded attempts enter the FIFO without receiving authority over the configured source.
-  RuntimeHarness harness{4U};
-  bind_and_bootstrap(harness);
-  require_accepted(
-      harness.runtime(),
-      attempt("AEGISMD|1|source.deribit-btc-perpetual|session-started|1000", std::nullopt));
-  require_accepted(harness.runtime(), attempt("AEGISMD|1|source.unconfigured|session-started|1000",
-                                              "source.unconfigured"));
-  const auto driven = harness.runtime().drive(2U);
+  MarketRuntimeHarness harness{4U};
+  require_bound_and_bootstrapped_runtime(harness);
+  require_accepted_frame(
+      harness.market_runtime(),
+      create_ingress_attempt_or_throw("AEGISMD|1|source.deribit-btc-perpetual|session-started|1000",
+                                      std::nullopt));
+  require_accepted_frame(
+      harness.market_runtime(),
+      create_ingress_attempt_or_throw("AEGISMD|1|source.unconfigured|session-started|1000",
+                                      "source.unconfigured"));
+  const auto driven = harness.market_runtime().execute_pending_turns(2U);
   REQUIRE(driven);
   CHECK(driven.value().turns_executed == 2U);
   CHECK(driven.value().pending_commands == 0U);
@@ -1310,9 +1349,10 @@ TEST_CASE("market runtime contains source-less and unconfigured accepted attempt
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Neither invalid envelope can publish a callback or mutate the sole configured source.
-  REQUIRE(harness.observations().size() == 1U);
-  CHECK(harness.observations().front().readiness == market_data::MarketReadiness::Synchronizing);
-  const auto evidence = close_and_collect(harness.runtime());
+  REQUIRE(harness.callback_observations().size() == 1U);
+  CHECK(harness.callback_observations().front().readiness ==
+        market_data::MarketReadiness::Synchronizing);
+  const auto evidence = close_and_collect_evidence_or_throw(harness.market_runtime());
   REQUIRE(evidence.sources.size() == 1U);
   CHECK(evidence.sources.front().readiness == market_data::MarketReadiness::Synchronizing);
   CHECK_FALSE(evidence.sources.front().book_identity.has_value());
@@ -1351,19 +1391,20 @@ TEST_CASE("market runtime exposes quiescent fault evidence with suppressed backl
   ArmedRegressingClock callback_clock;
   std::vector<CallbackObservation> observations;
   observations.reserve(8U);
-  auto runtime = runtime_with_strategy(4U, executor_clock, callback_clock,
-                                       std::make_unique<CapturingStrategy>(observations));
+  auto runtime = create_runtime_with_strategy_or_throw(
+      4U, executor_clock, callback_clock,
+      std::make_unique<MarketCallbackCapturingStrategy>(observations));
   REQUIRE(runtime->bind_to_current_thread());
-  const auto bootstrap = runtime->run_one();
+  const auto bootstrap = runtime->execute_next_turn();
   REQUIRE(bootstrap);
   REQUIRE(bootstrap.value().has_value());
-  callback_clock.arm();
-  require_accepted(*runtime, attempt(snapshot_frame()));
-  require_accepted(*runtime, attempt(delta_frame()));
+  callback_clock.arm_regression_script();
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_snapshot_frame()));
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_delta_frame()));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The snapshot commits and finishes its complete fan-out before the clock fault closes progress.
-  const auto faulting_turn = runtime->run_one();
+  const auto faulting_turn = runtime->execute_next_turn();
   REQUIRE(faulting_turn);
   REQUIRE(faulting_turn.value().has_value());
   REQUIRE(observations.size() == 3U);
@@ -1380,7 +1421,7 @@ TEST_CASE("market runtime exposes quiescent fault evidence with suppressed backl
   // ++++++++++++++++++++++++++++++++++++++++
   // Releasing the failed owner makes the immutable applied prefix and suppressed count collectible.
   REQUIRE(runtime->release_from_current_thread());
-  auto evidence_result = runtime->quiescent_evidence();
+  auto evidence_result = runtime->collect_quiescent_evidence();
   REQUIRE(evidence_result);
   const auto evidence = std::move(evidence_result).value();
   CHECK(evidence.executor.faulted);
@@ -1411,20 +1452,21 @@ TEST_CASE("market runtime uses exact fanout at the canonical trace boundary",
   model::DeterministicClockProvider callback_clock{1'000U};
   std::vector<CallbackObservation> observations;
   observations.reserve(8U);
-  auto runtime = runtime_with_strategy(4U, executor_clock, callback_clock,
-                                       std::make_unique<CapturingStrategy>(observations), 8U);
+  auto runtime = create_runtime_with_strategy_or_throw(
+      4U, executor_clock, callback_clock,
+      std::make_unique<MarketCallbackCapturingStrategy>(observations), 8U);
   REQUIRE(runtime->bind_to_current_thread());
-  REQUIRE(runtime->run_one());
-  require_accepted(*runtime, attempt(snapshot_frame()));
-  REQUIRE(runtime->run_one());
+  REQUIRE(runtime->execute_next_turn());
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_snapshot_frame()));
+  REQUIRE(runtime->execute_next_turn());
   REQUIRE(observations.size() == 3U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The exact duplicate needs only one input record and zero callback-counter headroom.
-  require_accepted(*runtime, attempt(snapshot_frame()));
-  require_accepted(*runtime, attempt(delta_frame()));
-  require_accepted(*runtime, attempt(delta_frame()));
-  const auto duplicate = runtime->run_one();
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_snapshot_frame()));
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_delta_frame()));
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_delta_frame()));
+  const auto duplicate = runtime->execute_next_turn();
   REQUIRE(duplicate);
   REQUIRE(duplicate.value().has_value());
   CHECK(observations.size() == 3U);
@@ -1435,7 +1477,7 @@ TEST_CASE("market runtime uses exact fanout at the canonical trace boundary",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One remaining slot cannot cover callback plus reserved reentry; the book stays at sequence 100.
-  const auto exhausted = runtime->run_one();
+  const auto exhausted = runtime->execute_next_turn();
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == model::DomainErrorCode::RuntimeEvidenceExhausted);
   const auto faulted = runtime->status();
@@ -1448,7 +1490,7 @@ TEST_CASE("market runtime uses exact fanout at the canonical trace boundary",
   // ++++++++++++++++++++++++++++++++++++++++
   // Cold evidence preserves the exact accepted trace prefix and suppressed work count.
   REQUIRE(runtime->release_from_current_thread());
-  auto evidence = runtime->quiescent_evidence();
+  auto evidence = runtime->collect_quiescent_evidence();
   REQUIRE(evidence);
   REQUIRE(evidence.value().fault.has_value());
   CHECK(evidence.value().fault->code == model::DomainErrorCode::RuntimeEvidenceExhausted);
@@ -1476,15 +1518,16 @@ TEST_CASE("market runtime publishes completed callback budget overruns",
   ArmedBudgetClock callback_clock;
   std::vector<CallbackObservation> observations;
   observations.reserve(8U);
-  auto runtime = runtime_with_strategy(4U, executor_clock, callback_clock,
-                                       std::make_unique<CapturingStrategy>(observations));
+  auto runtime = create_runtime_with_strategy_or_throw(
+      4U, executor_clock, callback_clock,
+      std::make_unique<MarketCallbackCapturingStrategy>(observations));
   REQUIRE(runtime->bind_to_current_thread());
-  const auto bootstrap = runtime->run_one();
+  const auto bootstrap = runtime->execute_next_turn();
   REQUIRE(bootstrap);
   REQUIRE(bootstrap.value().has_value());
-  callback_clock.arm();
-  require_accepted(*runtime, attempt(snapshot_frame()));
-  const auto snapshot = runtime->run_one();
+  callback_clock.arm_budget_script();
+  require_accepted_frame(*runtime, create_ingress_attempt_or_throw(create_snapshot_frame()));
+  const auto snapshot = runtime->execute_next_turn();
   REQUIRE(snapshot);
   REQUIRE(snapshot.value().has_value());
 
@@ -1492,7 +1535,7 @@ TEST_CASE("market runtime publishes completed callback budget overruns",
   // Both completed callbacks are reported after return without turning observation into a fault.
   const auto running = runtime->status();
   CHECK(running.lifecycle == runtime::MarketRuntimeLifecycle::Running);
-  CHECK(running.bots.healthy());
+  CHECK(running.bots.is_healthy());
   CHECK_FALSE(running.fault.has_value());
   REQUIRE(running.last_dispatch.has_value());
   CHECK(running.last_dispatch->callback_count() == 2U);
@@ -1503,7 +1546,7 @@ TEST_CASE("market runtime publishes completed callback budget overruns",
   // Cold evidence preserves the same metric and both bounded diagnostic observations.
   runtime->close();
   REQUIRE(runtime->release_from_current_thread());
-  auto evidence = runtime->quiescent_evidence();
+  auto evidence = runtime->collect_quiescent_evidence();
   REQUIRE(evidence);
   REQUIRE(evidence.value().last_dispatch.has_value());
   CHECK(evidence.value().last_dispatch == running.last_dispatch);
@@ -1527,8 +1570,8 @@ TEST_CASE("market runtime dedicated callback close returns before owner shutdown
   model::DeterministicClockProvider executor_clock{100U};
   model::DeterministicClockProvider callback_clock{1'000U};
   OwnerCloseControl control;
-  auto runtime = runtime_with_strategy(4U, executor_clock, callback_clock,
-                                       std::make_unique<OwnerClosingStrategy>(control));
+  auto runtime = create_runtime_with_strategy_or_throw(
+      4U, executor_clock, callback_clock, std::make_unique<OwnerClosingStrategy>(control));
   control.runtime.store(runtime.get(), std::memory_order_release);
   control.armed.store(true, std::memory_order_release);
   REQUIRE(runtime->start_dedicated());
@@ -1553,7 +1596,7 @@ TEST_CASE("market runtime dedicated callback close returns before owner shutdown
 
   // ++++++++++++++++++++++++++++++++++++++++
   // With no accepted suffix, the completed bootstrap is immediately available as cold evidence.
-  auto evidence = runtime->quiescent_evidence();
+  auto evidence = runtime->collect_quiescent_evidence();
   REQUIRE(evidence);
   CHECK(evidence.value().executor.pending_commands == 0U);
   CHECK(evidence.value().executor.pending_fences == 0U);
@@ -1572,13 +1615,14 @@ TEST_CASE("market runtime records over-bound callback drive as owner reentry",
   // Publish the final stable handle before manually executing the genuine bootstrap callback.
   model::DeterministicClockProvider executor_clock{100U};
   model::DeterministicClockProvider callback_clock{1'000U};
-  OwnerDriveControl control;
-  auto runtime = runtime_with_strategy(4U, executor_clock, callback_clock,
-                                       std::make_unique<OwnerDrivingStrategy>(control));
+  OwnerReentrantExecutionControl control;
+  auto runtime = create_runtime_with_strategy_or_throw(
+      4U, executor_clock, callback_clock,
+      std::make_unique<OwnerReentrantExecutionStrategy>(control));
   control.runtime.store(runtime.get(), std::memory_order_release);
   control.armed.store(true, std::memory_order_release);
   REQUIRE(runtime->bind_to_current_thread());
-  const auto bootstrap = runtime->run_one();
+  const auto bootstrap = runtime->execute_next_turn();
   REQUIRE(bootstrap);
   REQUIRE(bootstrap.value().has_value());
 
@@ -1589,7 +1633,7 @@ TEST_CASE("market runtime records over-bound callback drive as owner reentry",
         static_cast<std::uint32_t>(model::DomainErrorCode::ExecutorReentryDetected));
   const auto running = runtime->status();
   CHECK(running.lifecycle == runtime::MarketRuntimeLifecycle::Running);
-  CHECK(running.bots.healthy());
+  CHECK(running.bots.is_healthy());
   CHECK(running.executor.completed_turns == 1U);
   CHECK(running.executor.pending_commands == 0U);
 
@@ -1597,7 +1641,7 @@ TEST_CASE("market runtime records over-bound callback drive as owner reentry",
   // Canonical and noncanonical evidence each retain the single callback-local recursion attempt.
   runtime->close();
   REQUIRE(runtime->release_from_current_thread());
-  auto evidence = runtime->quiescent_evidence();
+  auto evidence = runtime->collect_quiescent_evidence();
   REQUIRE(evidence);
   REQUIRE(evidence.value().trace_records.size() == 3U);
   CHECK(evidence.value().trace_records.back().kind() ==
@@ -1617,44 +1661,49 @@ TEST_CASE("market runtime dedicated driver matches deterministic replay at quies
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Produce the reference callback and evidence sequence through explicit deterministic turns.
-  RuntimeHarness deterministic{4U};
-  bind_and_bootstrap(deterministic);
-  require_accepted(deterministic.runtime(), attempt(snapshot_frame()));
-  require_accepted(deterministic.runtime(), attempt(delta_frame()));
-  const auto deterministic_drive = deterministic.runtime().drive(2U);
+  MarketRuntimeHarness deterministic{4U};
+  require_bound_and_bootstrapped_runtime(deterministic);
+  require_accepted_frame(deterministic.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  require_accepted_frame(deterministic.market_runtime(),
+                         create_ingress_attempt_or_throw(create_delta_frame()));
+  const auto deterministic_drive = deterministic.market_runtime().execute_pending_turns(2U);
   REQUIRE(deterministic_drive);
   CHECK(deterministic_drive.value().turns_executed == 2U);
-  const auto deterministic_evidence = close_and_collect(deterministic.runtime());
+  const auto deterministic_evidence =
+      close_and_collect_evidence_or_throw(deterministic.market_runtime());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Let a dedicated owner consume the genuine bootstrap before accepting the same frame prefix.
-  RuntimeHarness dedicated{4U};
-  REQUIRE(dedicated.runtime().start_dedicated());
-  REQUIRE(wait_until_running(dedicated.runtime()));
-  const auto running = dedicated.runtime().status();
+  MarketRuntimeHarness dedicated{4U};
+  REQUIRE(dedicated.market_runtime().start_dedicated());
+  REQUIRE(wait_until_running(dedicated.market_runtime()));
+  const auto running = dedicated.market_runtime().status();
   CHECK(running.dedicated_driver_started);
   CHECK(running.dedicated_driver_running);
   CHECK(running.executor.owner_bound);
-  require_accepted(dedicated.runtime(), attempt(snapshot_frame()));
-  require_accepted(dedicated.runtime(), attempt(delta_frame()));
+  require_accepted_frame(dedicated.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  require_accepted_frame(dedicated.market_runtime(),
+                         create_ingress_attempt_or_throw(create_delta_frame()));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Close drains both accepted frames before releasing ownership and publishing cold evidence.
-  dedicated.runtime().close_and_wait();
-  const auto closed = dedicated.runtime().status();
+  dedicated.market_runtime().close_and_wait();
+  const auto closed = dedicated.market_runtime().status();
   CHECK(closed.lifecycle == runtime::MarketRuntimeLifecycle::Closed);
   CHECK(closed.dedicated_driver_started);
   CHECK_FALSE(closed.dedicated_driver_running);
   CHECK_FALSE(closed.executor.owner_bound);
   CHECK(closed.executor.pending_commands == 0U);
   CHECK(closed.executor.pending_fences == 0U);
-  auto dedicated_result = dedicated.runtime().quiescent_evidence();
+  auto dedicated_result = dedicated.market_runtime().collect_quiescent_evidence();
   REQUIRE(dedicated_result);
   const auto dedicated_evidence = std::move(dedicated_result).value();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Shared turn processing makes callbacks and every replay-evidence field driver-independent.
-  CHECK(dedicated.observations() == deterministic.observations());
+  CHECK(dedicated.callback_observations() == deterministic.callback_observations());
   CHECK(dedicated_evidence == deterministic_evidence);
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -1667,26 +1716,30 @@ TEST_CASE("market runtime manual replay is exactly deterministic at quiescence",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Feed two independent runtimes the same accepted bootstrap, snapshot, and delta prefix.
-  RuntimeHarness first{4U};
-  RuntimeHarness second{4U};
-  bind_and_bootstrap(first);
-  bind_and_bootstrap(second);
-  require_accepted(first.runtime(), attempt(snapshot_frame()));
-  require_accepted(second.runtime(), attempt(snapshot_frame()));
-  require_accepted(first.runtime(), attempt(delta_frame()));
-  require_accepted(second.runtime(), attempt(delta_frame()));
-  const auto first_drive = first.runtime().drive(2U);
-  const auto second_drive = second.runtime().drive(2U);
+  MarketRuntimeHarness first{4U};
+  MarketRuntimeHarness second{4U};
+  require_bound_and_bootstrapped_runtime(first);
+  require_bound_and_bootstrapped_runtime(second);
+  require_accepted_frame(first.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  require_accepted_frame(second.market_runtime(),
+                         create_ingress_attempt_or_throw(create_snapshot_frame()));
+  require_accepted_frame(first.market_runtime(),
+                         create_ingress_attempt_or_throw(create_delta_frame()));
+  require_accepted_frame(second.market_runtime(),
+                         create_ingress_attempt_or_throw(create_delta_frame()));
+  const auto first_drive = first.market_runtime().execute_pending_turns(2U);
+  const auto second_drive = second.market_runtime().execute_pending_turns(2U);
   REQUIRE(first_drive);
   REQUIRE(second_drive);
   CHECK(first_drive.value() == second_drive.value());
-  CHECK(first.runtime().status() == second.runtime().status());
-  CHECK(first.observations() == second.observations());
+  CHECK(first.market_runtime().status() == second.market_runtime().status());
+  CHECK(first.callback_observations() == second.callback_observations());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Released final copies match across every canonical and bounded external evidence component.
-  const auto first_evidence = close_and_collect(first.runtime());
-  const auto second_evidence = close_and_collect(second.runtime());
+  const auto first_evidence = close_and_collect_evidence_or_throw(first.market_runtime());
+  const auto second_evidence = close_and_collect_evidence_or_throw(second.market_runtime());
   CHECK(first_evidence.configuration_fingerprint == second_evidence.configuration_fingerprint);
   CHECK(first_evidence.runtime_policy_fingerprint == second_evidence.runtime_policy_fingerprint);
   CHECK(first_evidence.trace_records == second_evidence.trace_records);
@@ -1709,16 +1762,16 @@ TEST_CASE("market runtime composes direct fake submission and complete quiescent
   model::DeterministicClockProvider executor_clock{100U};
   model::DeterministicClockProvider callback_clock{1'000U};
   SubmissionCapture capture;
-  auto runtime = m3_runtime(executor_clock, callback_clock, capture);
+  auto runtime = create_m3_runtime_or_throw(executor_clock, callback_clock, capture);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One genuine bootstrap turn enters the callback, completes submission, and returns the result
   // without publishing another executor command or handoff.
   REQUIRE(runtime->bind_to_current_thread());
-  const auto bootstrap = runtime->run_one();
+  const auto bootstrap = runtime->execute_next_turn();
   REQUIRE(bootstrap);
   REQUIRE(bootstrap.value().has_value());
-  CHECK(bootstrap.value()->turn_ordinal == model::TurnOrdinal::initial());
+  CHECK(bootstrap.value()->turn_ordinal == model::TurnOrdinal::create_initial());
   CHECK(capture.callbacks == 1U);
   CHECK(capture.submit_returned);
   CHECK(capture.disposition == execution::SubmitDisposition::WriteInitiated);
@@ -1733,7 +1786,7 @@ TEST_CASE("market runtime composes direct fake submission and complete quiescent
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Closure copies both canonical streams and every retained fake-submission subsystem state.
-  const auto evidence = close_and_collect(*runtime);
+  const auto evidence = close_and_collect_evidence_or_throw(*runtime);
   REQUIRE(evidence.submission.has_value());
   const auto& submission = *evidence.submission;
   CHECK_FALSE(submission.runtime_faulted);
@@ -1752,7 +1805,7 @@ TEST_CASE("market runtime composes direct fake submission and complete quiescent
   REQUIRE(submission.scope_exposures.size() == 7U);
   for (const auto& scope : submission.scope_exposures) {
     CHECK(scope.exposure.open_order_count == 1U);
-    CHECK(scope.exposure.gross_reserved_quote_notional == notional("20"));
+    CHECK(scope.exposure.gross_reserved_quote_notional == parse_notional_or_throw("20"));
   }
   REQUIRE(submission.accepted_writes.size() == 1U);
   CHECK(submission.accepted_writes.front().attempt_id == *capture.attempt_id);
@@ -1799,28 +1852,28 @@ TEST_CASE("market runtime observation-only factory installs no submission author
   model::DeterministicClockProvider executor_clock{100U};
   model::DeterministicClockProvider callback_clock{1'000U};
   SubmissionCapture capture;
-  auto configuration = reference_configuration();
-  auto policy = reference_policy(configuration, 4U);
+  auto configuration = create_reference_configuration_or_throw();
+  auto policy = create_reference_policy_or_throw(configuration, 4U);
   std::vector<runtime::BotStrategyRegistration> strategies;
   strategies.push_back(runtime::BotStrategyRegistration{
-      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-      std::make_unique<SubmittingStrategy>(m3_order_request(), capture),
+      parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmittingStrategy>(create_m3_order_request_or_throw(), capture),
   });
-  auto created =
-      runtime::MarketRuntime::create(std::move(configuration), std::move(policy), executor_clock,
-                                     callback_clock, std::move(strategies));
+  auto created = runtime::MarketRuntime::create_market_runtime(
+      std::move(configuration), std::move(policy), executor_clock, callback_clock,
+      std::move(strategies));
   REQUIRE(created);
   auto runtime = std::move(created).value();
 
   REQUIRE(runtime->bind_to_current_thread());
-  REQUIRE(runtime->run_one());
+  REQUIRE(runtime->execute_next_turn());
   CHECK(capture.submit_returned);
   CHECK(capture.disposition == execution::SubmitDisposition::LocallyRejected);
   CHECK(capture.stage == execution::SubmissionStage::Context);
   CHECK(capture.reason == execution::SubmissionReason::SubmissionCapabilityUnavailable);
   CHECK_FALSE(capture.attempt_id.has_value());
   CHECK_FALSE(capture.order_id.has_value());
-  const auto evidence = close_and_collect(*runtime);
+  const auto evidence = close_and_collect_evidence_or_throw(*runtime);
   CHECK_FALSE(evidence.submission.has_value());
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -1834,17 +1887,17 @@ TEST_CASE("submission-capable BotContext gates retained and wrong-thread callers
   model::DeterministicClockProvider executor_clock{100U};
   model::DeterministicClockProvider callback_clock{1'000U};
   SubmissionGateControl control;
-  auto configuration = m3_configuration();
-  auto policy = reference_policy(configuration, 4U);
+  auto configuration = create_m3_configuration_or_throw();
+  auto policy = create_reference_policy_or_throw(configuration, 4U);
   auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
       std::vector<std::optional<std::uint64_t>>{10U, 20U});
   auto* const measurement_access = measurement.get();
-  auto submission_params =
-      m3_submission_params(configuration, execution::FakeInitiationOutcome::AcceptedAndInitiated,
-                           std::move(measurement));
+  auto submission_params = create_m3_submission_params_or_throw(
+      configuration, execution::FakeInitiationOutcome::AcceptedAndInitiated,
+      std::move(measurement));
   std::vector<runtime::BotStrategyRegistration> strategies;
   strategies.push_back(runtime::BotStrategyRegistration{
-      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
       std::make_unique<SubmissionGateStrategy>(control),
   });
   auto created = runtime::MarketRuntime::create_with_fake_submission(
@@ -1873,10 +1926,10 @@ TEST_CASE("submission-capable BotContext gates retained and wrong-thread callers
   }
   REQUIRE(context != nullptr);
 
-  const auto wrong_owner = context->submit(m3_order_request());
+  const auto wrong_owner = context->submit_order(create_m3_order_request_or_throw());
   control.release_callback.store(true, std::memory_order_release);
   runtime->close_and_wait();
-  const auto inactive = context->submit(m3_order_request());
+  const auto inactive = context->submit_order(create_m3_order_request_or_throw());
 
   CHECK(wrong_owner.disposition() == execution::SubmitDisposition::LocallyRejected);
   CHECK(wrong_owner.stage() == execution::SubmissionStage::Context);
@@ -1896,7 +1949,7 @@ TEST_CASE("submission-capable BotContext gates retained and wrong-thread callers
   CHECK_FALSE(inactive.local_path_nanoseconds());
   CHECK(measurement_access->readings_consumed() == 2U);
 
-  auto evidence = runtime->quiescent_evidence();
+  auto evidence = runtime->collect_quiescent_evidence();
   REQUIRE(evidence);
   REQUIRE(evidence.value().submission);
   const auto& submission = *evidence.value().submission;
@@ -1921,25 +1974,28 @@ TEST_CASE("market runtime fake submission is identical across manual and dedicat
   model::DeterministicClockProvider manual_executor_clock{100U};
   model::DeterministicClockProvider manual_callback_clock{1'000U};
   SubmissionCapture manual_capture;
-  auto manual = m3_runtime(manual_executor_clock, manual_callback_clock, manual_capture);
+  auto manual =
+      create_m3_runtime_or_throw(manual_executor_clock, manual_callback_clock, manual_capture);
   REQUIRE(manual->bind_to_current_thread());
-  REQUIRE(manual->run_one());
-  const auto manual_evidence = close_and_collect(*manual);
+  REQUIRE(manual->execute_next_turn());
+  const auto manual_evidence = close_and_collect_evidence_or_throw(*manual);
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Replay the same fixture under a dedicated owner and collect its cold quiescent evidence.
   model::DeterministicClockProvider dedicated_executor_clock{100U};
   model::DeterministicClockProvider dedicated_callback_clock{1'000U};
   SubmissionCapture dedicated_capture;
-  auto dedicated =
-      m3_runtime(dedicated_executor_clock, dedicated_callback_clock, dedicated_capture);
+  auto dedicated = create_m3_runtime_or_throw(dedicated_executor_clock, dedicated_callback_clock,
+                                              dedicated_capture);
   REQUIRE(dedicated->start_dedicated());
   REQUIRE(wait_until_running(*dedicated));
   dedicated->close_and_wait();
-  auto dedicated_result = dedicated->quiescent_evidence();
+  auto dedicated_result = dedicated->collect_quiescent_evidence();
   REQUIRE(dedicated_result);
   const auto dedicated_evidence = std::move(dedicated_result).value();
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Compare both strategy-visible results and the complete canonical evidence bundle.
   CHECK(dedicated_capture == manual_capture);
   CHECK(dedicated_evidence == manual_evidence);
 
@@ -1954,14 +2010,14 @@ TEST_CASE("market runtime fake submission fails closed for incomplete policy",
   model::DeterministicClockProvider executor_clock{100U};
   model::DeterministicClockProvider callback_clock{1'000U};
   SubmissionCapture capture;
-  auto configuration = m3_configuration();
-  auto policy = reference_policy(configuration, 4U);
-  auto submission_params = m3_submission_params(configuration);
+  auto configuration = create_m3_configuration_or_throw();
+  auto policy = create_reference_policy_or_throw(configuration, 4U);
+  auto submission_params = create_m3_submission_params_or_throw(configuration);
   submission_params.risk_policy.limit_sets.pop_back();
   std::vector<runtime::BotStrategyRegistration> strategies;
   strategies.push_back(runtime::BotStrategyRegistration{
-      id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-      std::make_unique<SubmittingStrategy>(m3_order_request(), capture),
+      parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+      std::make_unique<SubmittingStrategy>(create_m3_order_request_or_throw(), capture),
   });
 
   const auto created = runtime::MarketRuntime::create_with_fake_submission(

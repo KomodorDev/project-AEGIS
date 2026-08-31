@@ -113,8 +113,9 @@ public:
 
   // --------------------------------------------------------
   // Construct exact quantity evidence without exposing a generic decimal-unit escape hatch.
-  [[nodiscard]] static RiskLimitEvidence
-  quantity(risk::RiskScopeKind scope, model::Quantity observed, model::Quantity limit) noexcept {
+  [[nodiscard]] static RiskLimitEvidence create_quantity_evidence(risk::RiskScopeKind scope,
+                                                                  model::Quantity observed,
+                                                                  model::Quantity limit) noexcept {
     return RiskLimitEvidence{scope,        RiskMeasureKind::Quantity,
                              observed,     limit,
                              std::nullopt, std::nullopt,
@@ -123,9 +124,9 @@ public:
 
   // --------------------------------------------------------
   // Construct exact quote-notional evidence in the policy's declared currency and scale.
-  [[nodiscard]] static RiskLimitEvidence quote_notional(risk::RiskScopeKind scope,
-                                                        model::Notional observed,
-                                                        model::Notional limit) noexcept {
+  [[nodiscard]] static RiskLimitEvidence
+  create_quote_notional_evidence(risk::RiskScopeKind scope, model::Notional observed,
+                                 model::Notional limit) noexcept {
     return RiskLimitEvidence{scope,        RiskMeasureKind::QuoteNotional,
                              std::nullopt, std::nullopt,
                              observed,     limit,
@@ -134,8 +135,9 @@ public:
 
   // --------------------------------------------------------
   // Construct exact unsigned order-count evidence.
-  [[nodiscard]] static RiskLimitEvidence
-  order_count(risk::RiskScopeKind scope, std::uint64_t observed, std::uint64_t limit) noexcept {
+  [[nodiscard]] static RiskLimitEvidence create_order_count_evidence(risk::RiskScopeKind scope,
+                                                                     std::uint64_t observed,
+                                                                     std::uint64_t limit) noexcept {
     return RiskLimitEvidence{scope,        RiskMeasureKind::OrderCount,
                              std::nullopt, std::nullopt,
                              std::nullopt, std::nullopt,
@@ -143,37 +145,45 @@ public:
   }
 
   // --------------------------------------------------------
+  // Return the risk scope whose limit produced this evidence.
   [[nodiscard]] risk::RiskScopeKind scope() const noexcept { return scope_; }
 
   // --------------------------------------------------------
+  // Return which quantity, notional, or count measure was compared.
   [[nodiscard]] RiskMeasureKind measure_kind() const noexcept { return measure_kind_; }
 
   // --------------------------------------------------------
+  // Return the observed quantity only for quantity evidence.
   [[nodiscard]] const std::optional<model::Quantity>& observed_quantity() const noexcept {
     return observed_quantity_;
   }
 
   // --------------------------------------------------------
+  // Return the configured quantity limit only for quantity evidence.
   [[nodiscard]] const std::optional<model::Quantity>& quantity_limit() const noexcept {
     return quantity_limit_;
   }
 
   // --------------------------------------------------------
+  // Return the observed quote notional only for notional evidence.
   [[nodiscard]] const std::optional<model::Notional>& observed_notional() const noexcept {
     return observed_notional_;
   }
 
   // --------------------------------------------------------
+  // Return the configured quote-notional limit only for notional evidence.
   [[nodiscard]] const std::optional<model::Notional>& notional_limit() const noexcept {
     return notional_limit_;
   }
 
   // --------------------------------------------------------
+  // Return the observed open-order count only for count evidence.
   [[nodiscard]] const std::optional<std::uint64_t>& observed_count() const noexcept {
     return observed_count_;
   }
 
   // --------------------------------------------------------
+  // Return the configured open-order limit only for count evidence.
   [[nodiscard]] const std::optional<std::uint64_t>& count_limit() const noexcept {
     return count_limit_;
   }
@@ -222,12 +232,12 @@ public:
 
   // --------------------------------------------------------
   // Construct a definite local rejection with only the identities already consumed by its stage.
-  [[nodiscard]] static SubmitResult
-  locally_rejected(SubmissionStage stage, SubmissionReason reason,
-                   std::optional<model::SubmissionAttemptId> attempt_id = std::nullopt,
-                   std::optional<model::OrderId> order_id = std::nullopt,
-                   std::optional<RiskLimitEvidence> risk_evidence = std::nullopt,
-                   std::optional<std::uint64_t> local_path_nanoseconds = std::nullopt) noexcept {
+  [[nodiscard]] static SubmitResult create_locally_rejected_result(
+      SubmissionStage stage, SubmissionReason reason,
+      std::optional<model::SubmissionAttemptId> attempt_id = std::nullopt,
+      std::optional<model::OrderId> order_id = std::nullopt,
+      std::optional<RiskLimitEvidence> risk_evidence = std::nullopt,
+      std::optional<std::uint64_t> local_path_nanoseconds = std::nullopt) noexcept {
     return SubmitResult{SubmitDisposition::LocallyRejected,
                         stage,
                         reason,
@@ -239,9 +249,9 @@ public:
 
   // --------------------------------------------------------
   // Report successful local fake initiation without implying any exchange response.
-  [[nodiscard]] static SubmitResult
-  write_initiated(model::SubmissionAttemptId attempt_id, model::OrderId order_id,
-                  std::optional<std::uint64_t> local_path_nanoseconds = std::nullopt) noexcept {
+  [[nodiscard]] static SubmitResult create_write_initiated_result(
+      model::SubmissionAttemptId attempt_id, model::OrderId order_id,
+      std::optional<std::uint64_t> local_path_nanoseconds = std::nullopt) noexcept {
     return SubmitResult{SubmitDisposition::WriteInitiated,
                         SubmissionStage::Initiation,
                         SubmissionReason::None,
@@ -253,9 +263,9 @@ public:
 
   // --------------------------------------------------------
   // Report that fake acceptance may have occurred and conservative exposure must remain held.
-  [[nodiscard]] static SubmitResult
-  submission_unknown(model::SubmissionAttemptId attempt_id, model::OrderId order_id,
-                     std::optional<std::uint64_t> local_path_nanoseconds = std::nullopt) noexcept {
+  [[nodiscard]] static SubmitResult create_submission_unknown_result(
+      model::SubmissionAttemptId attempt_id, model::OrderId order_id,
+      std::optional<std::uint64_t> local_path_nanoseconds = std::nullopt) noexcept {
     return SubmitResult{SubmitDisposition::SubmissionUnknown,
                         SubmissionStage::Initiation,
                         SubmissionReason::InitiationOutcomeUnknown,
@@ -266,28 +276,35 @@ public:
   }
 
   // --------------------------------------------------------
+  // Return whether the submission was locally rejected, initiated, or left unknown.
   [[nodiscard]] SubmitDisposition disposition() const noexcept { return disposition_; }
 
   // --------------------------------------------------------
+  // Return the furthest submission stage represented by this terminal result.
   [[nodiscard]] SubmissionStage stage() const noexcept { return stage_; }
 
   // --------------------------------------------------------
+  // Return the stable reason associated with the disposition and stage.
   [[nodiscard]] SubmissionReason reason() const noexcept { return reason_; }
 
   // --------------------------------------------------------
+  // Return the attempt identity only after submission admission assigned one.
   [[nodiscard]] const std::optional<model::SubmissionAttemptId>& attempt_id() const noexcept {
     return attempt_id_;
   }
 
   // --------------------------------------------------------
+  // Return the local order identity only after OMS admission assigned one.
   [[nodiscard]] const std::optional<model::OrderId>& order_id() const noexcept { return order_id_; }
 
   // --------------------------------------------------------
+  // Return exact limit evidence only for risk-policy rejection.
   [[nodiscard]] const std::optional<RiskLimitEvidence>& risk_evidence() const noexcept {
     return risk_evidence_;
   }
 
   // --------------------------------------------------------
+  // Return measured local-path duration when both endpoint readings were available.
   [[nodiscard]] const std::optional<std::uint64_t>& local_path_nanoseconds() const noexcept {
     return local_path_nanoseconds_;
   }

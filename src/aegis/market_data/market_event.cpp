@@ -20,14 +20,14 @@ namespace {
 // ########################################################################
 // Stream explicitly sized network-order values into SHA-256 so canonical payload identity never
 // depends on host layout, endianness, padding, or standard-library serialization.
-class CanonicalDigestWriter final {
+class CanonicalMarketUpdateDigestWriter final {
 public:
 
   // --------------------------------------------------------
   // Append one byte without exposing the hash implementation to callers.
   void append_u8(std::uint8_t value) noexcept {
     const std::array bytes{static_cast<std::byte>(value)};
-    hash_.update(bytes);
+    hash_.append_bytes(bytes);
   }
 
   // --------------------------------------------------------
@@ -35,7 +35,7 @@ public:
   void append_u16(std::uint16_t value) noexcept {
     const std::array bytes{static_cast<std::byte>((value >> 8U) & 0xffU),
                            static_cast<std::byte>(value & 0xffU)};
-    hash_.update(bytes);
+    hash_.append_bytes(bytes);
   }
 
   // --------------------------------------------------------
@@ -46,14 +46,14 @@ public:
       const auto shift = static_cast<unsigned int>((bytes.size() - 1U - index) * 8U);
       bytes[index] = static_cast<std::byte>((value >> shift) & 0xffU);
     }
-    hash_.update(bytes);
+    hash_.append_bytes(bytes);
   }
 
   // --------------------------------------------------------
   // Prefix variable text with a fixed-width length so adjacent identifier fields cannot collide.
   void append_string(std::string_view value) noexcept {
     append_u64(static_cast<std::uint64_t>(value.size()));
-    hash_.update(std::as_bytes(std::span<const char>{value.data(), value.size()}));
+    hash_.append_bytes(std::as_bytes(std::span<const char>{value.data(), value.size()}));
   }
 
   // --------------------------------------------------------
@@ -65,11 +65,11 @@ public:
 
   // --------------------------------------------------------
   // Append already canonical fixed-width bytes without another length prefix.
-  void append_digest(const model::Sha256Digest& digest) noexcept { hash_.update(digest); }
+  void append_digest(const model::Sha256Digest& digest) noexcept { hash_.append_bytes(digest); }
 
   // --------------------------------------------------------
   // Finalize a copy of the streaming state into the complete canonical identity.
-  [[nodiscard]] model::Sha256Digest finalize() const noexcept { return hash_.finalize(); }
+  [[nodiscard]] model::Sha256Digest derive_digest() const noexcept { return hash_.derive_digest(); }
 
   // --------------------------------------------------------
 private:
@@ -107,8 +107,8 @@ private:
 // --------------------------------------------------------
 // Sort semantic changes independently from authored order: bids precede asks and exact price is
 // ascending within each side.
-[[nodiscard]] bool canonical_change_less(const MarketLevelChange& left,
-                                         const MarketLevelChange& right) noexcept {
+[[nodiscard]] bool is_canonical_change_less(const MarketLevelChange& left,
+                                            const MarketLevelChange& right) noexcept {
   if (left.side != right.side) {
     return static_cast<std::uint8_t>(left.side) < static_cast<std::uint8_t>(right.side);
   }
@@ -123,7 +123,7 @@ canonical_payload_digest(const NormalizedMarketUpdateFields& fields) noexcept {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Domain-separate normalized-market bytes and bind them to the assigned schema.
-  CanonicalDigestWriter writer;
+  CanonicalMarketUpdateDigestWriter writer;
   writer.append_string("AEGISNMD");
   writer.append_u16(normalized_market_schema_version);
   writer.append_u8(static_cast<std::uint8_t>(fields.kind));
@@ -157,22 +157,24 @@ canonical_payload_digest(const NormalizedMarketUpdateFields& fields) noexcept {
     writer.append_decimal(change.price);
     writer.append_decimal(change.quantity);
   }
-  return writer.finalize();
+  return writer.derive_digest();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Create one stable field-level market-contract failure.
-[[nodiscard]] model::DomainError invalid_event(model::DomainErrorCode code, std::string field) {
-  return model::DomainError::at_field(code, std::move(field));
+[[nodiscard]] model::DomainError create_invalid_market_event_error(model::DomainErrorCode code,
+                                                                   std::string field) {
+  return model::DomainError::create_at_field(code, std::move(field));
 }
 
 // --------------------------------------------------------
 // Create one stable indexed market-contract failure after canonical ordering.
-[[nodiscard]] model::DomainError invalid_change(model::DomainErrorCode code, std::string field,
-                                                std::size_t index) {
-  return model::DomainError::at_index(code, std::move(field), index);
+[[nodiscard]] model::DomainError create_invalid_market_change_error(model::DomainErrorCode code,
+                                                                    std::string field,
+                                                                    std::size_t index) {
+  return model::DomainError::create_at_index(code, std::move(field), index);
 }
 
 // --------------------------------------------------------
@@ -219,7 +221,8 @@ has_discontinuity_transition_context(const MarketStateEventFields& fields) noexc
 
 // --------------------------------------------------------
 // States that prove prior or current readiness cannot omit the last committed book identity.
-[[nodiscard]] bool requires_book_identity(const MarketStateEventFields& fields) noexcept {
+[[nodiscard]] bool
+does_market_state_event_require_book_identity(const MarketStateEventFields& fields) noexcept {
   return fields.readiness == MarketReadiness::Ready || fields.readiness == MarketReadiness::Stale ||
          fields.previous_readiness == MarketReadiness::Ready ||
          fields.previous_readiness == MarketReadiness::Stale;
@@ -245,14 +248,15 @@ model::Result<IntegrityTokenIdentity> IntegrityTokenIdentity::from_token(std::st
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject absence and oversized adapter input before any normalized identity is published.
   if (token.empty() || token.size() > maximum_integrity_token_bytes) {
-    return model::Result<IntegrityTokenIdentity>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketEvent, "market_update.integrity_token"));
+    return model::Result<IntegrityTokenIdentity>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketEvent, "market_update.integrity_token"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Hash exact token bytes; lexical grammar belongs to the parser that supplied them.
   const auto bytes = std::as_bytes(std::span<const char>{token.data(), token.size()});
-  return model::Result<IntegrityTokenIdentity>::success(from_digest(model::sha256(bytes)));
+  return model::Result<IntegrityTokenIdentity>::create_success(
+      from_digest(model::calculate_sha256_digest(bytes)));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -260,37 +264,38 @@ model::Result<IntegrityTokenIdentity> IntegrityTokenIdentity::from_token(std::st
 // --------------------------------------------------------
 // Validate and canonicalize a complete pre-book update without publishing partial output.
 model::Result<NormalizedMarketUpdate>
-NormalizedMarketUpdate::create(NormalizedMarketUpdateFields fields, std::size_t maximum_changes) {
+NormalizedMarketUpdate::create_normalized_market_update(NormalizedMarketUpdateFields fields,
+                                                        std::size_t maximum_changes) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject the primitive absence sentinel before continuity or payload identity can acquire
   // meaning.
   if (fields.source_sequence.value() == 0U) {
-    return model::Result<NormalizedMarketUpdate>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketEvent, "market_update.source_sequence"));
+    return model::Result<NormalizedMarketUpdate>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketEvent, "market_update.source_sequence"));
   }
   if (fields.predecessor_sequence.has_value() && fields.predecessor_sequence->value() == 0U) {
-    return model::Result<NormalizedMarketUpdate>::failure(invalid_event(
+    return model::Result<NormalizedMarketUpdate>::create_failure(create_invalid_market_event_error(
         model::DomainErrorCode::InvalidMarketEvent, "market_update.predecessor_sequence"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate closed enums and the immutable bound before interpreting any change content.
   if (!is_valid(fields.kind)) {
-    return model::Result<NormalizedMarketUpdate>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketEvent, "market_update.kind"));
+    return model::Result<NormalizedMarketUpdate>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketEvent, "market_update.kind"));
   }
   if (!is_valid(fields.integrity.verdict)) {
-    return model::Result<NormalizedMarketUpdate>::failure(invalid_event(
+    return model::Result<NormalizedMarketUpdate>::create_failure(create_invalid_market_event_error(
         model::DomainErrorCode::InvalidMarketEvent, "market_update.integrity_verdict"));
   }
   if (maximum_changes == 0U || maximum_changes > maximum_changes_per_market_update) {
-    return model::Result<NormalizedMarketUpdate>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketEvent, "market_update.maximum_changes"));
+    return model::Result<NormalizedMarketUpdate>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketEvent, "market_update.maximum_changes"));
   }
   if (fields.changes.size() > maximum_changes) {
-    return model::Result<NormalizedMarketUpdate>::failure(
-        invalid_event(model::DomainErrorCode::MarketBookCapacityExceeded, "market_update.changes"));
+    return model::Result<NormalizedMarketUpdate>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::MarketBookCapacityExceeded, "market_update.changes"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -298,36 +303,40 @@ NormalizedMarketUpdate::create(NormalizedMarketUpdateFields fields, std::size_t 
   for (std::size_t index = 0U; index < fields.changes.size(); ++index) {
     const auto& change = fields.changes[index];
     if (!is_valid(change.side)) {
-      return model::Result<NormalizedMarketUpdate>::failure(invalid_change(
-          model::DomainErrorCode::InvalidMarketEvent, "market_update.changes.side", index));
+      return model::Result<NormalizedMarketUpdate>::create_failure(
+          create_invalid_market_change_error(model::DomainErrorCode::InvalidMarketEvent,
+                                             "market_update.changes.side", index));
     }
     if (change.price.coefficient() <= 0) {
-      return model::Result<NormalizedMarketUpdate>::failure(invalid_change(
-          model::DomainErrorCode::InvalidMarketEvent, "market_update.changes.price", index));
+      return model::Result<NormalizedMarketUpdate>::create_failure(
+          create_invalid_market_change_error(model::DomainErrorCode::InvalidMarketEvent,
+                                             "market_update.changes.price", index));
     }
     if (change.quantity.coefficient() < 0 ||
         (fields.kind == MarketUpdateKind::Snapshot && change.quantity.coefficient() == 0)) {
-      return model::Result<NormalizedMarketUpdate>::failure(invalid_change(
-          model::DomainErrorCode::InvalidMarketEvent, "market_update.changes.quantity", index));
+      return model::Result<NormalizedMarketUpdate>::create_failure(
+          create_invalid_market_change_error(model::DomainErrorCode::InvalidMarketEvent,
+                                             "market_update.changes.quantity", index));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonicalize independent of fixture order, then detect duplicate side/price keys exactly.
-  std::sort(fields.changes.begin(), fields.changes.end(), canonical_change_less);
+  std::sort(fields.changes.begin(), fields.changes.end(), is_canonical_change_less);
   for (std::size_t index = 1U; index < fields.changes.size(); ++index) {
     const auto& previous = fields.changes[index - 1U];
     const auto& current = fields.changes[index];
     if (previous.side == current.side && previous.price == current.price) {
-      return model::Result<NormalizedMarketUpdate>::failure(invalid_change(
-          model::DomainErrorCode::InvalidMarketEvent, "market_update.changes.price", index));
+      return model::Result<NormalizedMarketUpdate>::create_failure(
+          create_invalid_market_change_error(model::DomainErrorCode::InvalidMarketEvent,
+                                             "market_update.changes.price", index));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive semantic identity only from the completely validated canonical field set.
   const auto payload_digest = canonical_payload_digest(fields);
-  return model::Result<NormalizedMarketUpdate>::success(
+  return model::Result<NormalizedMarketUpdate>::create_success(
       NormalizedMarketUpdate{std::move(fields), payload_digest});
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -341,13 +350,13 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
   // Validate assigned states and the unique initial-transition destination first.
   if (!is_valid(fields.readiness) ||
       (fields.previous_readiness.has_value() && !is_valid(fields.previous_readiness.value()))) {
-    return model::Result<void>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.readiness"));
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.readiness"));
   }
   if (!fields.previous_readiness.has_value() &&
       fields.readiness != MarketReadiness::Synchronizing) {
-    return model::Result<void>::failure(invalid_event(model::DomainErrorCode::InvalidMarketState,
-                                                      "market_state.previous_readiness"));
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.previous_readiness"));
   }
   // Exactly one complete owner, update, envelope, or discontinuity profile must be present.
   const bool owner_context = has_owner_transition_context(fields);
@@ -355,8 +364,8 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
   const bool envelope_context = has_envelope_transition_context(fields);
   const bool discontinuity_context = has_discontinuity_transition_context(fields);
   if (!owner_context && !update_context && !envelope_context && !discontinuity_context) {
-    return model::Result<void>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.input_context"));
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.input_context"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -364,23 +373,23 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
   if (fields.previous_readiness.has_value() &&
       fields.previous_readiness.value() == fields.readiness &&
       !(fields.readiness == MarketReadiness::Synchronizing && owner_context)) {
-    return model::Result<void>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.transition"));
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.transition"));
   }
   if (fields.receive_timestamp.has_value()) {
-    const auto delay =
-        model::processing_delay(fields.processing_timestamp, fields.receive_timestamp.value());
+    const auto delay = model::calculate_processing_delay(fields.processing_timestamp,
+                                                         fields.receive_timestamp.value());
     if (!delay) {
-      return model::Result<void>::failure(invalid_event(model::DomainErrorCode::InvalidMarketState,
-                                                        "market_state.processing_timestamp"));
+      return model::Result<void>::create_failure(create_invalid_market_event_error(
+          model::DomainErrorCode::InvalidMarketState, "market_state.processing_timestamp"));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Initial publication has no fabricated session, ingress, or committed-book identity.
   if (!fields.previous_readiness && (!owner_context || fields.book_generation)) {
-    return model::Result<void>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.initial_context"));
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.initial_context"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -406,24 +415,25 @@ model::Result<void> validate_market_state_transition(const MarketStateEventField
       break;
     }
     if (!transition_profile) {
-      return model::Result<void>::failure(invalid_event(model::DomainErrorCode::InvalidMarketState,
-                                                        "market_state.transition_profile"));
+      return model::Result<void>::create_failure(create_invalid_market_event_error(
+          model::DomainErrorCode::InvalidMarketState, "market_state.transition_profile"));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Book identities remain paired, ordered, and present after any known Ready history.
   if (!has_supported_book_identity(fields)) {
-    return model::Result<void>::failure(
-        invalid_event(model::DomainErrorCode::InvalidMarketState, "market_state.book_identity"));
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.book_identity"));
   }
-  if (requires_book_identity(fields) && !fields.book_generation) {
-    return model::Result<void>::failure(invalid_event(model::DomainErrorCode::InvalidMarketState,
-                                                      "market_state.required_book_identity"));
+  if (does_market_state_event_require_book_identity(fields) && !fields.book_generation) {
+    return model::Result<void>::create_failure(create_invalid_market_event_error(
+        model::DomainErrorCode::InvalidMarketState, "market_state.required_book_identity"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  return model::Result<void>::success();
+  // Report success only after the complete event shape and book-identity contract holds.
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

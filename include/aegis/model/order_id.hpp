@@ -108,8 +108,9 @@ private:
 
   // --------------------------------------------------------
   // Encode one namespace/counter pair into the single canonical byte layout.
-  [[nodiscard]] static OrderId from_parts(const OrderNamespace& order_namespace,
-                                          std::uint64_t counter) noexcept;
+  [[nodiscard]] static OrderId
+  order_id_from_namespace_and_counter(const OrderNamespace& order_namespace,
+                                      std::uint64_t counter) noexcept;
 
   // --------------------------------------------------------
 
@@ -131,8 +132,9 @@ public:
 
   // --------------------------------------------------------
   // Create a deterministic stream beginning at the assigned initial counter of one.
-  [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace) {
-    return create_validated(order_namespace, 1U);
+  [[nodiscard]] static Result<DeterministicOrderIdProvider>
+  create_deterministic_order_id_provider(OrderNamespace order_namespace) {
+    return create_validated_deterministic_order_id_provider(order_namespace, 1U);
   }
 
   // --------------------------------------------------------
@@ -141,19 +143,20 @@ public:
   // remain supported, while negative or unrepresentable values fail at order_counter before
   // conversion.
   template <detail::CheckedIntegerInput Counter>
-  [[nodiscard]] static Result<DeterministicOrderIdProvider> create(OrderNamespace order_namespace,
-                                                                   Counter initial_counter) {
+  [[nodiscard]] static Result<DeterministicOrderIdProvider>
+  create_deterministic_order_id_provider(OrderNamespace order_namespace, Counter initial_counter) {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject negative or unrepresentable authored counters before conversion.
     if (!std::in_range<std::uint64_t>(initial_counter)) {
-      return Result<DeterministicOrderIdProvider>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
+      return Result<DeterministicOrderIdProvider>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidValue, "order_counter"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Delegate only a validated fixed-width counter to the stable constructor boundary.
-    return create_validated(order_namespace, static_cast<std::uint64_t>(initial_counter));
+    return create_validated_deterministic_order_id_provider(
+        order_namespace, static_cast<std::uint64_t>(initial_counter));
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -167,7 +170,7 @@ public:
 
   // --------------------------------------------------------
   // Emit the current counter exactly once and advance, or preserve permanent exhaustion.
-  [[nodiscard]] Result<OrderId> next();
+  [[nodiscard]] Result<OrderId> generate_next_order_id();
 
   // --------------------------------------------------------
 private:
@@ -175,7 +178,8 @@ private:
   // --------------------------------------------------------
   // Enforce counter-domain semantics after public source-width validation.
   [[nodiscard]] static Result<DeterministicOrderIdProvider>
-  create_validated(OrderNamespace order_namespace, std::uint64_t initial_counter);
+  create_validated_deterministic_order_id_provider(OrderNamespace order_namespace,
+                                                   std::uint64_t initial_counter);
 
   // --------------------------------------------------------
   // Assemble one provider whose namespace and initial counter are already valid.
@@ -217,7 +221,7 @@ public:
 
   // --------------------------------------------------------
   // Emit the next trusted identity without allocation, then report stable exhaustion.
-  [[nodiscard]] Result<OrderId> next();
+  [[nodiscard]] Result<OrderId> generate_next_order_id();
 
   // --------------------------------------------------------
 private:
@@ -243,7 +247,7 @@ public:
 
   // --------------------------------------------------------
   // Create a production stream only after obtaining a complete OS-entropy namespace.
-  [[nodiscard]] static Result<ProductionOrderIdProvider> create();
+  [[nodiscard]] static Result<ProductionOrderIdProvider> create_production_order_id_provider();
 
   // --------------------------------------------------------
   // Keep production streams single-owner while allowing explicit ownership transfer.
@@ -254,7 +258,9 @@ public:
 
   // --------------------------------------------------------
   // Delegate generation and exhaustion behavior to the shared deterministic core.
-  [[nodiscard]] Result<OrderId> next() { return provider_.next(); }
+  [[nodiscard]] Result<OrderId> generate_next_order_id() {
+    return provider_.generate_next_order_id();
+  }
 
   // --------------------------------------------------------
 private:
@@ -269,7 +275,7 @@ private:
   // --------------------------------------------------------
   // Exercise the fail-closed entropy boundary through the private production/test seam.
   [[nodiscard]] static Result<ProductionOrderIdProvider>
-  create_with_entropy(EntropyFillCallback entropy_fill);
+  create_production_order_id_provider_with_entropy(EntropyFillCallback entropy_fill);
 
   // --------------------------------------------------------
   // Transfer one successfully sourced namespace into the shared counter provider.

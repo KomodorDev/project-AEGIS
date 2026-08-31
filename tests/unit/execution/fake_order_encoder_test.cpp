@@ -21,7 +21,8 @@ namespace {
 using namespace aegis;
 
 // ########################################################################
-// Compile-time probes make accidental transport-shaped fields or methods a structural regression.
+// Interesting syntax: requires-expression probes make accidental transport-shaped fields or
+// methods a compile-time structural regression without invoking them.
 template <typename Value>
 concept HasEndpoint = requires(Value value) { value.endpoint; };
 
@@ -48,8 +49,9 @@ static_assert(execution::maximum_encoded_fake_order_bytes == 1'024U);
 
 // --------------------------------------------------------
 // Invalid identifier literals are fixture defects rather than encoder behavior under test.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto result = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto result = Identifier::parse_identifier(text);
   if (!result) {
     throw std::logic_error{"invalid identifier in fake encoder fixture"};
   }
@@ -59,7 +61,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 // --------------------------------------------------------
 // Build exact nominal decimal inputs without passing through binary floating point.
 template <typename Decimal>
-[[nodiscard]] Decimal decimal(std::int64_t coefficient, std::uint8_t scale) {
+[[nodiscard]] Decimal create_decimal_or_throw(std::int64_t coefficient, std::uint8_t scale) {
   auto result = Decimal::from_scaled(coefficient, scale);
   if (!result) {
     throw std::logic_error{"invalid decimal in fake encoder fixture"};
@@ -69,7 +71,7 @@ template <typename Decimal>
 
 // --------------------------------------------------------
 // Construct one exact positive ordinal or revision for deterministic fixtures.
-template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value) {
+template <typename Identity> [[nodiscard]] Identity create_identity_or_throw(std::uint64_t value) {
   auto result = Identity::from_value(value);
   if (!result) {
     throw std::logic_error{"invalid identity in fake encoder fixture"};
@@ -79,17 +81,17 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Generate one canonical 24-byte local identity with namespace bytes 00 through 0f.
-[[nodiscard]] model::OrderId order_id(std::uint64_t counter = 1U) {
+[[nodiscard]] model::OrderId create_order_id_or_throw(std::uint64_t counter = 1U) {
   model::OrderNamespace::Bytes bytes{};
   for (std::size_t index = 0U; index < bytes.size(); ++index) {
     bytes[index] = static_cast<std::uint8_t>(index);
   }
-  auto provider =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{bytes}, counter);
+  auto provider = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{bytes}, counter);
   if (!provider) {
     throw std::logic_error{"invalid order ID provider in fake encoder fixture"};
   }
-  auto generated = provider.value().next();
+  auto generated = provider.value().generate_next_order_id();
   if (!generated) {
     throw std::logic_error{"order ID generation failed in fake encoder fixture"};
   }
@@ -98,7 +100,7 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Populate raw fixed-width fingerprints with deterministic consecutive byte ranges.
-[[nodiscard]] model::Sha256Digest digest(std::uint8_t first) noexcept {
+[[nodiscard]] model::Sha256Digest create_digest(std::uint8_t first) noexcept {
   model::Sha256Digest value{};
   for (std::size_t index = 0U; index < value.size(); ++index) {
     value[index] = std::byte{static_cast<std::uint8_t>(first + index)};
@@ -108,50 +110,51 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Author the exact provenance whose identifiers and revisions appear in the golden byte vector.
-[[nodiscard]] oms::OutboundOrderProvenance provenance() {
+[[nodiscard]] oms::OutboundOrderProvenance create_provenance_or_throw() {
   return oms::OutboundOrderProvenance{
-      id<model::RouteId>("route.r"),
-      id<model::VenueId>("deribit"),
-      id<model::LogicalAccountId>("account.a"),
-      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-      id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-      id<model::FirmId>("firm.f"),
-      id<model::DeskId>("desk.d"),
-      id<model::BotId>("bot.b"),
-      id<model::StrategyId>("strategy.s"),
-      digest(0x10U),
-      identity<model::ConfigurationRevision>(9U),
-      identity<model::OrganizationRevision>(2U),
-      identity<model::RouteRevision>(3U),
-      identity<model::InstrumentMetadataRevision>(4U),
-      digest(0x30U),
-      digest(0x50U),
-      identity<model::RiskPolicyRevision>(5U),
-      digest(0x70U),
+      parse_identifier_or_throw<model::RouteId>("route.r"),
+      parse_identifier_or_throw<model::VenueId>("deribit"),
+      parse_identifier_or_throw<model::LogicalAccountId>("account.a"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+      parse_identifier_or_throw<model::FirmId>("firm.f"),
+      parse_identifier_or_throw<model::DeskId>("desk.d"),
+      parse_identifier_or_throw<model::BotId>("bot.b"),
+      parse_identifier_or_throw<model::StrategyId>("strategy.s"),
+      create_digest(0x10U),
+      create_identity_or_throw<model::ConfigurationRevision>(9U),
+      create_identity_or_throw<model::OrganizationRevision>(2U),
+      create_identity_or_throw<model::RouteRevision>(3U),
+      create_identity_or_throw<model::InstrumentMetadataRevision>(4U),
+      create_digest(0x30U),
+      create_digest(0x50U),
+      create_identity_or_throw<model::RiskPolicyRevision>(5U),
+      create_digest(0x70U),
   };
 }
 
 // --------------------------------------------------------
 // Couple canonical economics and exposure into one admitted order fixture.
-[[nodiscard]] oms::OutboundOrderAdmission admission() {
-  const auto quantity = decimal<model::Quantity>(3, 0U);
+[[nodiscard]] oms::OutboundOrderAdmission create_admission_or_throw() {
+  const auto quantity = create_decimal_or_throw<model::Quantity>(3, 0U);
   return oms::OutboundOrderAdmission{
-      identity<model::SubmissionAttemptId>(1U),
-      order_id(),
-      identity<model::ReservationId>(1U),
+      create_identity_or_throw<model::SubmissionAttemptId>(1U),
+      create_order_id_or_throw(),
+      create_identity_or_throw<model::ReservationId>(1U),
       execution::CanonicalOrderEconomics{execution::OrderSide::Sell, execution::OrderType::Limit,
                                          execution::TimeInForce::GoodTilCancelled,
-                                         decimal<model::Price>(12'345, 2U), quantity},
-      risk::OrderExposure{quantity, decimal<model::Notional>(30, 0U)},
-      provenance(),
+                                         create_decimal_or_throw<model::Price>(12'345, 2U),
+                                         quantity},
+      risk::OrderExposure{quantity, create_decimal_or_throw<model::Notional>(30, 0U)},
+      create_provenance_or_throw(),
   };
 }
 
 // --------------------------------------------------------
 // Admit one record or fail immediately when fixture construction violates the OMS contract.
-[[nodiscard]] const oms::OutboundOrderRecord& admit_one(oms::OutboundOms& outbound) {
-  auto result = outbound.admit(admission());
-  if (!result || !result.value().admitted()) {
+[[nodiscard]] const oms::OutboundOrderRecord& admit_one_order_or_fail(oms::OutboundOms& outbound) {
+  auto result = outbound.admit_outbound_order(create_admission_or_throw());
+  if (!result || !result.value().is_admitted()) {
     throw std::logic_error{"fake encoder fixture OMS admission failed"};
   }
   return *result.value().record();
@@ -159,7 +162,7 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Render exact bytes as lowercase hexadecimal for a compact immutable golden assertion.
-[[nodiscard]] std::string hex(std::span<const std::byte> bytes) {
+[[nodiscard]] std::string bytes_to_hex(std::span<const std::byte> bytes) {
   constexpr std::array<char, 16U> digits{'0', '1', '2', '3', '4', '5', '6', '7',
                                          '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
   std::string result;
@@ -174,7 +177,8 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Read one big-endian unsigned 16-bit value while advancing a bounded test cursor.
-[[nodiscard]] std::uint16_t read_u16(std::span<const std::byte> bytes, std::size_t& cursor) {
+[[nodiscard]] std::uint16_t read_u16_or_throw(std::span<const std::byte> bytes,
+                                              std::size_t& cursor) {
   if (cursor + 2U > bytes.size()) {
     throw std::logic_error{"truncated u16 in fake encoder fixture"};
   }
@@ -186,7 +190,8 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Read one big-endian coefficient bit pattern while advancing a bounded test cursor.
-[[nodiscard]] std::int64_t read_i64(std::span<const std::byte> bytes, std::size_t& cursor) {
+[[nodiscard]] std::int64_t read_i64_or_throw(std::span<const std::byte> bytes,
+                                             std::size_t& cursor) {
   if (cursor + 8U > bytes.size()) {
     throw std::logic_error{"truncated i64 in fake encoder fixture"};
   }
@@ -208,28 +213,29 @@ TEST_CASE("fake encoder scripts validate and select canonical overrides", "[exec
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Sort two authored overrides and prove missing ordinals permanently select the default.
-  const auto script = execution::FakeEncoderScript::create(
+  const auto script = execution::FakeEncoderScript::create_fake_encoder_script(
       execution::FakeEncodingAction::Encode, 3U,
       {{3U, execution::FakeEncodingAction::Fail}, {1U, execution::FakeEncodingAction::Fail}});
   REQUIRE(script);
   REQUIRE(script.value().overrides().size() == 2U);
   CHECK(script.value().overrides()[0U].invocation_ordinal == 1U);
   CHECK(script.value().overrides()[1U].invocation_ordinal == 3U);
-  CHECK(script.value().action_for(identity<model::EncoderInvocationOrdinal>(1U)) ==
+  CHECK(script.value().action_for(create_identity_or_throw<model::EncoderInvocationOrdinal>(1U)) ==
         execution::FakeEncodingAction::Fail);
-  CHECK(script.value().action_for(identity<model::EncoderInvocationOrdinal>(2U)) ==
+  CHECK(script.value().action_for(create_identity_or_throw<model::EncoderInvocationOrdinal>(2U)) ==
         execution::FakeEncodingAction::Encode);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Zero maximum, unassigned values, zero/out-of-range ordinals, and duplicates all fail closed.
-  CHECK_FALSE(execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 0U, {}));
-  CHECK_FALSE(
-      execution::FakeEncoderScript::create(static_cast<execution::FakeEncodingAction>(0U), 1U, {}));
-  CHECK_FALSE(execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 2U,
-                                                   {{0U, execution::FakeEncodingAction::Fail}}));
-  CHECK_FALSE(execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 2U,
-                                                   {{3U, execution::FakeEncodingAction::Fail}}));
-  CHECK_FALSE(execution::FakeEncoderScript::create(
+  CHECK_FALSE(execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 0U, {}));
+  CHECK_FALSE(execution::FakeEncoderScript::create_fake_encoder_script(
+      static_cast<execution::FakeEncodingAction>(0U), 1U, {}));
+  CHECK_FALSE(execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 2U, {{0U, execution::FakeEncodingAction::Fail}}));
+  CHECK_FALSE(execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 2U, {{3U, execution::FakeEncodingAction::Fail}}));
+  CHECK_FALSE(execution::FakeEncoderScript::create_fake_encoder_script(
       execution::FakeEncodingAction::Encode, 2U,
       {{1U, execution::FakeEncodingAction::Fail}, {1U, execution::FakeEncodingAction::Encode}}));
 
@@ -243,22 +249,24 @@ TEST_CASE("fake encoder emits exact AEGISFOE schema-one bytes without rounding",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Encode one PendingEncoding row under the non-failing default action.
-  auto outbound_result = oms::OutboundOms::create(1U);
+  auto outbound_result = oms::OutboundOms::create_outbound_oms(1U);
   REQUIRE(outbound_result);
-  const auto& record = admit_one(outbound_result.value());
-  auto script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 1U, {});
+  const auto& record = admit_one_order_or_fail(outbound_result.value());
+  auto script = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 1U, {});
   REQUIRE(script);
-  auto encoder = execution::DeterministicFakeOrderEncoder::create(std::move(script).value(), 512U);
+  auto encoder = execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      std::move(script).value(), 512U);
   REQUIRE(encoder);
-  const auto result = encoder.value().encode(record);
+  const auto result = encoder.value().encode_order(record);
   REQUIRE(result);
-  REQUIRE(result.value().encoded());
+  REQUIRE(result.value().is_encoded());
   REQUIRE(result.value().encoded_order() != nullptr);
   const auto& encoded = *result.value().encoded_order();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Compare the complete fixed positional sequence to one immutable lowercase golden vector.
-  CHECK(hex(encoded.bytes()) ==
+  CHECK(bytes_to_hex(encoded.bytes()) ==
         "4145474953464f450001000102030405060708090a0b0c0d0e0f0000000000000001"
         "0007726f7574652e7200076465726962697400096163636f756e742e6100114254432d"
         "5553442d50455250455455414c000d4254432d50455250455455414c00066669726d"
@@ -273,20 +281,21 @@ TEST_CASE("fake encoder emits exact AEGISFOE schema-one bytes without rounding",
   // ++++++++++++++++++++++++++++++++++++++++
   // Decode only the economics positions and prove coefficients/scales are exactly the OMS values.
   std::size_t cursor = 8U;
-  CHECK(read_u16(encoded.bytes(), cursor) == execution::canonical_fake_order_schema_version);
+  CHECK(read_u16_or_throw(encoded.bytes(), cursor) ==
+        execution::canonical_fake_order_schema_version);
   cursor += model::OrderId::byte_size;
   for (std::size_t identifier = 0U; identifier < 9U; ++identifier) {
-    cursor += read_u16(encoded.bytes(), cursor);
+    cursor += read_u16_or_throw(encoded.bytes(), cursor);
   }
   REQUIRE(cursor + 21U <= encoded.bytes().size());
   CHECK(std::to_integer<std::uint8_t>(encoded.bytes()[cursor++]) ==
         static_cast<std::uint8_t>(execution::OrderSide::Sell));
   CHECK(std::to_integer<std::uint8_t>(encoded.bytes()[cursor++]) == 1U);
   CHECK(std::to_integer<std::uint8_t>(encoded.bytes()[cursor++]) == 1U);
-  CHECK(read_i64(encoded.bytes(), cursor) == record.economics().price.coefficient());
+  CHECK(read_i64_or_throw(encoded.bytes(), cursor) == record.economics().price.coefficient());
   CHECK(std::to_integer<std::uint8_t>(encoded.bytes()[cursor++]) ==
         record.economics().price.scale());
-  CHECK(read_i64(encoded.bytes(), cursor) == record.economics().quantity.coefficient());
+  CHECK(read_i64_or_throw(encoded.bytes(), cursor) == record.economics().quantity.coefficient());
   CHECK(std::to_integer<std::uint8_t>(encoded.bytes()[cursor]) ==
         record.economics().quantity.scale());
   CHECK(encoded.attempt_id() == record.attempt_id());
@@ -302,36 +311,37 @@ TEST_CASE("fake encoder consumes scripted failures exactly once", "[execution][f
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Override only invocation one to fail, leaving invocation two on the successful default.
-  auto outbound_result = oms::OutboundOms::create(1U);
+  auto outbound_result = oms::OutboundOms::create_outbound_oms(1U);
   REQUIRE(outbound_result);
-  const auto& record = admit_one(outbound_result.value());
-  auto script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 2U,
-                                                     {{1U, execution::FakeEncodingAction::Fail}});
+  const auto& record = admit_one_order_or_fail(outbound_result.value());
+  auto script = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 2U, {{1U, execution::FakeEncodingAction::Fail}});
   REQUIRE(script);
-  auto encoder = execution::DeterministicFakeOrderEncoder::create(std::move(script).value(), 512U);
+  auto encoder = execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      std::move(script).value(), 512U);
   REQUIRE(encoder);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The first ordinary failure retains its invocation but has no encoded object.
-  const auto failed = encoder.value().encode(record);
+  const auto failed = encoder.value().encode_order(record);
   REQUIRE(failed);
   CHECK(failed.value().action() == execution::FakeEncodingAction::Fail);
   CHECK(failed.value().invocation_ordinal().value() == 1U);
-  CHECK_FALSE(failed.value().encoded());
+  CHECK_FALSE(failed.value().is_encoded());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The next reached call selects invocation two, proving no implicit retry of the first action.
-  const auto succeeded = encoder.value().encode(record);
+  const auto succeeded = encoder.value().encode_order(record);
   REQUIRE(succeeded);
   CHECK(succeeded.value().action() == execution::FakeEncodingAction::Encode);
   CHECK(succeeded.value().invocation_ordinal().value() == 2U);
-  CHECK(succeeded.value().encoded());
+  CHECK(succeeded.value().is_encoded());
   CHECK(encoder.value().invocations_consumed() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Calls beyond the validated outer-attempt bound are impossible fake state, not script
   // exhaustion.
-  const auto exhausted = encoder.value().encode(record);
+  const auto exhausted = encoder.value().encode_order(record);
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == model::DomainErrorCode::InvalidFakeState);
 
@@ -346,22 +356,28 @@ TEST_CASE("fake encoder bounds every byte result and separates policy from inter
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Zero and values above the compiled 1,024-byte ceiling cannot construct the concrete fake.
-  auto script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 1U, {});
+  auto script = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 1U, {});
   REQUIRE(script);
-  CHECK_FALSE(execution::DeterministicFakeOrderEncoder::create(script.value(), 0U));
-  CHECK_FALSE(execution::DeterministicFakeOrderEncoder::create(script.value(), 1'025U));
+  CHECK_FALSE(execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      script.value(), 0U));
+  CHECK_FALSE(execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      script.value(), 1'025U));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A submission policy should preclude this undersized case; direct misuse fails without bytes.
-  auto outbound_result = oms::OutboundOms::create(1U);
+  auto outbound_result = oms::OutboundOms::create_outbound_oms(1U);
   REQUIRE(outbound_result);
-  const auto& record = admit_one(outbound_result.value());
-  auto undersized = execution::DeterministicFakeOrderEncoder::create(std::move(script).value(), 1U);
+  const auto& record = admit_one_order_or_fail(outbound_result.value());
+  auto undersized =
+      execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+          std::move(script).value(), 1U);
   REQUIRE(undersized);
-  const auto result = undersized.value().encode(record);
+  const auto result = undersized.value().encode_order(record);
   REQUIRE_FALSE(result);
-  CHECK(result.error() == model::DomainError::at_field(model::DomainErrorCode::InvalidFakeState,
-                                                       "fake_order_encoder.bytes"));
+  CHECK(result.error() ==
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidFakeState,
+                                            "fake_order_encoder.bytes"));
   CHECK(undersized.value().invocations_consumed() == 1U);
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -374,19 +390,21 @@ TEST_CASE("fake encoder rejects wrong OMS source state without mutation", "[exec
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Advance one successfully encoded row exactly as the coordinator would before initiation.
-  auto outbound_result = oms::OutboundOms::create(1U);
+  auto outbound_result = oms::OutboundOms::create_outbound_oms(1U);
   REQUIRE(outbound_result);
-  const auto& record = admit_one(outbound_result.value());
-  auto script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 2U, {});
+  const auto& record = admit_one_order_or_fail(outbound_result.value());
+  auto script = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 2U, {});
   REQUIRE(script);
-  auto encoder = execution::DeterministicFakeOrderEncoder::create(std::move(script).value(), 512U);
+  auto encoder = execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      std::move(script).value(), 512U);
   REQUIRE(encoder);
-  REQUIRE(encoder.value().encode(record));
+  REQUIRE(encoder.value().encode_order(record));
   REQUIRE(outbound_result.value().mark_encoding_succeeded(record.order_id()));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Repeating encode consumes invocation two, returns InvalidFakeState, and leaves OMS unchanged.
-  const auto repeated = encoder.value().encode(record);
+  const auto repeated = encoder.value().encode_order(record);
   REQUIRE_FALSE(repeated);
   CHECK(repeated.error().code == model::DomainErrorCode::InvalidFakeState);
   CHECK(encoder.value().invocations_consumed() == 2U);

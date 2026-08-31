@@ -97,7 +97,8 @@ public:
   // --------------------------------------------------------
   // Preserve one public submission vocabulary across runtime modes; the M2 composition has no
   // authority and therefore returns a definite capability rejection without consuming identity.
-  [[nodiscard]] execution::SubmitResult submit(const execution::OrderRequest& request) noexcept;
+  [[nodiscard]] execution::SubmitResult
+  submit_order(const execution::OrderRequest& request) noexcept;
 
   // --------------------------------------------------------
 private:
@@ -132,8 +133,8 @@ private:
   // --------------------------------------------------------
   organization::BotAttribution attribution_;
   const model::SubscriptionId* subscription_id_{nullptr};
-  model::TurnOrdinal owner_turn_ordinal_{model::TurnOrdinal::initial()};
-  model::CallbackOrdinal callback_ordinal_{model::CallbackOrdinal::initial()};
+  model::TurnOrdinal owner_turn_ordinal_{model::TurnOrdinal::create_initial()};
+  model::CallbackOrdinal callback_ordinal_{model::CallbackOrdinal::create_initial()};
   model::ProcessingTimestamp processing_timestamp_{0U};
   configuration::ConfigurationFingerprint configuration_fingerprint_;
   RuntimePolicyFingerprint runtime_policy_fingerprint_;
@@ -261,7 +262,7 @@ struct BotRuntimeStatus {
 
   // --------------------------------------------------------
   // Report whether no post-callback fault has been latched.
-  [[nodiscard]] bool healthy() const noexcept {
+  [[nodiscard]] bool is_healthy() const noexcept {
     return !canonical_trace_failure_latched && !callback_clock_regression_latched &&
            !diagnostic_evidence_failure_latched;
   }
@@ -317,11 +318,12 @@ public:
   // Success with a submission coordinator permanently closes its recovery-install seam before
   // returning; reported failure leaves that coordinator unchanged.
   [[nodiscard]] static model::Result<BotRuntime>
-  create(const configuration::StartupConfiguration& configuration, const RuntimePolicy& policy,
-         model::ClockProvider& measurement_clock, trace::RuntimeTraceSink& trace_sink,
-         RuntimeDiagnosticSink& diagnostics, std::vector<BotStrategyRegistration> registrations,
-         BotRuntimeCounterSeed counter_seed = {},
-         SubmissionCoordinator* submission_coordinator = nullptr);
+  create_bot_runtime(const configuration::StartupConfiguration& configuration,
+                     const RuntimePolicy& policy, model::ClockProvider& measurement_clock,
+                     trace::RuntimeTraceSink& trace_sink, RuntimeDiagnosticSink& diagnostics,
+                     std::vector<BotStrategyRegistration> registrations,
+                     BotRuntimeCounterSeed counter_seed = {},
+                     SubmissionCoordinator* submission_coordinator = nullptr);
 
   // --------------------------------------------------------
   // One-time moves publish the factory result before any plan can bind to the final object address.
@@ -333,20 +335,20 @@ public:
   // --------------------------------------------------------
   // Validate source routing, exact callback/trace capacity, and callback-counter headroom for the
   // classified zero-to-two event shape. This observation does not mutate BotRuntime.
-  [[nodiscard]] model::Result<BotDispatchPlan> preflight(model::MarketSourceOrdinal source_ordinal,
-                                                         model::TurnOrdinal turn_ordinal,
-                                                         std::uint32_t event_count) const;
+  [[nodiscard]] model::Result<BotDispatchPlan>
+  preflight_dispatch_callbacks(model::MarketSourceOrdinal source_ordinal,
+                               model::TurnOrdinal turn_ordinal, std::uint32_t event_count) const;
 
   // --------------------------------------------------------
   // Preserve a no-fail coordinator rollback seam. Preflight is observational, so cancellation is a
   // deliberate no-op and a failed market turn leaves BotRuntime bit-for-bit unchanged.
-  void cancel(const BotDispatchPlan& plan) noexcept;
+  void cancel_dispatch_callbacks(const BotDispatchPlan& plan) noexcept;
 
   // --------------------------------------------------------
   // Validate the exact opaque preflight proof, prepare all owned trace identities, then invoke
   // state-before-market callbacks in canonical grant order.
   [[nodiscard]] model::Result<BotDispatchReport>
-  dispatch(const BotDispatchPlan& plan, const market_data::MarketTurnOutcome& outcome);
+  dispatch_callbacks(const BotDispatchPlan& plan, const market_data::MarketTurnOutcome& outcome);
 
   // --------------------------------------------------------
   // Coalesce an executor owner-drive recursion attempt into the active callback's one prebuilt
@@ -355,7 +357,7 @@ public:
 
   // --------------------------------------------------------
   // Report whether a synchronous callback fan-out is currently on the owner stack.
-  [[nodiscard]] bool dispatch_active() const noexcept { return dispatch_active_; }
+  [[nodiscard]] bool is_dispatch_active() const noexcept { return dispatch_active_; }
 
   // --------------------------------------------------------
   // Return the final global callback ordinal, absent before the first callback.
@@ -390,7 +392,7 @@ private:
 
   // ########################################################################
   // Bind one canonical subscription and full attribution to its owning strategy and source.
-  struct Grant {
+  struct SubscriptionCallbackGrant {
     model::MarketSourceOrdinal source_ordinal;
     trace::RuntimeTraceSource trace_source;
     market_data::Subscription subscription;
@@ -404,7 +406,7 @@ private:
   // ########################################################################
   // Own validated callback and possible re-entry trace fields before strategy execution begins.
   struct PreparedCallback {
-    Grant* grant;
+    SubscriptionCallbackGrant* grant;
     model::CallbackOrdinal callback_ordinal;
     trace::RuntimeTraceFields trace_fields;
     trace::RuntimeTraceFields reentry_trace_fields;
@@ -420,7 +422,7 @@ private:
              std::uint32_t maximum_callbacks_per_turn, std::uint64_t callback_budget_nanoseconds,
              model::ClockProvider& measurement_clock, trace::RuntimeTraceSink& trace_sink,
              RuntimeDiagnosticSink& diagnostics, std::vector<StrategyEntry> strategies,
-             std::vector<Grant> grants, std::vector<std::size_t> source_offsets,
+             std::vector<SubscriptionCallbackGrant> grants, std::vector<std::size_t> source_offsets,
              BotRuntimeCounterSeed counter_seed)
       : configuration_fingerprint_{std::move(configuration_fingerprint)},
         runtime_policy_fingerprint_{std::move(runtime_policy_fingerprint)},
@@ -467,14 +469,14 @@ private:
   trace::RuntimeTraceSink* trace_sink_;
   RuntimeDiagnosticSink* diagnostics_;
   std::vector<StrategyEntry> strategies_;
-  std::vector<Grant> grants_;
+  std::vector<SubscriptionCallbackGrant> grants_;
   std::vector<std::size_t> source_offsets_;
   std::vector<PreparedCallback> prepared_callbacks_;
   std::optional<model::CallbackOrdinal> last_callback_ordinal_;
   BotRuntimeStatus status_;
   std::uint64_t completed_dispatch_count_{0U};
   bool dispatch_active_{false};
-  Grant* active_grant_{nullptr};
+  SubscriptionCallbackGrant* active_grant_{nullptr};
   PreparedCallback* active_prepared_callback_{nullptr};
   std::optional<model::TurnOrdinal> active_turn_ordinal_;
   std::optional<model::CallbackOrdinal> active_callback_ordinal_;

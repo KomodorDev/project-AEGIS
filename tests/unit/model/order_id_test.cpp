@@ -18,7 +18,8 @@ namespace aegis::model::detail {
 
 // ########################################################################
 // Interesting syntax: the declared friend proxy exposes only the private entropy seam needed to
-// force startup failures; ordinary callers still see only ProductionOrderIdProvider::create().
+// force startup failures; ordinary callers still see only
+// ProductionOrderIdProvider::create_production_order_id_provider().
 struct ProductionOrderIdProviderTestAccess {
 
   // ########################################################################
@@ -30,8 +31,9 @@ struct ProductionOrderIdProviderTestAccess {
   // --------------------------------------------------------
   // Forward an injected entropy callback through the otherwise private production factory seam.
   [[nodiscard]] static Result<ProductionOrderIdProvider>
-  create_with_entropy(EntropyFillCallback entropy_fill) {
-    return ProductionOrderIdProvider::create_with_entropy(entropy_fill);
+  create_production_order_id_provider_with_entropy(EntropyFillCallback entropy_fill) {
+    return ProductionOrderIdProvider::create_production_order_id_provider_with_entropy(
+        entropy_fill);
   }
 
   // --------------------------------------------------------
@@ -48,7 +50,7 @@ using namespace aegis::model;
 // --------------------------------------------------------
 // The deterministic fixture makes namespace bytes visually traceable in canonical hex vectors;
 // changing the first byte also creates a distinct restart namespace.
-[[nodiscard]] OrderNamespace sequential_namespace(std::uint8_t first_byte = 0U) {
+[[nodiscard]] OrderNamespace create_sequential_namespace(std::uint8_t first_byte = 0U) {
   OrderNamespace::Bytes bytes{};
   for (std::size_t index = 0; index < bytes.size(); ++index) {
     bytes[index] = static_cast<std::uint8_t>(first_byte + static_cast<std::uint8_t>(index));
@@ -63,12 +65,13 @@ static_assert(OrderId::byte_size == 24U);
 
 // ########################################################################
 // The fake-submission identity source is a closed value sum: neither alternative has a virtual
-// dispatch seam, and an arbitrary next()-shaped type cannot become a source alternative.
+// dispatch seam, and an arbitrary generate_next_order_id()-shaped type cannot become a source
+// alternative.
 struct ArbitraryOrderIdProviderShape {
 
   // --------------------------------------------------------
   // Match the concrete providers' method shape without inheriting any trusted implementation.
-  [[nodiscard]] Result<OrderId> next();
+  [[nodiscard]] Result<OrderId> generate_next_order_id();
 
   // --------------------------------------------------------
 };
@@ -93,7 +96,7 @@ static_assert(std::is_move_constructible_v<DeterministicOrderIdSource>);
 // below instantiates the accepted body and its std::in_range use.
 template <typename Counter>
 concept HasOrderProviderFactory = requires(OrderNamespace order_namespace, Counter counter) {
-  DeterministicOrderIdProvider::create(order_namespace, counter);
+  DeterministicOrderIdProvider::create_deterministic_order_id_provider(order_namespace, counter);
 };
 
 static_assert(HasOrderProviderFactory<std::uint64_t>);
@@ -112,17 +115,18 @@ TEST_CASE("deterministic order IDs use canonical namespace and big-endian counte
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin the namespace bytes independently before they are combined with a counter.
-  const auto order_namespace = sequential_namespace();
+  const auto order_namespace = create_sequential_namespace();
   CHECK(order_namespace.to_hex() == "000102030405060708090a0b0c0d0e0f");
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Generate consecutive identities from an explicitly injected starting counter.
-  auto created = DeterministicOrderIdProvider::create(order_namespace, 1U);
+  auto created =
+      DeterministicOrderIdProvider::create_deterministic_order_id_provider(order_namespace, 1U);
   REQUIRE(created);
   auto provider = std::move(created).value();
 
-  const auto first = provider.next();
-  const auto second = provider.next();
+  const auto first = provider.generate_next_order_id();
+  const auto second = provider.generate_next_order_id();
   REQUIRE(first);
   REQUIRE(second);
 
@@ -140,8 +144,10 @@ TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[m
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seed two independent providers with identical namespace and counter state.
-  auto first_created = DeterministicOrderIdProvider::create(sequential_namespace(), 42U);
-  auto second_created = DeterministicOrderIdProvider::create(sequential_namespace(), 42U);
+  auto first_created = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), 42U);
+  auto second_created = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), 42U);
   REQUIRE(first_created);
   REQUIRE(second_created);
   auto first_provider = std::move(first_created).value();
@@ -149,8 +155,8 @@ TEST_CASE("fixed deterministic inputs reproduce identical order identities", "[m
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Their next values must be byte-for-byte equal for deterministic replay.
-  const auto first = first_provider.next();
-  const auto second = second_provider.next();
+  const auto first = first_provider.generate_next_order_id();
+  const auto second = second_provider.generate_next_order_id();
   REQUIRE(first);
   REQUIRE(second);
   CHECK(first.value() == second.value());
@@ -165,8 +171,11 @@ TEST_CASE("different restart namespaces cannot collide at the same counter", "[m
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Hold the counter constant while changing only the injected restart namespace.
-  auto before_restart_created = DeterministicOrderIdProvider::create(sequential_namespace(0U), 1U);
-  auto after_restart_created = DeterministicOrderIdProvider::create(sequential_namespace(1U), 1U);
+  auto before_restart_created =
+      DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+          create_sequential_namespace(0U), 1U);
+  auto after_restart_created = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(1U), 1U);
   REQUIRE(before_restart_created);
   REQUIRE(after_restart_created);
   auto before_restart = std::move(before_restart_created).value();
@@ -174,8 +183,8 @@ TEST_CASE("different restart namespaces cannot collide at the same counter", "[m
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Prove namespace separation alone prevents an identity collision.
-  const auto before_id = before_restart.next();
-  const auto after_id = after_restart.next();
+  const auto before_id = before_restart.generate_next_order_id();
+  const auto after_id = after_restart.generate_next_order_id();
   REQUIRE(before_id);
   REQUIRE(after_id);
   CHECK(before_id.value() != after_id.value());
@@ -190,32 +199,35 @@ TEST_CASE("order counters reject zero and fail after their final value", "[model
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject the reserved zero and signed-negative authored starting counters.
-  const auto invalid = DeterministicOrderIdProvider::create(sequential_namespace(), 0U);
+  const auto invalid = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), 0U);
   REQUIRE_FALSE(invalid);
   CHECK(invalid.error().code == DomainErrorCode::InvalidValue);
 
-  const auto negative = DeterministicOrderIdProvider::create(sequential_namespace(), -1);
+  const auto negative = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), -1);
   REQUIRE_FALSE(negative);
-  CHECK(negative.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
+  CHECK(negative.error() ==
+        DomainError::create_at_field(DomainErrorCode::InvalidValue, "order_counter"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Unsigned char is a supported numeric integer source despite sharing plain char's storage width.
-  auto narrow_counter =
-      DeterministicOrderIdProvider::create(sequential_namespace(), static_cast<unsigned char>(1));
+  auto narrow_counter = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), static_cast<unsigned char>(1));
   REQUIRE(narrow_counter);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Permit the final representable counter exactly once, then fail without wrapping.
-  auto created = DeterministicOrderIdProvider::create(sequential_namespace(),
-                                                      std::numeric_limits<std::uint64_t>::max());
+  auto created = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), std::numeric_limits<std::uint64_t>::max());
   REQUIRE(created);
   auto provider = std::move(created).value();
 
-  const auto last = provider.next();
+  const auto last = provider.generate_next_order_id();
   REQUIRE(last);
   CHECK(last.value().to_hex().ends_with("ffffffffffffffff"));
 
-  const auto exhausted = provider.next();
+  const auto exhausted = provider.generate_next_order_id();
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == DomainErrorCode::CounterExhausted);
   CHECK(exhausted.error().context.field == "order_counter");
@@ -231,11 +243,12 @@ TEST_CASE("scripted order identities preserve repeats and exhaust deterministica
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Mint two trusted canonical identities before building the allocation-free emission sequence.
-  auto created = DeterministicOrderIdProvider::create(sequential_namespace(), 7U);
+  auto created = DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      create_sequential_namespace(), 7U);
   REQUIRE(created);
   auto minter = std::move(created).value();
-  const auto first = minter.next();
-  const auto second = minter.next();
+  const auto first = minter.generate_next_order_id();
+  const auto second = minter.generate_next_order_id();
   REQUIRE(first);
   REQUIRE(second);
 
@@ -243,10 +256,10 @@ TEST_CASE("scripted order identities preserve repeats and exhaust deterministica
   // The scripted source emits the repeated value exactly, then uses stable counter exhaustion.
   ScriptedOrderIdProvider provider{
       std::vector<OrderId>{first.value(), first.value(), second.value()}};
-  const auto emitted_first = provider.next();
-  const auto emitted_repeat = provider.next();
-  const auto emitted_second = provider.next();
-  const auto exhausted = provider.next();
+  const auto emitted_first = provider.generate_next_order_id();
+  const auto emitted_repeat = provider.generate_next_order_id();
+  const auto emitted_second = provider.generate_next_order_id();
+  const auto exhausted = provider.generate_next_order_id();
   REQUIRE(emitted_first);
   REQUIRE(emitted_repeat);
   REQUIRE(emitted_second);
@@ -255,7 +268,7 @@ TEST_CASE("scripted order identities preserve repeats and exhaust deterministica
   CHECK(emitted_second.value() == second.value());
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error() ==
-        DomainError::at_field(DomainErrorCode::CounterExhausted, "order_counter"));
+        DomainError::create_at_field(DomainErrorCode::CounterExhausted, "order_counter"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -265,10 +278,10 @@ TEST_CASE("scripted order identities preserve repeats and exhaust deterministica
 // canonical identity without exposing the random bytes as a test oracle.
 TEST_CASE("the production provider obtains a supported operating-system namespace",
           "[model][order-id]") {
-  auto created = ProductionOrderIdProvider::create();
+  auto created = ProductionOrderIdProvider::create_production_order_id_provider();
   REQUIRE(created);
   auto provider = std::move(created).value();
-  const auto order_id = provider.next();
+  const auto order_id = provider.generate_next_order_id();
   REQUIRE(order_id);
   CHECK(order_id.value().to_hex().size() == OrderId::byte_size * 2U);
 }
@@ -289,19 +302,21 @@ TEST_CASE("the production provider fails closed when its entropy source is unava
   // ++++++++++++++++++++++++++++++++++++++++
   // Written bytes must never be accepted when the source reports failure.
   const auto created =
-      detail::ProductionOrderIdProviderTestAccess::create_with_entropy(unavailable);
+      detail::ProductionOrderIdProviderTestAccess::create_production_order_id_provider_with_entropy(
+          unavailable);
 
   REQUIRE_FALSE(created);
   CHECK(created.error() ==
-        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+        DomainError::create_at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A missing callback must produce the same failure rather than choosing a weak fallback.
   const auto null_source =
-      detail::ProductionOrderIdProviderTestAccess::create_with_entropy(nullptr);
+      detail::ProductionOrderIdProviderTestAccess::create_production_order_id_provider_with_entropy(
+          nullptr);
   REQUIRE_FALSE(null_source);
   CHECK(null_source.error() ==
-        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+        DomainError::create_at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

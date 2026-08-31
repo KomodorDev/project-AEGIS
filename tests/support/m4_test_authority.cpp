@@ -34,7 +34,7 @@ namespace {
 // grammar.
 template <typename Identifier>
 [[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M4 authority fixture"};
   }
@@ -46,7 +46,7 @@ template <typename Identifier>
 // std::logic_error when the sealed authority is inconsistent.
 [[nodiscard]] runtime::RuntimePolicy
 create_runtime_policy_or_throw(const configuration::StartupConfiguration& configuration) {
-  auto created = runtime::RuntimePolicy::create(
+  auto created = runtime::RuntimePolicy::create_runtime_policy(
       configuration,
       runtime::RuntimePolicyParams{
           runtime::RuntimePolicyLimits{2U, 4096U, 64U, 20U, 5'000'000'000U, 4U, 64U, 128U, 32U,
@@ -55,7 +55,7 @@ create_runtime_policy_or_throw(const configuration::StartupConfiguration& config
             parse_identifier_or_throw<model::VenueId>("deribit"),
             parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
             parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
-            model::InstrumentMetadataRevision::initial()}}});
+            model::InstrumentMetadataRevision::create_initial()}}});
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M4 authority fixture"};
   }
@@ -82,18 +82,18 @@ create_submission_coordinator_or_throw(const configuration::StartupConfiguration
         {1U, execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance});
     initiator_overrides.push_back({2U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost});
   }
-  auto encoder = execution::FakeEncoderScript::create(
+  auto encoder = execution::FakeEncoderScript::create_fake_encoder_script(
       execution::FakeEncodingAction::Encode, maximum_attempts, std::move(encoder_overrides));
-  auto initiator =
-      execution::FakeInitiatorScript::create(execution::FakeInitiationOutcome::AcceptedAndInitiated,
-                                             maximum_attempts, std::move(initiator_overrides));
+  auto initiator = execution::FakeInitiatorScript::create_fake_initiator_script(
+      execution::FakeInitiationOutcome::AcceptedAndInitiated, maximum_attempts,
+      std::move(initiator_overrides));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Give the coordinator one deterministic identity stream and a finite measurement sequence.
   model::OrderNamespace::Bytes namespace_bytes{};
   namespace_bytes.fill(0x42U);
-  auto order_ids =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{namespace_bytes});
+  auto order_ids = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{namespace_bytes});
   if (!encoder || !initiator || !order_ids) {
     throw std::logic_error{"invalid deterministic fake in M4 authority fixture"};
   }
@@ -106,10 +106,10 @@ create_submission_coordinator_or_throw(const configuration::StartupConfiguration
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Compose the fake submission owner only after every authored dependency validates.
-  auto created = runtime::SubmissionCoordinator::create(
+  auto created = runtime::SubmissionCoordinator::create_submission_coordinator(
       configuration, policy,
       runtime::FakeSubmissionRuntimeParams{
-          m3_reference_risk_policy_params(configuration),
+          create_m3_reference_risk_policy_params_or_throw(configuration),
           execution::SubmissionPolicyCapacities{maximum_attempts, 4U, 4U, 1'024U, 2U, 110U, 8U},
           std::move(encoder).value(), std::move(initiator).value(),
           std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
@@ -159,7 +159,7 @@ private:
   void submit_request_once(runtime::BotContext& context) noexcept {
     if (!has_submitted_) {
       has_submitted_ = true;
-      result_->emplace(context.submit(request_));
+      result_->emplace(context.submit_order(request_));
     }
   }
 
@@ -250,8 +250,8 @@ M4TestAuthority create_m4_test_authority_or_throw(runtime::M4PolicyCapacities ca
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal the unchanged reference configuration and runtime authority first.
-  auto configured =
-      configuration::StartupConfiguration::create(m3_enabled_two_firm_configuration_params());
+  auto configured = configuration::StartupConfiguration::create_startup_configuration(
+      create_m3_enabled_two_firm_configuration_params_or_throw());
   if (!configured) {
     throw std::logic_error{"invalid startup configuration in M4 authority fixture"};
   }
@@ -261,9 +261,9 @@ M4TestAuthority create_m4_test_authority_or_throw(runtime::M4PolicyCapacities ca
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive risk/submission authority from the deterministic offline M3 composition.
   auto submission = create_submission_coordinator_or_throw(configuration, runtime, true);
-  auto policy =
-      runtime::M4Policy::create(configuration, runtime, submission->reservations().policy(),
-                                submission->policy(), capacities);
+  auto policy = runtime::M4Policy::create_m4_policy(configuration, runtime,
+                                                    submission->reservations().policy(),
+                                                    submission->policy(), capacities);
   if (!policy) {
     throw std::logic_error{"invalid M4 policy in M4 authority fixture"};
   }
@@ -294,7 +294,8 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal the authored M3-enabled startup and its matching runtime policy.
-  auto configured = configuration::StartupConfiguration::create(std::move(params));
+  auto configured =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
   if (!configured) {
     throw std::logic_error{"invalid startup configuration in M4 owner fixture"};
   }
@@ -304,16 +305,20 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
   // ++++++++++++++++++++++++++++++++++++++++
   // Build the one coordinator before deriving M4 authority from its retained policies.
   auto submission = create_submission_coordinator_or_throw(configuration, runtime, false);
-  auto policy =
-      runtime::M4Policy::create(configuration, runtime, submission->reservations().policy(),
-                                submission->policy(), create_ordinary_m4_policy_capacities());
+  auto policy = runtime::M4Policy::create_m4_policy(
+      configuration, runtime, submission->reservations().policy(), submission->policy(),
+      create_ordinary_m4_policy_capacities());
   if (!policy) {
     throw std::logic_error{"invalid M4 policy in M4 owner fixture"};
   }
-  return M4OwnerTestAuthority{
-      std::move(configuration),      std::move(runtime), std::move(submission),
-      std::move(policy).value(),     std::nullopt,       0U,
-      model::TurnOrdinal::initial(), 1'234'567U};
+  return M4OwnerTestAuthority{std::move(configuration),
+                              std::move(runtime),
+                              std::move(submission),
+                              std::move(policy).value(),
+                              std::nullopt,
+                              0U,
+                              model::TurnOrdinal::create_initial(),
+                              1'234'567U};
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -324,7 +329,8 @@ create_m4_owner_test_authority_or_throw(configuration::StartupConfigurationParam
 // Build the unchanged reference owner through the authored owner fixture; invalid authority throws
 // std::logic_error without returning a partial owner.
 M4OwnerTestAuthority create_m4_owner_test_authority_or_throw() {
-  return create_m4_owner_test_authority_or_throw(m3_enabled_two_firm_configuration_params());
+  return create_m4_owner_test_authority_or_throw(
+      create_m3_enabled_two_firm_configuration_params_or_throw());
 }
 
 // --------------------------------------------------------
@@ -397,11 +403,11 @@ execution::OrderRequest create_m4_reference_order_request_or_throw() {
 // invalid composition, exhausted identities, or a missing submission result throws.
 execution::SubmitResult submit_m4_order_or_throw(M4OwnerTestAuthority& authority,
                                                  const execution::OrderRequest& request) {
-  const auto* const route = authority.configuration.routes().find(request.route_id);
+  const auto* const route = authority.configuration.routes().find_route(request.route_id);
   if (route == nullptr) {
     throw std::logic_error{"missing route in M4 submission harness"};
   }
-  auto next_turn = authority.next_owner_turn.next();
+  auto next_turn = authority.next_owner_turn.derive_next_ordinal();
   if (!next_turn || authority.next_processing_timestamp_nanoseconds ==
                         std::numeric_limits<std::uint64_t>::max()) {
     throw std::logic_error{"exhausted longitudinal M4 submission harness"};
@@ -435,8 +441,9 @@ execution::SubmitResult submit_m4_order_or_throw(M4OwnerTestAuthority& authority
   if (metadata == nullptr) {
     throw std::logic_error{"missing metadata in M4 submission harness"};
   }
-  auto state = market_data::MarketStateMachine::create(authority.runtime_policy, source, *metadata);
-  auto bots = runtime::BotRuntime::create(
+  auto state = market_data::MarketStateMachine::create_market_state_machine(
+      authority.runtime_policy, source, *metadata);
+  auto bots = runtime::BotRuntime::create_bot_runtime(
       authority.configuration, authority.runtime_policy, callback_clock, trace_sink, diagnostics,
       std::move(registrations),
       runtime::BotRuntimeCounterSeed{authority.last_callback_ordinal,
@@ -448,8 +455,9 @@ execution::SubmitResult submit_m4_order_or_throw(M4OwnerTestAuthority& authority
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One initializing state callback activates the route owner's context for exactly one call.
-  auto plan = bots.value().preflight(source.ordinal(), authority.next_owner_turn, 1U);
-  auto outcome = state.value().initialize(
+  auto plan =
+      bots.value().preflight_dispatch_callbacks(source.ordinal(), authority.next_owner_turn, 1U);
+  auto outcome = state.value().initialize_market_state(
       market_data::OwnerMarketTurnContext{
           authority.next_owner_turn,
           model::ProcessingTimestamp{authority.next_processing_timestamp_nanoseconds}},
@@ -457,7 +465,7 @@ execution::SubmitResult submit_m4_order_or_throw(M4OwnerTestAuthority& authority
   if (!plan || !outcome) {
     throw std::logic_error{"failed M4 submission harness preflight"};
   }
-  auto dispatched = bots.value().dispatch(plan.value(), outcome.value());
+  auto dispatched = bots.value().dispatch_callbacks(plan.value(), outcome.value());
   if (!dispatched || !result) {
     throw std::logic_error{"failed M4 submission harness dispatch"};
   }

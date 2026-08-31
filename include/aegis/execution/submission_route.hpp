@@ -35,36 +35,44 @@ class InstalledSubmissionRoute final {
 public:
 
   // --------------------------------------------------------
+  // Return the stable one-based ordinal assigned by canonical catalog ordering.
   [[nodiscard]] model::RouteOrdinal ordinal() const noexcept { return ordinal_; }
 
   // --------------------------------------------------------
+  // Borrow the immutable execution route used for authorization and encoding.
   [[nodiscard]] const ExecutionRoute& route() const noexcept { return route_; }
 
   // --------------------------------------------------------
+  // Borrow the exact bot ownership attribution sealed with the route.
   [[nodiscard]] const organization::BotAttribution& attribution() const noexcept {
     return attribution_;
   }
 
   // --------------------------------------------------------
+  // Borrow the exact instrument economics sealed with the route.
   [[nodiscard]] const model::InstrumentMetadata& metadata() const noexcept { return metadata_; }
 
   // --------------------------------------------------------
+  // Borrow the configuration digest under which this route projection was installed.
   [[nodiscard]] const configuration::ConfigurationFingerprint&
   configuration_fingerprint() const noexcept {
     return configuration_fingerprint_;
   }
 
   // --------------------------------------------------------
+  // Return the configuration revision under which this route projection was installed.
   [[nodiscard]] model::ConfigurationRevision configuration_revision() const noexcept {
     return configuration_revision_;
   }
 
   // --------------------------------------------------------
+  // Return the organization revision that authorized the retained attribution.
   [[nodiscard]] model::OrganizationRevision organization_revision() const noexcept {
     return organization_revision_;
   }
 
   // --------------------------------------------------------
+  // Return the execution-route revision from which the catalog was built.
   [[nodiscard]] model::RouteRevision route_revision() const noexcept { return route_revision_; }
 
   // --------------------------------------------------------
@@ -109,7 +117,8 @@ struct RouteAuthorizationDecision {
   SubmissionReason reason;
 
   // --------------------------------------------------------
-  [[nodiscard]] bool authorized() const noexcept { return installed_route != nullptr; }
+  // Report whether authorization selected an installed route rather than a rejection reason.
+  [[nodiscard]] bool is_authorized() const noexcept { return installed_route != nullptr; }
 
   // --------------------------------------------------------
 };
@@ -124,25 +133,28 @@ public:
 
   // --------------------------------------------------------
   // Validate sealed route/attribution/metadata agreement and assign stable sorted ordinals.
-  [[nodiscard]] static model::Result<OwnerLocalRouteCatalog>
-  create(configuration::ConfigurationFingerprint configuration_fingerprint,
-         model::ConfigurationRevision configuration_revision,
-         model::OrganizationRevision organization_revision, model::RouteRevision route_revision,
-         std::vector<SubmissionRouteInput> inputs);
+  [[nodiscard]] static model::Result<OwnerLocalRouteCatalog> create_owner_local_route_catalog(
+      configuration::ConfigurationFingerprint configuration_fingerprint,
+      model::ConfigurationRevision configuration_revision,
+      model::OrganizationRevision organization_revision, model::RouteRevision route_revision,
+      std::vector<SubmissionRouteInput> inputs);
 
   // --------------------------------------------------------
   // Apply missing, ownership, enabled-state, then instrument precedence without mutation.
   [[nodiscard]] RouteAuthorizationDecision
-  authorize(const organization::BotAttribution& active_attribution,
-            const OrderRequest& request) const noexcept;
+  evaluate_route_authorization(const organization::BotAttribution& active_attribution,
+                               const OrderRequest& request) const noexcept;
 
   // --------------------------------------------------------
+  // Borrow every installed route in stable canonical order.
   [[nodiscard]] const std::vector<InstalledSubmissionRoute>& routes() const noexcept {
     return routes_;
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] const InstalledSubmissionRoute* find(const model::RouteId& route_id) const noexcept;
+  // Find an installed route by ID, or return null when the immutable catalog has no match.
+  [[nodiscard]] const InstalledSubmissionRoute*
+  find_route(const model::RouteId& route_id) const noexcept;
 
   // --------------------------------------------------------
 private:

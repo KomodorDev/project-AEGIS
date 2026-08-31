@@ -48,7 +48,7 @@ SerializedExecutor::SerializedExecutor(std::size_t command_capacity, std::size_t
 // Assign every ordinary attempt exactly once, preserving capacity rejection as a successful
 // decision and preventing source recovery from crossing a pending or active loss fence.
 model::Result<AdmissionDecision>
-SerializedExecutor::try_admit(WorkItem work,
+SerializedExecutor::try_admit(InlineCommandWorkItem work,
                               std::optional<model::MarketSourceOrdinal> source_ordinal) {
   std::unique_lock lock{mutex_};
 
@@ -56,13 +56,13 @@ SerializedExecutor::try_admit(WorkItem work,
   // A terminal fault has precedence over ordinary closure because it can no longer assign replay
   // ordinals safely.
   if (terminal_error_.has_value()) {
-    return model::Result<AdmissionDecision>::failure(terminal_error_.value());
+    return model::Result<AdmissionDecision>::create_failure(terminal_error_.value());
   }
-  auto next_attempt = next_admission_ordinal_locked();
+  auto next_attempt = derive_next_admission_ordinal_locked();
   if (!next_attempt) {
     const auto error = next_attempt.error();
     fail_closed_locked(error);
-    return model::Result<AdmissionDecision>::failure(error);
+    return model::Result<AdmissionDecision>::create_failure(error);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -70,7 +70,7 @@ SerializedExecutor::try_admit(WorkItem work,
   // source fence.
   if (closed_) {
     last_admission_ordinal_.emplace(next_attempt.value());
-    return model::Result<AdmissionDecision>::success(
+    return model::Result<AdmissionDecision>::create_success(
         AdmissionDecision{AdmissionOutcome::Closed, next_attempt.value(), pending_commands_,
                           queue_.size(), std::nullopt, false});
   }
@@ -87,7 +87,7 @@ SerializedExecutor::try_admit(WorkItem work,
       if (!loss) {
         const auto error = loss.error();
         fail_closed_locked(error);
-        return model::Result<AdmissionDecision>::failure(error);
+        return model::Result<AdmissionDecision>::create_failure(error);
       }
     }
     last_admission_ordinal_.emplace(next_attempt.value());
@@ -98,7 +98,7 @@ SerializedExecutor::try_admit(WorkItem work,
     if (fence != nullptr) {
       work_available_.notify_one();
     }
-    return model::Result<AdmissionDecision>::success(AdmissionDecision{
+    return model::Result<AdmissionDecision>::create_success(AdmissionDecision{
         AdmissionOutcome::CapacityExceeded, next_attempt.value(), observed_pending_depth,
         observed_pending_capacity, std::nullopt, fence != nullptr});
   }
@@ -106,19 +106,19 @@ SerializedExecutor::try_admit(WorkItem work,
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive both accepted-only values before committing the attempt. Receive exhaustion and clock
   // regression consequently leave every counter and queue slot unchanged while failing closed.
-  auto next_receive = next_receive_sequence_locked();
+  auto next_receive = derive_next_receive_sequence_locked();
   if (!next_receive) {
     const auto error = next_receive.error();
     fail_closed_locked(error);
-    return model::Result<AdmissionDecision>::failure(error);
+    return model::Result<AdmissionDecision>::create_failure(error);
   }
-  const auto received_at = clock_.receive_now();
+  const auto received_at = clock_.receive_timestamp_now();
   auto clock_observation =
       observe_clock_locked(received_at.nanoseconds(), "executor_admission_clock");
   if (!clock_observation) {
     const auto error = clock_observation.error();
     fail_closed_locked(error);
-    return model::Result<AdmissionDecision>::failure(error);
+    return model::Result<AdmissionDecision>::create_failure(error);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -137,7 +137,7 @@ SerializedExecutor::try_admit(WorkItem work,
   // Wake only after the complete queue entry and counters are visible.
   lock.unlock();
   work_available_.notify_one();
-  return model::Result<AdmissionDecision>::success(
+  return model::Result<AdmissionDecision>::create_success(
       AdmissionDecision{AdmissionOutcome::Accepted, next_attempt.value(), receipt.pending_depth,
                         receipt.pending_capacity, receipt, false});
 
@@ -155,34 +155,36 @@ void SerializedExecutor::close() noexcept {
 }
 
 // --------------------------------------------------------
-// Latch a fault raised after owner-local mutation while leaving run_one responsible for publishing
-// the active handler's successful completion before that fault surfaces at the next boundary.
+// Latch a fault raised after owner-local mutation while leaving execute_next_turn responsible for
+// publishing the active handler's successful completion before that fault surfaces at the next
+// boundary.
 model::Result<void> SerializedExecutor::request_owner_fault(model::DomainError error) noexcept {
   std::lock_guard lock{mutex_};
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject callers without the current owner authority before lifecycle state can change.
   if (!owner_thread_.has_value()) {
-    return model::Result<void>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
   }
   if (owner_thread_.value() != std::this_thread::get_id()) {
-    return model::Result<void>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // This seam is post-mutation authority for a running handler, never an out-of-turn close API.
   if (!turn_active_) {
-    return model::Result<void>::failure(model::DomainError::at_field(
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::ExecutorReentryDetected, "executor_owner_fault"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Preserve the first cause, close later admission, and wake a dedicated driver. The active
-  // handler still owns its stack and may return success so run_one can publish its TurnReport.
+  // handler still owns its stack and may return success so execute_next_turn can publish its
+  // TurnReport.
   fail_closed_locked(std::move(error));
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -193,11 +195,11 @@ model::Result<void> SerializedExecutor::bind_to_current_thread() {
   std::lock_guard lock{mutex_};
   const auto current_thread = std::this_thread::get_id();
   if (owner_thread_.has_value() && owner_thread_.value() != current_thread) {
-    return model::Result<void>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
   }
   owner_thread_ = current_thread;
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -209,20 +211,20 @@ model::Result<void> SerializedExecutor::release_from_current_thread() {
     return validation;
   }
   owner_thread_.reset();
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Public deterministic progression has no dedicated-stop gate.
-model::Result<std::optional<TurnReport>> SerializedExecutor::run_one() {
-  return run_one_impl(nullptr);
+model::Result<std::optional<TurnReport>> SerializedExecutor::execute_next_turn() {
+  return execute_next_turn_impl(nullptr);
 }
 
 // --------------------------------------------------------
 // Select, validate, remove, and execute at most one command or fence in global attempt order.
 model::Result<std::optional<TurnReport>>
-SerializedExecutor::run_one_impl(const std::atomic_bool* stop_requested) {
-  std::optional<WorkItem> work;
+SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requested) {
+  std::optional<InlineCommandWorkItem> work;
   std::optional<AdmissionReceipt> receipt;
   std::optional<SourceDiscontinuity> discontinuity;
   std::optional<std::size_t> fence_index;
@@ -239,39 +241,39 @@ SerializedExecutor::run_one_impl(const std::atomic_bool* stop_requested) {
     // Ownership and terminal lifecycle checks precede any runnable-state mutation.
     const auto owner_validation = validate_owner_locked();
     if (!owner_validation) {
-      return model::Result<std::optional<TurnReport>>::failure(owner_validation.error());
+      return model::Result<std::optional<TurnReport>>::create_failure(owner_validation.error());
     }
     if (terminal_error_.has_value()) {
-      return model::Result<std::optional<TurnReport>>::failure(terminal_error_.value());
+      return model::Result<std::optional<TurnReport>>::create_failure(terminal_error_.value());
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Dedicated stop wins an open-ingress turn only when it acquires this mutex before turn start.
     // Closed-prefix drainage deliberately retains precedence over the same stop request.
     if (stop_requested != nullptr && stop_requested->load() && !closed_) {
-      return model::Result<std::optional<TurnReport>>::success(std::nullopt);
+      return model::Result<std::optional<TurnReport>>::create_success(std::nullopt);
     }
     const auto candidate = oldest_runnable_locked();
     if (!candidate.has_value()) {
-      return model::Result<std::optional<TurnReport>>::success(std::nullopt);
+      return model::Result<std::optional<TurnReport>>::create_success(std::nullopt);
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Validate the next turn ordinal and sole processing-time observation while the selected head
     // remains intact, so either failure closes without invoking mutable owner work.
-    auto next_turn = next_turn_ordinal_locked();
+    auto next_turn = derive_next_turn_ordinal_locked();
     if (!next_turn) {
       const auto error = next_turn.error();
       fail_closed_locked(error);
-      return model::Result<std::optional<TurnReport>>::failure(error);
+      return model::Result<std::optional<TurnReport>>::create_failure(error);
     }
-    const auto processing_start = clock_.processing_now();
+    const auto processing_start = clock_.processing_timestamp_now();
     auto clock_observation =
         observe_clock_locked(processing_start.nanoseconds(), "executor_processing_clock");
     if (!clock_observation) {
       const auto error = clock_observation.error();
       fail_closed_locked(error);
-      return model::Result<std::optional<TurnReport>>::failure(error);
+      return model::Result<std::optional<TurnReport>>::create_failure(error);
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -316,7 +318,7 @@ SerializedExecutor::run_one_impl(const std::atomic_bool* stop_requested) {
   // Handlers receive only stack-scoped turn authority. Their failure contract guarantees all
   // fallible validation happened before any data-plane mutation.
   auto handler_result = turn_kind == TurnKind::Command
-                            ? work->execute(accepted_context.value())
+                            ? work->execute_work(accepted_context.value())
                             : discontinuity_handler_->on_source_discontinuity(
                                   discontinuity.value(), control_context.value());
 
@@ -339,7 +341,7 @@ SerializedExecutor::run_one_impl(const std::atomic_bool* stop_requested) {
   // fault remains stable if another producer fault raced the active handler.
   if (!handler_result) {
     fail_closed_locked(handler_result.error());
-    return model::Result<std::optional<TurnReport>>::failure(terminal_error_.value());
+    return model::Result<std::optional<TurnReport>>::create_failure(terminal_error_.value());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -376,7 +378,7 @@ SerializedExecutor::run_one_impl(const std::atomic_bool* stop_requested) {
       queue_.size(),
       completed_turns,
   };
-  return model::Result<std::optional<TurnReport>>::success(report);
+  return model::Result<std::optional<TurnReport>>::create_success(report);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -384,19 +386,21 @@ SerializedExecutor::run_one_impl(const std::atomic_bool* stop_requested) {
 // --------------------------------------------------------
 // Bounded progression validates even a zero-turn call and rejects policy-bound violations before
 // starting any owner turn.
-model::Result<DriveReport> SerializedExecutor::drive(std::size_t max_turns) {
+model::Result<PendingTurnExecutionReport>
+SerializedExecutor::execute_pending_turns(std::size_t max_turns) {
   {
     std::lock_guard lock{mutex_};
     const auto owner_validation = validate_owner_locked();
     if (!owner_validation) {
-      return model::Result<DriveReport>::failure(owner_validation.error());
+      return model::Result<PendingTurnExecutionReport>::create_failure(owner_validation.error());
     }
     if (terminal_error_.has_value()) {
-      return model::Result<DriveReport>::failure(terminal_error_.value());
+      return model::Result<PendingTurnExecutionReport>::create_failure(terminal_error_.value());
     }
     if (max_turns > maximum_drive_turns_) {
-      return model::Result<DriveReport>::failure(model::DomainError::at_field(
-          model::DomainErrorCode::InvalidRuntimePolicy, "maximum_drive_turns"));
+      return model::Result<PendingTurnExecutionReport>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::InvalidRuntimePolicy,
+                                              "maximum_drive_turns"));
     }
   }
 
@@ -404,9 +408,9 @@ model::Result<DriveReport> SerializedExecutor::drive(std::size_t max_turns) {
   // Stop at the explicit turn bound or the first observation with neither command nor fence.
   std::size_t turns_executed = 0U;
   while (turns_executed < max_turns) {
-    auto turn = run_one();
+    auto turn = execute_next_turn();
     if (!turn) {
-      return model::Result<DriveReport>::failure(std::move(turn).error());
+      return model::Result<PendingTurnExecutionReport>::create_failure(std::move(turn).error());
     }
     if (!turn.value().has_value()) {
       break;
@@ -416,10 +420,10 @@ model::Result<DriveReport> SerializedExecutor::drive(std::size_t max_turns) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Snapshot all remaining bounded work once after progression.
-  const auto state = snapshot();
-  return model::Result<DriveReport>::success(
-      DriveReport{turns_executed, state.pending_commands, state.pending_fences,
-                  state.command_capacity, state.maximum_drive_turns, state.completed_turns});
+  const auto state = queue_snapshot();
+  return model::Result<PendingTurnExecutionReport>::create_success(PendingTurnExecutionReport{
+      turns_executed, state.pending_commands, state.pending_fences, state.command_capacity,
+      state.maximum_drive_turns, state.completed_turns});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -427,24 +431,24 @@ model::Result<DriveReport> SerializedExecutor::drive(std::size_t max_turns) {
 // --------------------------------------------------------
 // Read every related queue, fence, owner, bound, and lifecycle field under one synchronization
 // boundary.
-QueueSnapshot SerializedExecutor::snapshot() const noexcept {
+ExecutorQueueSnapshot SerializedExecutor::queue_snapshot() const noexcept {
   std::lock_guard lock{mutex_};
-  return QueueSnapshot{pending_commands_,
-                       pending_fences_,
-                       in_flight_fences_,
-                       queue_.size(),
-                       fences_.size(),
-                       maximum_drive_turns_,
-                       last_turn_ordinal_.has_value() ? last_turn_ordinal_->value() : 0U,
-                       closed_,
-                       terminal_error_.has_value(),
-                       owner_thread_.has_value(),
-                       turn_active_};
+  return ExecutorQueueSnapshot{pending_commands_,
+                               pending_fences_,
+                               in_flight_fences_,
+                               queue_.size(),
+                               fences_.size(),
+                               maximum_drive_turns_,
+                               last_turn_ordinal_.has_value() ? last_turn_ordinal_->value() : 0U,
+                               closed_,
+                               terminal_error_.has_value(),
+                               owner_thread_.has_value(),
+                               turn_active_};
 }
 
 // --------------------------------------------------------
 // Compare the caller with the synchronized owner token without publishing a thread identifier.
-bool SerializedExecutor::current_thread_is_owner() const noexcept {
+bool SerializedExecutor::is_current_thread_owner() const noexcept {
   std::lock_guard lock{mutex_};
   return owner_thread_.has_value() && owner_thread_.value() == std::this_thread::get_id();
 }
@@ -512,63 +516,67 @@ SerializedExecutor::release_from_current_thread_for_driver() {
   std::lock_guard lock{mutex_};
   const auto validation = validate_owner_locked();
   if (!validation) {
-    return model::Result<std::optional<model::DomainError>>::failure(validation.error());
+    return model::Result<std::optional<model::DomainError>>::create_failure(validation.error());
   }
   auto terminal = terminal_error_;
   owner_thread_.reset();
-  return model::Result<std::optional<model::DomainError>>::success(std::move(terminal));
+  return model::Result<std::optional<model::DomainError>>::create_success(std::move(terminal));
 }
 
 // --------------------------------------------------------
 // Apply the same synchronized stop predicate again at the exact shared turn-start boundary.
 model::Result<std::optional<TurnReport>>
-SerializedExecutor::run_one_for_driver(const std::atomic_bool& stop_requested) {
-  return run_one_impl(&stop_requested);
+SerializedExecutor::execute_next_turn_for_driver(const std::atomic_bool& stop_requested) {
+  return execute_next_turn_impl(&stop_requested);
 }
 
 // --------------------------------------------------------
 // Owner validation reports absence, wrong thread, then nested progression in stable precedence.
 model::Result<void> SerializedExecutor::validate_owner_locked() const {
   if (!owner_thread_.has_value()) {
-    return model::Result<void>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
   }
   if (owner_thread_.value() != std::this_thread::get_id()) {
-    return model::Result<void>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
   }
   if (turn_active_) {
-    return model::Result<void>::failure(model::DomainError::at_field(
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::ExecutorReentryDetected, "executor_reentry"));
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Derive the next attempt ordinal while preserving absence as the pre-first-attempt state.
-model::Result<model::AdmissionOrdinal> SerializedExecutor::next_admission_ordinal_locked() const {
+model::Result<model::AdmissionOrdinal>
+SerializedExecutor::derive_next_admission_ordinal_locked() const {
   if (!last_admission_ordinal_.has_value()) {
-    return model::Result<model::AdmissionOrdinal>::success(model::AdmissionOrdinal::initial());
+    return model::Result<model::AdmissionOrdinal>::create_success(
+        model::AdmissionOrdinal::create_initial());
   }
-  return last_admission_ordinal_->next();
+  return last_admission_ordinal_->derive_next_ordinal();
 }
 
 // --------------------------------------------------------
 // Derive the next accepted-only receive sequence without advancing it for rejected attempts.
-model::Result<model::ReceiveSequence> SerializedExecutor::next_receive_sequence_locked() const {
+model::Result<model::ReceiveSequence>
+SerializedExecutor::derive_next_receive_sequence_locked() const {
   if (!last_receive_sequence_.has_value()) {
-    return model::Result<model::ReceiveSequence>::success(model::ReceiveSequence::initial());
+    return model::Result<model::ReceiveSequence>::create_success(
+        model::ReceiveSequence::create_initial());
   }
-  return last_receive_sequence_->next();
+  return last_receive_sequence_->derive_next_ordinal();
 }
 
 // --------------------------------------------------------
 // Derive the next completed-turn ordinal before selected owner work can begin.
-model::Result<model::TurnOrdinal> SerializedExecutor::next_turn_ordinal_locked() const {
+model::Result<model::TurnOrdinal> SerializedExecutor::derive_next_turn_ordinal_locked() const {
   if (!last_turn_ordinal_.has_value()) {
-    return model::Result<model::TurnOrdinal>::success(model::TurnOrdinal::initial());
+    return model::Result<model::TurnOrdinal>::create_success(model::TurnOrdinal::create_initial());
   }
-  return last_turn_ordinal_->next();
+  return last_turn_ordinal_->derive_next_ordinal();
 }
 
 // --------------------------------------------------------
@@ -576,11 +584,11 @@ model::Result<model::TurnOrdinal> SerializedExecutor::next_turn_ordinal_locked()
 model::Result<void> SerializedExecutor::observe_clock_locked(std::uint64_t nanoseconds,
                                                              const char* field) {
   if (last_clock_observation_.has_value() && nanoseconds < last_clock_observation_.value()) {
-    return model::Result<void>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::ExecutorClockRegression, field));
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorClockRegression, field));
   }
   last_clock_observation_.emplace(nanoseconds);
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -595,7 +603,7 @@ void SerializedExecutor::fail_closed_locked(model::DomainError error) {
 
 // --------------------------------------------------------
 // Map a canonical one-based ordinal directly to its construction-time table slot.
-SerializedExecutor::FenceState* SerializedExecutor::configured_fence_locked(
+SerializedExecutor::SourceFenceState* SerializedExecutor::configured_fence_locked(
     std::optional<model::MarketSourceOrdinal> source_ordinal) noexcept {
   if (!source_ordinal.has_value() || source_ordinal->value() > fences_.size()) {
     return nullptr;
@@ -606,20 +614,20 @@ SerializedExecutor::FenceState* SerializedExecutor::configured_fence_locked(
 // --------------------------------------------------------
 // Extend one current or successor loss interval without erasing its earliest attempt.
 model::Result<void>
-SerializedExecutor::record_source_loss_locked(FenceState& fence,
+SerializedExecutor::record_source_loss_locked(SourceFenceState& fence,
                                               model::AdmissionOrdinal attempt_ordinal) {
   if (!fence.earliest_failed_attempt.has_value()) {
     fence.earliest_failed_attempt.emplace(attempt_ordinal);
     fence.lost_attempt_count = 1U;
     ++pending_fences_;
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
   if (fence.lost_attempt_count == std::numeric_limits<std::uint64_t>::max()) {
-    return model::Result<void>::failure(model::DomainError::at_field(
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::ExecutorCounterExhausted, "executor_discontinuity_loss_count"));
   }
   ++fence.lost_attempt_count;
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -647,15 +655,15 @@ void SerializedExecutor::restore_failed_fence_locked(
 
 // --------------------------------------------------------
 // Merge the FIFO head with all active source slots by their unique attempt ordinals.
-std::optional<SerializedExecutor::RunnableCandidate>
+std::optional<SerializedExecutor::RunnableTurnCandidate>
 SerializedExecutor::oldest_runnable_locked() const noexcept {
-  std::optional<RunnableCandidate> oldest;
+  std::optional<RunnableTurnCandidate> oldest;
   std::optional<std::uint64_t> oldest_attempt;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seed selection from the FIFO head because later accepted queue entries cannot be older.
   if (pending_commands_ > 0U) {
-    oldest.emplace(RunnableCandidate{TurnKind::Command, 0U});
+    oldest.emplace(RunnableTurnCandidate{TurnKind::Command, 0U});
     oldest_attempt.emplace(queue_[head_].receipt->attempt_ordinal.value());
   }
 
@@ -666,7 +674,7 @@ SerializedExecutor::oldest_runnable_locked() const noexcept {
     if (fence.earliest_failed_attempt.has_value() &&
         (!oldest_attempt.has_value() ||
          fence.earliest_failed_attempt->value() < oldest_attempt.value())) {
-      oldest.emplace(RunnableCandidate{TurnKind::SourceDiscontinuity, index});
+      oldest.emplace(RunnableTurnCandidate{TurnKind::SourceDiscontinuity, index});
       oldest_attempt.emplace(fence.earliest_failed_attempt->value());
     }
   }
@@ -700,14 +708,15 @@ model::Result<void> DeterministicExecutorDriver::release_from_current_thread() {
 
 // --------------------------------------------------------
 // One deterministic step is exactly one shared executor step.
-model::Result<std::optional<TurnReport>> DeterministicExecutorDriver::run_one() {
-  return executor_.run_one();
+model::Result<std::optional<TurnReport>> DeterministicExecutorDriver::execute_next_turn() {
+  return executor_.execute_next_turn();
 }
 
 // --------------------------------------------------------
 // Bounded deterministic progression delegates to the executor's policy-bound drive loop.
-model::Result<DriveReport> DeterministicExecutorDriver::drive(std::size_t max_turns) {
-  return executor_.drive(max_turns);
+model::Result<PendingTurnExecutionReport>
+DeterministicExecutorDriver::execute_pending_turns(std::size_t max_turns) {
+  return executor_.execute_pending_turns(max_turns);
 }
 
 // --------------------------------------------------------

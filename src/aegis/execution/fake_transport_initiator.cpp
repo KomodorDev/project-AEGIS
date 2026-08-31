@@ -31,8 +31,9 @@ static_assert(std::is_nothrow_move_constructible_v<AcceptedFakeWrite>);
 
 // --------------------------------------------------------
 // Separate impossible local fake state from the ordinary definite capacity outcome.
-[[nodiscard]] model::DomainError invalid_fake_state(std::string field) {
-  return model::DomainError::at_field(model::DomainErrorCode::InvalidFakeState, std::move(field));
+[[nodiscard]] model::DomainError create_invalid_fake_state_error(std::string field) {
+  return model::DomainError::create_at_field(model::DomainErrorCode::InvalidFakeState,
+                                             std::move(field));
 }
 
 // --------------------------------------------------------
@@ -42,21 +43,21 @@ static_assert(std::is_nothrow_move_constructible_v<AcceptedFakeWrite>);
 // --------------------------------------------------------
 // Validate outcomes and bounds before sorting authored overrides into canonical invocation order.
 model::Result<FakeInitiatorScript>
-FakeInitiatorScript::create(FakeInitiationOutcome default_outcome,
-                            std::uint64_t maximum_invocations,
-                            std::vector<FakeInitiationOverride> overrides) {
+FakeInitiatorScript::create_fake_initiator_script(FakeInitiationOutcome default_outcome,
+                                                  std::uint64_t maximum_invocations,
+                                                  std::vector<FakeInitiationOverride> overrides) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Fail closed on an unassigned default or a maximum outside the AEGISSUP schema-one bound.
   if (!is_assigned(default_outcome)) {
-    return model::Result<FakeInitiatorScript>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.initiator_script.default_outcome"));
+    return model::Result<FakeInitiatorScript>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.initiator_script.default_outcome"));
   }
   if (maximum_invocations == 0U || maximum_invocations > maximum_submission_attempts_supported) {
-    return model::Result<FakeInitiatorScript>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.maximum_submission_attempts"));
+    return model::Result<FakeInitiatorScript>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.maximum_submission_attempts"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -72,15 +73,15 @@ FakeInitiatorScript::create(FakeInitiationOutcome default_outcome,
     if (override.invocation_ordinal == 0U || override.invocation_ordinal > maximum_invocations ||
         !is_assigned(override.outcome) ||
         (index != 0U && overrides[index - 1U].invocation_ordinal == override.invocation_ordinal)) {
-      return model::Result<FakeInitiatorScript>::failure(
-          model::DomainError::at_index(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                       "submission_policy.initiator_script.overrides", index));
+      return model::Result<FakeInitiatorScript>::create_failure(model::DomainError::create_at_index(
+          model::DomainErrorCode::InvalidSubmissionPolicy,
+          "submission_policy.initiator_script.overrides", index));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the validated default plus canonical unique override list as one immutable value.
-  return model::Result<FakeInitiatorScript>::success(
+  return model::Result<FakeInitiatorScript>::create_success(
       FakeInitiatorScript{default_outcome, maximum_invocations, std::move(overrides)});
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -132,24 +133,24 @@ FakeInitiationResult::FakeInitiationResult(
 // --------------------------------------------------------
 // Reject zero capacity before allocating the complete accepted-write slot array.
 model::Result<DeterministicFakeWriteInitiator>
-DeterministicFakeWriteInitiator::create(FakeInitiatorScript script,
-                                        std::uint32_t accepted_write_capacity) {
+DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
+    FakeInitiatorScript script, std::uint32_t accepted_write_capacity) {
   if (accepted_write_capacity == 0U) {
-    return model::Result<DeterministicFakeWriteInitiator>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.accepted_write_capacity"));
+    return model::Result<DeterministicFakeWriteInitiator>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.accepted_write_capacity"));
   }
   try {
-    return model::Result<DeterministicFakeWriteInitiator>::success(
+    return model::Result<DeterministicFakeWriteInitiator>::create_success(
         DeterministicFakeWriteInitiator{std::move(script), accepted_write_capacity});
   } catch (const std::bad_alloc&) {
-    return model::Result<DeterministicFakeWriteInitiator>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.accepted_write_capacity"));
+    return model::Result<DeterministicFakeWriteInitiator>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.accepted_write_capacity"));
   } catch (const std::length_error&) {
-    return model::Result<DeterministicFakeWriteInitiator>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.accepted_write_capacity"));
+    return model::Result<DeterministicFakeWriteInitiator>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.accepted_write_capacity"));
   }
 }
 
@@ -166,8 +167,8 @@ DeterministicFakeWriteInitiator::DeterministicFakeWriteInitiator(
 model::Result<model::InitiatorInvocationOrdinal>
 DeterministicFakeWriteInitiator::consume_invocation() {
   if (invocations_consumed_ == script_.maximum_invocations()) {
-    return model::Result<model::InitiatorInvocationOrdinal>::failure(
-        invalid_fake_state("fake_write_initiator.invocation_ordinal"));
+    return model::Result<model::InitiatorInvocationOrdinal>::create_failure(
+        create_invalid_fake_state_error("fake_write_initiator.invocation_ordinal"));
   }
   ++invocations_consumed_;
   return model::InitiatorInvocationOrdinal::from_value(invocations_consumed_);
@@ -184,7 +185,7 @@ DeterministicFakeWriteInitiator::initiate(const EncodedFakeOrder& encoded_order,
   // Every reached call first consumes its invocation and selected action exactly once.
   auto invocation = consume_invocation();
   if (!invocation) {
-    return model::Result<FakeInitiationResult>::failure(invocation.error());
+    return model::Result<FakeInitiationResult>::create_failure(invocation.error());
   }
   const auto selected_outcome = script_.outcome_for(invocation.value());
 
@@ -192,7 +193,7 @@ DeterministicFakeWriteInitiator::initiate(const EncodedFakeOrder& encoded_order,
   // Both an explicit definite action and full slot capacity prove no accepted copy occurred.
   if (selected_outcome == FakeInitiationOutcome::DefiniteFailureBeforeAcceptance ||
       accepted_writes_.size() >= capacity_) {
-    return model::Result<FakeInitiationResult>::success(FakeInitiationResult{
+    return model::Result<FakeInitiationResult>::create_success(FakeInitiationResult{
         invocation.value(), FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, std::nullopt,
         std::nullopt});
   }
@@ -201,8 +202,8 @@ DeterministicFakeWriteInitiator::initiate(const EncodedFakeOrder& encoded_order,
   // Assign an ordinal only as part of the accepted copy; the positive fixed capacity bounds it.
   auto write_ordinal = model::FakeWriteOrdinal::from_value(accepted_writes_.size() + 1U);
   if (!write_ordinal) {
-    return model::Result<FakeInitiationResult>::failure(
-        invalid_fake_state("fake_write_initiator.write_ordinal"));
+    return model::Result<FakeInitiationResult>::create_failure(
+        create_invalid_fake_state_error("fake_write_initiator.write_ordinal"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -211,7 +212,7 @@ DeterministicFakeWriteInitiator::initiate(const EncodedFakeOrder& encoded_order,
   auto accepted_write = AcceptedFakeWrite{encoded_order, invocation.value(), write_ordinal.value()};
   accepted_writes_.push_back(std::move(accepted_write));
   const auto accepted_slot_endpoint = measurement_clock.now_nanoseconds();
-  return model::Result<FakeInitiationResult>::success(
+  return model::Result<FakeInitiationResult>::create_success(
       FakeInitiationResult{invocation.value(), selected_outcome,
                            std::optional{write_ordinal.value()}, accepted_slot_endpoint});
 

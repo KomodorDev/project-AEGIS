@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 // --------------------------------------------------------
+// The linked library must expose the configured project name and semantic version unchanged.
 // Interesting syntax: Catch2 expands TEST_CASE and CHECK into a discoverable test and assertions.
 TEST_CASE("the compiled library reports its project identity", "[baseline]") {
   CHECK(aegis::project_name() == "AEGIS");

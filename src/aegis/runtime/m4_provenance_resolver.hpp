@@ -41,7 +41,8 @@ public:
   // InvalidPrivateEvent for authority mismatch or translated allocation failure without publishing
   // a partial resolver.
   [[nodiscard]] static model::Result<M4ProvenanceResolver>
-  create(const configuration::StartupConfiguration& configuration, const M4Policy& policy);
+  create_m4_provenance_resolver(const configuration::StartupConfiguration& configuration,
+                                const M4Policy& policy);
 
   // --------------------------------------------------------
   // Produce the root-only lineage/runtime profile with typed subject absence.

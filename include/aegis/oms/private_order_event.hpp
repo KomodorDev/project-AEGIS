@@ -247,8 +247,8 @@ public:
   // --------------------------------------------------------
   // Reject the empty locator while retaining either or both exact identity values.
   [[nodiscard]] static model::Result<PrivateOrderLocator>
-  create(std::optional<model::OrderId> local_order_id,
-         std::optional<ExchangeOrderId> exchange_order_id);
+  create_private_order_locator(std::optional<model::OrderId> local_order_id,
+                               std::optional<ExchangeOrderId> exchange_order_id);
 
   // --------------------------------------------------------
   // Return the caller-supplied local identity exactly when the locator contained one.
@@ -270,7 +270,7 @@ public:
 private:
 
   // --------------------------------------------------------
-  // Publish only the nonempty locator shape accepted by create.
+  // Publish only the nonempty locator shape accepted by create_private_order_locator.
   PrivateOrderLocator(std::optional<model::OrderId> local_order_id,
                       std::optional<ExchangeOrderId> exchange_order_id) noexcept
       : local_order_id_{std::move(local_order_id)},
@@ -294,7 +294,7 @@ public:
   // --------------------------------------------------------
   // Copy a bounded opaque byte sequence, accepting an exact empty reason.
   [[nodiscard]] static model::Result<PrivateRejectionDetail>
-  create(std::span<const std::byte> bytes);
+  create_private_rejection_detail(std::span<const std::byte> bytes);
 
   // --------------------------------------------------------
   // Borrow only the active prefix, including an empty span for absent detail.
@@ -304,7 +304,7 @@ public:
 
   // --------------------------------------------------------
   // Return the exact number of active opaque rejection-detail bytes.
-  [[nodiscard]] std::size_t size() const noexcept { return size_; }
+  [[nodiscard]] std::size_t active_byte_count() const noexcept { return size_; }
 
   // --------------------------------------------------------
   // Equality ignores zeroed spare capacity and compares the exact active opaque bytes.

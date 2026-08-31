@@ -233,7 +233,8 @@ private:
 
 // ########################################################################
 // Ordinary duplicate and capacity non-admission remain SubmitResult reasons, while impossible
-// lower-level state is returned separately as a DomainError by OutboundOms::admit. Every
+// lower-level state is returned separately as a DomainError by OutboundOms::admit_outbound_order.
+// Every
 // constructed result contains either one stable row pointer or one ordinary non-admission reason,
 // never both.
 class OmsAdmissionResult final {
@@ -241,7 +242,7 @@ public:
 
   // --------------------------------------------------------
   // Return whether admission retained one permanent OMS row.
-  [[nodiscard]] bool admitted() const noexcept { return record_ != nullptr; }
+  [[nodiscard]] bool is_admitted() const noexcept { return record_ != nullptr; }
 
   // --------------------------------------------------------
   // Borrow the retained row on admission, or return null after ordinary non-admission.
@@ -290,7 +291,7 @@ public:
   // --------------------------------------------------------
   // Allocate the complete positive row capacity before owner-local submission begins; zero or an
   // unavailable allocation returns InvalidSubmissionPolicy without publishing a table.
-  [[nodiscard]] static model::Result<OutboundOms> create(std::uint32_t capacity);
+  [[nodiscard]] static model::Result<OutboundOms> create_outbound_oms(std::uint32_t capacity);
 
   // --------------------------------------------------------
   // Preserve unique table ownership: copying is forbidden and moves transfer all preallocated
@@ -303,7 +304,8 @@ public:
   // --------------------------------------------------------
   // Check exact duplicate identity before capacity, then retain one complete admitted row;
   // contradictory admission evidence returns InvalidOmsState without modifying the table.
-  [[nodiscard]] model::Result<OmsAdmissionResult> admit(OutboundOrderAdmission admission);
+  [[nodiscard]] model::Result<OmsAdmissionResult>
+  admit_outbound_order(OutboundOrderAdmission admission);
 
   // --------------------------------------------------------
   // Move only PendingEncoding to PendingInitiation after exact encoding succeeds.
@@ -337,7 +339,8 @@ public:
 
   // --------------------------------------------------------
   // Resolve an exact complete identity without changing table state.
-  [[nodiscard]] const OutboundOrderRecord* find(const model::OrderId& order_id) const noexcept;
+  [[nodiscard]] const OutboundOrderRecord*
+  find_order(const model::OrderId& order_id) const noexcept;
 
   // --------------------------------------------------------
   // Borrow one retained row in canonical admission order; an out-of-range index returns null.
@@ -349,7 +352,7 @@ public:
 
   // --------------------------------------------------------
   // Return the exact number of permanently retained admission rows.
-  [[nodiscard]] std::uint32_t size() const noexcept { return size_; }
+  [[nodiscard]] std::uint32_t order_count() const noexcept { return size_; }
 
   // --------------------------------------------------------
 private:
@@ -360,17 +363,18 @@ private:
 
   // --------------------------------------------------------
   // Hash all 24 identity bytes only to choose a probe start; equality remains authoritative.
-  [[nodiscard]] std::size_t probe_start(const model::OrderId& order_id) const noexcept;
+  [[nodiscard]] std::size_t
+  calculate_probe_start_index(const model::OrderId& order_id) const noexcept;
 
   // --------------------------------------------------------
   // Resolve a mutable row for the closed transition implementation.
-  [[nodiscard]] OutboundOrderRecord* find_mutable(const model::OrderId& order_id) noexcept;
+  [[nodiscard]] OutboundOrderRecord* find_mutable_order(const model::OrderId& order_id) noexcept;
 
   // --------------------------------------------------------
   // Apply one source-to-target transition or fail without mutation for missing/wrong state.
-  [[nodiscard]] model::Result<void> transition(const model::OrderId& order_id,
-                                               OutboundOrderState expected,
-                                               OutboundOrderState target);
+  [[nodiscard]] model::Result<void> transition_order_state(const model::OrderId& order_id,
+                                                           OutboundOrderState expected,
+                                                           OutboundOrderState target);
 
   // --------------------------------------------------------
   // Retain the fixed slot table and canonical admission index without post-construction growth.

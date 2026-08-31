@@ -34,6 +34,7 @@ struct RiskLimitKey {
   std::string quote_currency;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete canonical semantic limit key.
   friend bool operator==(const RiskLimitKey&, const RiskLimitKey&) = default;
 
   // --------------------------------------------------------
@@ -43,14 +44,16 @@ struct RiskLimitKey {
 
 // --------------------------------------------------------
 // Map every construction rejection onto ADR-0008's single persisted policy error code.
-template <typename Value> [[nodiscard]] model::Result<Value> invalid_policy(std::string field) {
-  return model::Result<Value>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidRiskPolicy, std::move(field)));
+template <typename Value>
+[[nodiscard]] model::Result<Value> create_invalid_risk_policy_result(std::string field) {
+  return model::Result<Value>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidRiskPolicy, std::move(field)));
 }
 
 // --------------------------------------------------------
 // Compare complete semantic keys in their canonical AEGISRSP field order.
-[[nodiscard]] bool key_less(const RiskLimitKey& left, const RiskLimitKey& right) noexcept {
+[[nodiscard]] bool is_risk_limit_key_less(const RiskLimitKey& left,
+                                          const RiskLimitKey& right) noexcept {
   return std::tie(left.firm_id, left.scope, left.scope_subject, left.instrument_id,
                   left.quote_currency) < std::tie(right.firm_id, right.scope, right.scope_subject,
                                                   right.instrument_id, right.quote_currency);
@@ -58,23 +61,24 @@ template <typename Value> [[nodiscard]] model::Result<Value> invalid_policy(std:
 
 // --------------------------------------------------------
 // Project an immutable limit row into the same canonical key representation.
-[[nodiscard]] RiskLimitKey key_of(const RiskLimitSet& limits) {
+[[nodiscard]] RiskLimitKey risk_limit_key_from_limit_set(const RiskLimitSet& limits) {
   return RiskLimitKey{limits.firm_id(), limits.scope(), std::string{limits.scope_subject()},
                       limits.instrument_id(), std::string{limits.quote_currency()}};
 }
 
 // --------------------------------------------------------
 // Compare installed metadata revision keys independently from authored collection order.
-[[nodiscard]] bool metadata_less(const configuration::InstrumentMetadataRevisionEntry& left,
-                                 const configuration::InstrumentMetadataRevisionEntry& right) {
+[[nodiscard]] bool
+is_metadata_revision_entry_less(const configuration::InstrumentMetadataRevisionEntry& left,
+                                const configuration::InstrumentMetadataRevisionEntry& right) {
   return std::tie(left.venue_id, left.instrument_id) <
          std::tie(right.venue_id, right.instrument_id);
 }
 
 // --------------------------------------------------------
 // Compare every economic and venue-filter field against the sealed startup metadata projection.
-[[nodiscard]] bool metadata_equal(const model::InstrumentMetadata& left,
-                                  const model::InstrumentMetadata& right) noexcept {
+[[nodiscard]] bool is_instrument_metadata_equal(const model::InstrumentMetadata& left,
+                                                const model::InstrumentMetadata& right) noexcept {
   return left.venue_id() == right.venue_id() && left.instrument_id() == right.instrument_id() &&
          left.venue_instrument_id() == right.venue_instrument_id() &&
          left.revision() == right.revision() && left.base_currency() == right.base_currency() &&
@@ -185,13 +189,13 @@ encode_risk_policy(const RiskPolicyParams& params, std::uint8_t notional_scale,
 
 // --------------------------------------------------------
 // Return whether a scope byte is one of the seven assigned M3 values.
-[[nodiscard]] bool assigned_scope(RiskScopeKind scope) noexcept {
+[[nodiscard]] bool is_scope_kind_assigned(RiskScopeKind scope) noexcept {
   return scope >= RiskScopeKind::Bot && scope <= RiskScopeKind::Venue;
 }
 
 // --------------------------------------------------------
 // Require every decimal limit to be strictly positive before it can authorize exposure.
-[[nodiscard]] bool positive_limits(const RiskLimitSetParams& limits) noexcept {
+[[nodiscard]] bool has_positive_limits(const RiskLimitSetParams& limits) noexcept {
   return limits.maximum_single_order_quantity.coefficient() > 0 &&
          limits.maximum_single_order_quote_notional.coefficient() > 0 &&
          limits.maximum_open_order_count > 0U &&
@@ -202,7 +206,7 @@ encode_risk_policy(const RiskPolicyParams& params, std::uint8_t notional_scale,
 
 // --------------------------------------------------------
 // Enforce shared mutable-cell limits independent of authored row ordering.
-[[nodiscard]] bool shared_key_limits_agree(const std::vector<RiskLimitSet>& limits) noexcept {
+[[nodiscard]] bool do_shared_key_limits_agree(const std::vector<RiskLimitSet>& limits) noexcept {
   for (std::size_t left_index = 0U; left_index < limits.size(); ++left_index) {
     const auto& left = limits[left_index];
     for (std::size_t right_index = left_index + 1U; right_index < limits.size(); ++right_index) {
@@ -245,16 +249,15 @@ encode_risk_policy(const RiskPolicyParams& params, std::uint8_t notional_scale,
 // --------------------------------------------------------
 // Render exactly 64 lowercase hexadecimal digits for the same fixed digest bytes.
 std::string RiskPolicyFingerprint::to_hex() const {
-  const auto encoded = model::sha256_hex(bytes_);
+  const auto encoded = model::sha256_hex_from_digest(bytes_);
   return std::string{encoded.begin(), encoded.end()};
 }
 
 // --------------------------------------------------------
 // Validate all startup authority before publishing any canonical policy or mutable risk capability.
-model::Result<RiskPolicySnapshot>
-RiskPolicySnapshot::create(RiskPolicyParams params,
-                           const configuration::StartupConfiguration& authority,
-                           const execution::OwnerLocalRouteCatalog& routes) {
+model::Result<RiskPolicySnapshot> RiskPolicySnapshot::create_risk_policy_snapshot(
+    RiskPolicyParams params, const configuration::StartupConfiguration& authority,
+    const execution::OwnerLocalRouteCatalog& routes) {
   const auto& provenance = authority.provenance();
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -263,31 +266,32 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
       params.configuration_revision != provenance.configuration_revision() ||
       params.organization_revision != provenance.organization_revision() ||
       params.route_revision != provenance.route_revision()) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.provenance");
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.provenance");
   }
   if (params.notional_scale > model::FixedPoint::maximum_scale ||
       params.notional_rounding != model::RoundingMode::AwayFromZero) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.notional_decision");
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.notional_decision");
   }
   if (params.metadata_revisions.size() > std::numeric_limits<std::uint32_t>::max() ||
       params.limit_sets.size() > std::numeric_limits<std::uint32_t>::max()) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.collection_size");
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.collection_size");
   }
   const auto notional_scale = static_cast<std::uint8_t>(params.notional_scale);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 2: canonicalize metadata references and reject duplicate, stale, or unknown revisions.
   auto metadata = std::move(params.metadata_revisions);
-  std::sort(metadata.begin(), metadata.end(), metadata_less);
+  std::sort(metadata.begin(), metadata.end(), is_metadata_revision_entry_less);
   for (std::size_t index = 0U; index < metadata.size(); ++index) {
-    if (index > 0U && !metadata_less(metadata[index - 1U], metadata[index]) &&
-        !metadata_less(metadata[index], metadata[index - 1U])) {
-      return invalid_policy<RiskPolicySnapshot>("risk_policy.metadata_duplicate");
+    if (index > 0U && !is_metadata_revision_entry_less(metadata[index - 1U], metadata[index]) &&
+        !is_metadata_revision_entry_less(metadata[index], metadata[index - 1U])) {
+      return create_invalid_risk_policy_result<RiskPolicySnapshot>(
+          "risk_policy.metadata_duplicate");
     }
     const auto* const accepted = provenance.find_instrument_metadata_revision(
         metadata[index].venue_id, metadata[index].instrument_id);
     if (accepted == nullptr || accepted->value() != metadata[index].revision.value()) {
-      return invalid_policy<RiskPolicySnapshot>("risk_policy.metadata_revision");
+      return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.metadata_revision");
     }
   }
 
@@ -297,10 +301,10 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
   std::vector<configuration::InstrumentMetadataRevisionEntry> expected_metadata;
   std::vector<RiskLimitKey> expected_keys;
   if (routes.routes().size() != authority.routes().routes().size()) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.route_completeness");
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.route_completeness");
   }
   for (const auto& installed : routes.routes()) {
-    const auto* const accepted_route = authority.routes().find(installed.route().id);
+    const auto* const accepted_route = authority.routes().find_route(installed.route().id);
     const auto* const accepted_attribution =
         authority.organization().find_bot(installed.route().bot_id);
     const auto* const accepted_metadata = authority.find_instrument_metadata(
@@ -311,8 +315,8 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
         installed.route_revision() != provenance.route_revision() || accepted_route == nullptr ||
         *accepted_route != installed.route() || accepted_attribution == nullptr ||
         *accepted_attribution != installed.attribution() || accepted_metadata == nullptr ||
-        !metadata_equal(*accepted_metadata, installed.metadata())) {
-      return invalid_policy<RiskPolicySnapshot>("risk_policy.route_provenance");
+        !is_instrument_metadata_equal(*accepted_metadata, installed.metadata())) {
+      return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.route_provenance");
     }
     if (!installed.route().is_enabled()) {
       continue;
@@ -329,13 +333,14 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
                                            std::string{installed.metadata().quote_currency()}});
     }
   }
-  std::sort(expected_metadata.begin(), expected_metadata.end(), metadata_less);
+  std::sort(expected_metadata.begin(), expected_metadata.end(), is_metadata_revision_entry_less);
   expected_metadata.erase(std::unique(expected_metadata.begin(), expected_metadata.end()),
                           expected_metadata.end());
-  std::sort(expected_keys.begin(), expected_keys.end(), key_less);
+  std::sort(expected_keys.begin(), expected_keys.end(), is_risk_limit_key_less);
   expected_keys.erase(std::unique(expected_keys.begin(), expected_keys.end()), expected_keys.end());
   if (metadata != expected_metadata) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.metadata_completeness");
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>(
+        "risk_policy.metadata_completeness");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -343,20 +348,21 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
   std::vector<RiskLimitSet> limits;
   limits.reserve(params.limit_sets.size());
   for (auto& authored : params.limit_sets) {
-    if (!assigned_scope(authored.scope) || authored.scope_subject.empty() ||
+    if (!is_scope_kind_assigned(authored.scope) || authored.scope_subject.empty() ||
         authored.scope_subject.size() > std::numeric_limits<std::uint16_t>::max() ||
         authored.quote_currency.empty() ||
         authored.quote_currency.size() > std::numeric_limits<std::uint16_t>::max() ||
         authored.maximum_open_order_count > std::numeric_limits<std::uint32_t>::max() ||
-        !positive_limits(authored)) {
-      return invalid_policy<RiskPolicySnapshot>("risk_policy.limit_value");
+        !has_positive_limits(authored)) {
+      return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.limit_value");
     }
     const auto maximum_open_order_count =
         static_cast<std::uint32_t>(authored.maximum_open_order_count);
     limits.push_back(RiskLimitSet{std::move(authored), maximum_open_order_count});
   }
   std::sort(limits.begin(), limits.end(), [](const RiskLimitSet& left, const RiskLimitSet& right) {
-    return key_less(key_of(left), key_of(right));
+    return is_risk_limit_key_less(risk_limit_key_from_limit_set(left),
+                                  risk_limit_key_from_limit_set(right));
   });
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -364,18 +370,18 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
   std::vector<RiskLimitKey> authored_keys;
   authored_keys.reserve(limits.size());
   for (const auto& row : limits) {
-    authored_keys.push_back(key_of(row));
+    authored_keys.push_back(risk_limit_key_from_limit_set(row));
   }
   for (std::size_t index = 1U; index < authored_keys.size(); ++index) {
     if (authored_keys[index - 1U] == authored_keys[index]) {
-      return invalid_policy<RiskPolicySnapshot>("risk_policy.limit_duplicate");
+      return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.limit_duplicate");
     }
   }
   if (authored_keys != expected_keys) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.limit_completeness");
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.limit_completeness");
   }
-  if (!shared_key_limits_agree(limits)) {
-    return invalid_policy<RiskPolicySnapshot>("risk_policy.limit_consistency");
+  if (!do_shared_key_limits_agree(limits)) {
+    return create_invalid_risk_policy_result<RiskPolicySnapshot>("risk_policy.limit_consistency");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -383,8 +389,8 @@ RiskPolicySnapshot::create(RiskPolicyParams params,
   params.metadata_revisions.clear();
   params.limit_sets.clear();
   auto encoded = encode_risk_policy(params, notional_scale, metadata, limits);
-  RiskPolicyFingerprint fingerprint{model::sha256(encoded)};
-  return model::Result<RiskPolicySnapshot>::success(RiskPolicySnapshot{
+  RiskPolicyFingerprint fingerprint{model::calculate_sha256_digest(encoded)};
+  return model::Result<RiskPolicySnapshot>::create_success(RiskPolicySnapshot{
       params.revision, std::move(params.configuration_fingerprint), params.configuration_revision,
       params.organization_revision, params.route_revision, notional_scale, params.notional_rounding,
       std::move(metadata), std::move(limits), std::move(encoded), std::move(fingerprint)});

@@ -46,9 +46,10 @@ public:
   // --------------------------------------------------------
   // Validate dependencies and uniqueness before publishing canonical subscription-ID order.
   [[nodiscard]] static model::Result<SubscriptionConfiguration>
-  create(model::SubscriptionRevision revision, std::vector<Subscription> subscriptions,
-         const organization::Organization& organization,
-         std::vector<VenueInstrumentPair> known_venue_instruments);
+  create_subscription_configuration(model::SubscriptionRevision revision,
+                                    std::vector<Subscription> subscriptions,
+                                    const organization::Organization& organization,
+                                    std::vector<VenueInstrumentPair> known_venue_instruments);
 
   // --------------------------------------------------------
   // Return the accepted subscription-section revision.
@@ -62,7 +63,8 @@ public:
 
   // --------------------------------------------------------
   // Find one configured observation grant by its nominal subscription identity.
-  [[nodiscard]] const Subscription* find(const model::SubscriptionId& id) const noexcept;
+  [[nodiscard]] const Subscription*
+  find_subscription(const model::SubscriptionId& id) const noexcept;
 
   // --------------------------------------------------------
   // Structural equality compares the complete published subscription configuration.

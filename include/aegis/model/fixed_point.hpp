@@ -53,15 +53,15 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject coefficients outside the signed kernel representation before conversion.
     if (!std::in_range<std::int64_t>(coefficient)) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
+      return Result<FixedPoint>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::ArithmeticOverflow, "fixed_point"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject negative or unrepresentable scales before conversion.
     if (!std::in_range<std::uint64_t>(scale)) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
+      return Result<FixedPoint>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidScale, "fixed_point"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -110,8 +110,8 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject negative or unrepresentable target scales before conversion.
     if (!std::in_range<std::uint64_t>(target_scale)) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
+      return Result<FixedPoint>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidScale, "fixed_point"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -130,8 +130,8 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject negative or unrepresentable target scales before conversion.
     if (!std::in_range<std::uint64_t>(target_scale)) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
+      return Result<FixedPoint>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidScale, "fixed_point"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -150,8 +150,8 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject negative or unrepresentable target scales before conversion.
     if (!std::in_range<std::uint64_t>(target_scale)) {
-      return Result<FixedPoint>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidScale, "fixed_point"));
+      return Result<FixedPoint>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidScale, "fixed_point"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -205,7 +205,8 @@ private:
   // --------------------------------------------------------
   // Public templates normalize source types; these fixed-width helpers enforce decimal-scale and
   // rounding semantics without multiplying implementation overloads for every integer type.
-  [[nodiscard]] static FixedPoint canonical(std::int64_t coefficient, std::uint8_t scale) noexcept;
+  [[nodiscard]] static FixedPoint create_canonical_fixed_point(std::int64_t coefficient,
+                                                               std::uint8_t scale) noexcept;
 
   // --------------------------------------------------------
   // Validate decimal scale semantics and canonicalize an already representable coefficient.
@@ -275,12 +276,12 @@ public:
     if (!value) {
       auto error = value.error();
       error.context.field = std::string{Tag::field};
-      return Result<DecimalValue>::failure(std::move(error));
+      return Result<DecimalValue>::create_failure(std::move(error));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the validated kernel inside its nominal wrapper.
-    return Result<DecimalValue>::success(DecimalValue{value.value()});
+    return Result<DecimalValue>::create_success(DecimalValue{value.value()});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -306,12 +307,12 @@ public:
     if (!value) {
       auto error = value.error();
       error.context.field = std::string{Tag::field};
-      return Result<DecimalValue>::failure(std::move(error));
+      return Result<DecimalValue>::create_failure(std::move(error));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the validated kernel inside its nominal wrapper.
-    return Result<DecimalValue>::success(DecimalValue{value.value()});
+    return Result<DecimalValue>::create_success(DecimalValue{value.value()});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -331,13 +332,13 @@ public:
   // --------------------------------------------------------
   // Arithmetic preserves the nominal wrapper and consistently remaps kernel failures to its tag.
   [[nodiscard]] Result<DecimalValue> checked_add(DecimalValue other) const {
-    return wrap(value_.checked_add(other.value_));
+    return decimal_value_from_fixed_point_result(value_.checked_add(other.value_));
   }
 
   // --------------------------------------------------------
   // Subtract within one nominal domain and remap kernel failures to its public field.
   [[nodiscard]] Result<DecimalValue> checked_subtract(DecimalValue other) const {
-    return wrap(value_.checked_subtract(other.value_));
+    return decimal_value_from_fixed_point_result(value_.checked_subtract(other.value_));
   }
 
   // --------------------------------------------------------
@@ -345,7 +346,7 @@ public:
   // the nominal wrapper, owns negative and out-of-range rejection.
   template <CheckedIntegerInput Scale>
   [[nodiscard]] Result<DecimalValue> rescale(Scale target_scale, RoundingMode rounding) const {
-    return wrap(value_.rescale(target_scale, rounding));
+    return decimal_value_from_fixed_point_result(value_.rescale(target_scale, rounding));
   }
 
   // --------------------------------------------------------
@@ -367,7 +368,7 @@ public:
     if (!result) {
       auto error = result.error();
       error.context.field = std::string{Tag::field};
-      return Result<bool>::failure(std::move(error));
+      return Result<bool>::create_failure(std::move(error));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -380,7 +381,7 @@ public:
   // --------------------------------------------------------
   // Quantize within one nominal domain under an explicit rounding policy.
   [[nodiscard]] Result<DecimalValue> quantize(DecimalValue increment, RoundingMode rounding) const {
-    return wrap(value_.quantize(increment.value_, rounding));
+    return decimal_value_from_fixed_point_result(value_.quantize(increment.value_, rounding));
   }
 
   // --------------------------------------------------------
@@ -402,19 +403,20 @@ private:
 
   // --------------------------------------------------------
   // Preserve the kernel error code while making its field identify the public nominal domain.
-  [[nodiscard]] static Result<DecimalValue> wrap(Result<FixedPoint> result) {
+  [[nodiscard]] static Result<DecimalValue>
+  decimal_value_from_fixed_point_result(Result<FixedPoint> result) {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Remap only the stable field while retaining the kernel failure code and index.
     if (!result) {
       auto error = result.error();
       error.context.field = std::string{Tag::field};
-      return Result<DecimalValue>::failure(std::move(error));
+      return Result<DecimalValue>::create_failure(std::move(error));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the successful kernel inside its nominal wrapper.
-    return Result<DecimalValue>::success(DecimalValue{result.value()});
+    return Result<DecimalValue>::create_success(DecimalValue{result.value()});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }

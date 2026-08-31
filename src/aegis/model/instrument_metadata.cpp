@@ -12,7 +12,7 @@ namespace {
 // --------------------------------------------------------
 // Currency identifiers are deliberately narrower than general IDs: 3-12 uppercase ASCII letters
 // or digits, beginning with a letter, keep unit comparisons deterministic and locale-free.
-[[nodiscard]] bool valid_currency(std::string_view value) noexcept {
+[[nodiscard]] bool is_valid_currency(std::string_view value) noexcept {
   if (value.size() < 3U || value.size() > 12U || value.front() < 'A' || value.front() > 'Z') {
     return false;
   }
@@ -28,9 +28,10 @@ namespace {
 
 // --------------------------------------------------------
 // Metadata construction failures share one stable code and identify the first invalid field.
-[[nodiscard]] Result<InstrumentMetadata> invalid_metadata(std::string field) {
-  return Result<InstrumentMetadata>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidMetadata, std::move(field)));
+[[nodiscard]] Result<InstrumentMetadata>
+create_invalid_instrument_metadata_result(std::string field) {
+  return Result<InstrumentMetadata>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidMetadata, std::move(field)));
 }
 
 // --------------------------------------------------------
@@ -43,7 +44,7 @@ template <typename T>
   }
   auto error = result.error();
   error.context.field = std::move(field);
-  return Result<T>::failure(std::move(error));
+  return Result<T>::create_failure(std::move(error));
 }
 
 // --------------------------------------------------------
@@ -52,68 +53,69 @@ template <typename T>
 
 // --------------------------------------------------------
 // Validate authored metadata in stable failure order before publishing an immutable snapshot.
-Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams params) {
+Result<InstrumentMetadata>
+InstrumentMetadata::create_instrument_metadata(InstrumentMetadataParams params) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // This order is a compatibility contract: callers always receive the first canonical failure.
   // Phase 1: validate currency grammar and the fundamental base/quote distinction.
-  if (!valid_currency(params.base_currency)) {
-    return invalid_metadata("instrument.base_currency");
+  if (!is_valid_currency(params.base_currency)) {
+    return create_invalid_instrument_metadata_result("instrument.base_currency");
   }
-  if (!valid_currency(params.quote_currency)) {
-    return invalid_metadata("instrument.quote_currency");
+  if (!is_valid_currency(params.quote_currency)) {
+    return create_invalid_instrument_metadata_result("instrument.quote_currency");
   }
-  if (!valid_currency(params.settlement_currency)) {
-    return invalid_metadata("instrument.settlement_currency");
+  if (!is_valid_currency(params.settlement_currency)) {
+    return create_invalid_instrument_metadata_result("instrument.settlement_currency");
   }
   if (params.base_currency == params.quote_currency) {
-    return invalid_metadata("instrument.quote_currency");
+    return create_invalid_instrument_metadata_result("instrument.quote_currency");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 2: validate enum assignments and the style-specific multiplier and settlement units.
   if (params.contract_style != ContractStyle::Linear &&
       params.contract_style != ContractStyle::Inverse) {
-    return invalid_metadata("instrument.contract_style");
+    return create_invalid_instrument_metadata_result("instrument.contract_style");
   }
   if (params.quantity_unit != QuantityUnit::Contracts) {
-    return invalid_metadata("instrument.quantity_unit");
+    return create_invalid_instrument_metadata_result("instrument.quantity_unit");
   }
   if (params.contract_multiplier_unit != ContractMultiplierUnit::BaseCurrencyPerContract &&
       params.contract_multiplier_unit != ContractMultiplierUnit::QuoteCurrencyPerContract) {
-    return invalid_metadata("instrument.contract_multiplier_unit");
+    return create_invalid_instrument_metadata_result("instrument.contract_multiplier_unit");
   }
   if (params.contract_style == ContractStyle::Inverse &&
       params.contract_multiplier_unit != ContractMultiplierUnit::QuoteCurrencyPerContract) {
-    return invalid_metadata("instrument.contract_multiplier_unit");
+    return create_invalid_instrument_metadata_result("instrument.contract_multiplier_unit");
   }
   if (params.contract_style == ContractStyle::Linear &&
       params.contract_multiplier_unit != ContractMultiplierUnit::BaseCurrencyPerContract) {
-    return invalid_metadata("instrument.contract_multiplier_unit");
+    return create_invalid_instrument_metadata_result("instrument.contract_multiplier_unit");
   }
   if (params.contract_style == ContractStyle::Inverse &&
       params.settlement_currency != params.base_currency) {
-    return invalid_metadata("instrument.settlement_currency");
+    return create_invalid_instrument_metadata_result("instrument.settlement_currency");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Phase 3: prove scales and positive increments are representable in the decimal kernel.
   if (params.price_scale > FixedPoint::maximum_scale) {
-    return invalid_metadata("instrument.price_scale");
+    return create_invalid_instrument_metadata_result("instrument.price_scale");
   }
   if (params.quantity_scale > FixedPoint::maximum_scale) {
-    return invalid_metadata("instrument.quantity_scale");
+    return create_invalid_instrument_metadata_result("instrument.quantity_scale");
   }
   if (params.tick_size.coefficient() <= 0 || params.tick_size.scale() > params.price_scale) {
-    return invalid_metadata("instrument.tick_size");
+    return create_invalid_instrument_metadata_result("instrument.tick_size");
   }
   if (params.quantity_step.coefficient() <= 0 ||
       params.quantity_step.scale() > params.quantity_scale) {
-    return invalid_metadata("instrument.quantity_step");
+    return create_invalid_instrument_metadata_result("instrument.quantity_step");
   }
   if (params.minimum_quantity.coefficient() <= 0 ||
       params.minimum_quantity.scale() > params.quantity_scale) {
-    return invalid_metadata("instrument.minimum_quantity");
+    return create_invalid_instrument_metadata_result("instrument.minimum_quantity");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -121,15 +123,15 @@ Result<InstrumentMetadata> InstrumentMetadata::create(InstrumentMetadataParams p
   // positive before accepting the snapshot.
   const auto minimum_aligned = params.minimum_quantity.is_multiple_of(params.quantity_step);
   if (!minimum_aligned || !minimum_aligned.value()) {
-    return invalid_metadata("instrument.minimum_quantity");
+    return create_invalid_instrument_metadata_result("instrument.minimum_quantity");
   }
   if (params.contract_multiplier.coefficient() <= 0) {
-    return invalid_metadata("instrument.contract_multiplier");
+    return create_invalid_instrument_metadata_result("instrument.contract_multiplier");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Ownership transfers only after every field has passed in canonical order.
-  return Result<InstrumentMetadata>::success(InstrumentMetadata{std::move(params)});
+  return Result<InstrumentMetadata>::create_success(InstrumentMetadata{std::move(params)});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -141,12 +143,13 @@ Result<void> InstrumentMetadata::validate_price_alignment(Price price) const {
   if (!aligned) {
     auto error = aligned.error();
     error.context.field = "price";
-    return Result<void>::failure(std::move(error));
+    return Result<void>::create_failure(std::move(error));
   }
   if (!aligned.value()) {
-    return Result<void>::failure(DomainError::at_field(DomainErrorCode::MisalignedPrice, "price"));
+    return Result<void>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::MisalignedPrice, "price"));
   }
-  return Result<void>::success();
+  return Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -156,13 +159,13 @@ Result<void> InstrumentMetadata::validate_quantity_alignment(Quantity quantity) 
   if (!aligned) {
     auto error = aligned.error();
     error.context.field = "quantity";
-    return Result<void>::failure(std::move(error));
+    return Result<void>::create_failure(std::move(error));
   }
   if (!aligned.value()) {
-    return Result<void>::failure(
-        DomainError::at_field(DomainErrorCode::MisalignedQuantity, "quantity"));
+    return Result<void>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::MisalignedQuantity, "quantity"));
   }
-  return Result<void>::success();
+  return Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -181,16 +184,15 @@ Result<Quantity> InstrumentMetadata::quantize_quantity(Quantity quantity,
 // --------------------------------------------------------
 // The public constrained overload has normalized scale signedness and width; this helper keeps
 // quantity alignment, arithmetic, and error remapping in one non-templated implementation path.
-Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts,
-                                                              std::uint64_t target_scale,
-                                                              RoundingMode rounding) const {
+Result<Notional> InstrumentMetadata::calculate_contract_value_from_validated_scale(
+    Quantity contracts, std::uint64_t target_scale, RoundingMode rounding) const {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject off-step contract counts before privileged access combines nominal Quantity and Notional
   // kernels; callers cannot reach this cross-domain multiplication directly.
   const auto aligned = validate_quantity_alignment(contracts);
   if (!aligned) {
-    return Result<Notional>::failure(aligned.error());
+    return Result<Notional>::create_failure(aligned.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -201,9 +203,9 @@ Result<Notional> InstrumentMetadata::contract_value_validated(Quantity contracts
   if (!converted) {
     auto error = converted.error();
     error.context.field = "contract_value";
-    return Result<Notional>::failure(std::move(error));
+    return Result<Notional>::create_failure(std::move(error));
   }
-  return Result<Notional>::success(Notional{converted.value()});
+  return Result<Notional>::create_success(Notional{converted.value()});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

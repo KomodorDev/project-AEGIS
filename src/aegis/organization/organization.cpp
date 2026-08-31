@@ -23,11 +23,11 @@ template <typename Record, typename IdAccessor>
                                                        std::string_view field, IdAccessor id_of) {
   for (std::size_t index = 1U; index < records.size(); ++index) {
     if (id_of(records[index - 1U]) == id_of(records[index])) {
-      return model::Result<void>::failure(
-          DomainError::at_index(DomainErrorCode::DuplicateIdentifier, std::string{field}, index));
+      return model::Result<void>::create_failure(DomainError::create_at_index(
+          DomainErrorCode::DuplicateIdentifier, std::string{field}, index));
     }
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -49,23 +49,24 @@ template <typename Record, typename Id>
 
 // --------------------------------------------------------
 // Validate the complete peer-firm hierarchy and publish canonical registrations and attribution.
-model::Result<Organization> Organization::create(model::OrganizationRevision revision,
-                                                 std::vector<Firm> firms, std::vector<Desk> desks,
-                                                 std::vector<BotRegistration> bots) {
+model::Result<Organization> Organization::create_organization(model::OrganizationRevision revision,
+                                                              std::vector<Firm> firms,
+                                                              std::vector<Desk> desks,
+                                                              std::vector<BotRegistration> bots) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject missing hierarchy levels from root to leaf so simultaneous defects have stable priority.
   if (firms.empty()) {
-    return model::Result<Organization>::failure(
-        DomainError::at_field(DomainErrorCode::EmptyCollection, "organization.firms"));
+    return model::Result<Organization>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EmptyCollection, "organization.firms"));
   }
   if (desks.empty()) {
-    return model::Result<Organization>::failure(
-        DomainError::at_field(DomainErrorCode::EmptyCollection, "organization.desks"));
+    return model::Result<Organization>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EmptyCollection, "organization.desks"));
   }
   if (bots.empty()) {
-    return model::Result<Organization>::failure(
-        DomainError::at_field(DomainErrorCode::EmptyCollection, "organization.bots"));
+    return model::Result<Organization>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EmptyCollection, "organization.bots"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -83,32 +84,32 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
       reject_duplicate_ids(firms, "organization.firms.id",
                            [](const Firm& firm) -> const model::FirmId& { return firm.id; });
   if (!firm_duplicates) {
-    return model::Result<Organization>::failure(firm_duplicates.error());
+    return model::Result<Organization>::create_failure(firm_duplicates.error());
   }
   const auto desk_duplicates =
       reject_duplicate_ids(desks, "organization.desks.id",
                            [](const Desk& desk) -> const model::DeskId& { return desk.id; });
   if (!desk_duplicates) {
-    return model::Result<Organization>::failure(desk_duplicates.error());
+    return model::Result<Organization>::create_failure(desk_duplicates.error());
   }
   const auto bot_duplicates = reject_duplicate_ids(
       bots, "organization.bots.id",
       [](const BotRegistration& bot) -> const model::BotId& { return bot.id; });
   if (!bot_duplicates) {
-    return model::Result<Organization>::failure(bot_duplicates.error());
+    return model::Result<Organization>::create_failure(bot_duplicates.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Prove upward references before checking whether every parent has descendants.
   for (std::size_t index = 0U; index < desks.size(); ++index) {
     if (find_by_id(firms, desks[index].firm_id) == nullptr) {
-      return model::Result<Organization>::failure(DomainError::at_index(
+      return model::Result<Organization>::create_failure(DomainError::create_at_index(
           DomainErrorCode::DanglingReference, "organization.desks.firm_id", index));
     }
   }
   for (std::size_t index = 0U; index < bots.size(); ++index) {
     if (find_by_id(desks, bots[index].desk_id) == nullptr) {
-      return model::Result<Organization>::failure(DomainError::at_index(
+      return model::Result<Organization>::create_failure(DomainError::create_at_index(
           DomainErrorCode::DanglingReference, "organization.bots.desk_id", index));
     }
   }
@@ -120,7 +121,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
       return desk.firm_id == firms[index].id;
     });
     if (!has_desk) {
-      return model::Result<Organization>::failure(DomainError::at_index(
+      return model::Result<Organization>::create_failure(DomainError::create_at_index(
           DomainErrorCode::InvalidRelationship, "organization.firms.desks", index));
     }
   }
@@ -129,7 +130,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
       return bot.desk_id == desks[index].id;
     });
     if (!has_bot) {
-      return model::Result<Organization>::failure(DomainError::at_index(
+      return model::Result<Organization>::create_failure(DomainError::create_at_index(
           DomainErrorCode::InvalidRelationship, "organization.desks.bots", index));
     }
   }
@@ -144,7 +145,7 @@ model::Result<Organization> Organization::create(model::OrganizationRevision rev
     attributions.push_back(BotAttribution{bot.id, bot.desk_id, firm->id, bot.strategy_id});
   }
 
-  return model::Result<Organization>::success(Organization{
+  return model::Result<Organization>::create_success(Organization{
       revision, std::move(firms), std::move(desks), std::move(bots), std::move(attributions)});
 
   // ++++++++++++++++++++++++++++++++++++++++

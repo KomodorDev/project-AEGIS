@@ -10,7 +10,7 @@ namespace aegis::configuration {
 // --------------------------------------------------------
 // Formatting reuses the digest's fixed-width lowercase representation without hashing it again.
 std::string ConfigurationFingerprint::to_hex() const {
-  const model::Sha256Hex hexadecimal = model::sha256_hex(bytes_);
+  const model::Sha256Hex hexadecimal = model::sha256_hex_from_digest(bytes_);
   return std::string{hexadecimal.data(), hexadecimal.size()};
 }
 

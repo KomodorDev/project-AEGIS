@@ -213,8 +213,9 @@ template <typename Value> [[nodiscard]] Value extract_result_or_throw(model::Res
 // Build one source factory from the same sealed configuration and M4 root as its authority.
 [[nodiscard]] runtime::PrivateOrderEventFactory
 create_private_order_event_factory_or_throw(const test_support::M4OwnerTestAuthority& authority) {
-  return runtime::PrivateOrderEventFactory{extract_result_or_throw(
-      runtime::M4ProvenanceResolver::create(authority.configuration, authority.m4_policy))};
+  return runtime::PrivateOrderEventFactory{
+      extract_result_or_throw(runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+          authority.configuration, authority.m4_policy))};
 }
 
 // --------------------------------------------------------
@@ -232,8 +233,8 @@ create_owner_planning_snapshot_or_throw(const test_support::M4OwnerTestAuthority
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy every retained OMS row in canonical admission order.
   std::vector<OmsRowSnapshot> oms_rows;
-  oms_rows.reserve(coordinator.outbound_oms().size());
-  for (std::size_t index = 0U; index < coordinator.outbound_oms().size(); ++index) {
+  oms_rows.reserve(coordinator.outbound_oms().order_count());
+  for (std::size_t index = 0U; index < coordinator.outbound_oms().order_count(); ++index) {
     const auto* const row = coordinator.outbound_oms().record_at(index);
     if (row == nullptr) {
       throw std::logic_error{"missing retained OMS row in planner snapshot fixture"};
@@ -273,9 +274,9 @@ create_owner_planning_snapshot_or_throw(const test_support::M4OwnerTestAuthority
   std::vector<trace::SubmissionTraceRecord> submission_trace{trace_records.begin(),
                                                              trace_records.end()};
   std::vector<runtime::SubmissionDiagnosticRecord> diagnostics;
-  diagnostics.reserve(coordinator.diagnostics().size());
-  for (std::size_t index = 0U; index < coordinator.diagnostics().size(); ++index) {
-    const auto* const record = coordinator.diagnostics().at(index);
+  diagnostics.reserve(coordinator.diagnostics().diagnostic_count());
+  for (std::size_t index = 0U; index < coordinator.diagnostics().diagnostic_count(); ++index) {
+    const auto* const record = coordinator.diagnostics().diagnostic_at(index);
     if (record == nullptr) {
       throw std::logic_error{"missing diagnostic in planner snapshot fixture"};
     }
@@ -308,7 +309,7 @@ create_owner_planning_snapshot_or_throw(const test_support::M4OwnerTestAuthority
       reconciler->event_identity_record_count(),
       reconciler->trade_identity_record_count(),
       reconciler->exchange_order_mapping_count(),
-      coordinator.runtime_faulted(),
+      coordinator.is_runtime_faulted(),
       coordinator.terminal_error(),
   };
 
@@ -359,7 +360,7 @@ public:
   // --------------------------------------------------------
   // Borrow the genuine retained OMS row that supplies correlation authority.
   [[nodiscard]] const oms::OutboundOrderRecord& order_or_throw() const {
-    const auto* const value = authority_.submission->outbound_oms().find(order_id_or_throw());
+    const auto* const value = authority_.submission->outbound_oms().find_order(order_id_or_throw());
     if (value == nullptr) {
       throw std::logic_error{"missing genuine M4 first-seen planner order"};
     }
@@ -424,8 +425,8 @@ public:
 [[nodiscard]] oms::PrivateOrderLocator
 create_private_order_locator_or_throw(std::optional<model::OrderId> local_order_id,
                                       std::optional<oms::ExchangeOrderId> exchange_order_id) {
-  return extract_result_or_throw(
-      oms::PrivateOrderLocator::create(std::move(local_order_id), std::move(exchange_order_id)));
+  return extract_result_or_throw(oms::PrivateOrderLocator::create_private_order_locator(
+      std::move(local_order_id), std::move(exchange_order_id)));
 }
 
 // --------------------------------------------------------
@@ -853,8 +854,10 @@ TEST_CASE("M4 first-seen planner contains provenance and locator source mismatch
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A coherent foreign revision preserves valid source shape but cannot match the bound M4 root.
-  auto foreign_root_params = test_support::m3_enabled_two_firm_configuration_params();
-  foreign_root_params.revision = extract_result_or_throw(foreign_root_params.revision.next());
+  auto foreign_root_params =
+      test_support::create_m3_enabled_two_firm_configuration_params_or_throw();
+  foreign_root_params.revision =
+      extract_result_or_throw(foreign_root_params.revision.derive_next_revision());
   const auto foreign_root_input = create_foreign_acknowledgement_semantic_or_throw(
       std::move(foreign_root_params), baseline_account, baseline_venue, 0x81U);
   check_conflict_plan(require_plan_without_mutation(fixture, foreign_root_input),

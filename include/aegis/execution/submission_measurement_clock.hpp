@@ -20,6 +20,7 @@ class SubmissionMeasurementClock {
 public:
 
   // --------------------------------------------------------
+  // Keep each clock at one stable address and destroy derived implementations through the base.
   SubmissionMeasurementClock(const SubmissionMeasurementClock&) = delete;
   SubmissionMeasurementClock& operator=(const SubmissionMeasurementClock&) = delete;
   SubmissionMeasurementClock(SubmissionMeasurementClock&&) = delete;
@@ -44,6 +45,7 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
+  // Permit construction only through the two trusted friend implementations.
   SubmissionMeasurementClock() = default;
 
   // --------------------------------------------------------
@@ -88,6 +90,7 @@ public:
       : readings_{std::move(readings)}, fallback_{fallback} {}
 
   // --------------------------------------------------------
+  // Return how many scripted readings callers have claimed, capped only by the atomic counter.
   [[nodiscard]] std::size_t readings_consumed() const noexcept {
     return next_reading_.load(std::memory_order_relaxed);
   }

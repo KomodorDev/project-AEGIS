@@ -30,8 +30,8 @@ namespace {
 using namespace aegis;
 
 // ########################################################################
-// Compile-time API checks prevent a local result or caller-authored request from growing exchange
-// acknowledgement or organizational-attribution escape hatches unnoticed.
+// Interesting syntax: requires-expression probes prevent a local result or caller-authored request
+// from growing exchange acknowledgement or organizational-attribution escape hatches unnoticed.
 template <typename Value>
 concept HasExchangeAcknowledgement =
     requires(const Value& value) { value.exchange_acknowledged(); };
@@ -40,7 +40,7 @@ template <typename Value>
 concept HasCallerFirm = requires(Value& value) { value.firm_id; };
 
 template <typename Value>
-concept HasPublicCoordinatorSubmit = requires { &Value::submit; };
+concept HasPublicCoordinatorSubmitOrder = requires { &Value::submit_order; };
 
 template <typename Value>
 concept HasPublicMeasurementClock = requires { &Value::measurement_now; };
@@ -50,7 +50,7 @@ concept HasPublicCallbackBinding = requires { typename Value::CallbackBinding; }
 
 static_assert(!HasExchangeAcknowledgement<execution::SubmitResult>);
 static_assert(!HasCallerFirm<execution::OrderRequest>);
-static_assert(!HasPublicCoordinatorSubmit<runtime::SubmissionCoordinator>);
+static_assert(!HasPublicCoordinatorSubmitOrder<runtime::SubmissionCoordinator>);
 static_assert(!HasPublicMeasurementClock<runtime::SubmissionCoordinator>);
 static_assert(!HasPublicCallbackBinding<runtime::SubmissionCoordinator>);
 static_assert(std::same_as<decltype(runtime::FakeSubmissionRuntimeParams::order_ids),
@@ -61,8 +61,9 @@ static_assert(!std::is_default_constructible_v<runtime::FakeSubmissionRuntimePar
 
 // --------------------------------------------------------
 // Parse one nominal identifier or stop on a test-authoring error before exercising the coordinator.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view value) {
-  auto parsed = Identifier::parse(value);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view value) {
+  auto parsed = Identifier::parse_identifier(value);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in submission-coordinator fixture"};
   }
@@ -71,7 +72,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
 
 // --------------------------------------------------------
 // Parse exact decimal fixture input without introducing binary floating-point arithmetic.
-template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view value) {
+template <typename Decimal> [[nodiscard]] Decimal parse_decimal_or_throw(std::string_view value) {
   auto parsed = Decimal::parse_ascii(value);
   if (!parsed) {
     throw std::logic_error{"invalid decimal in submission-coordinator fixture"};
@@ -81,7 +82,7 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view value
 
 // --------------------------------------------------------
 // Construct one checked one-based callback identity or fail as a fixture-authoring defect.
-template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
+template <typename Ordinal> [[nodiscard]] Ordinal create_ordinal_or_throw(std::uint64_t value) {
   auto created = Ordinal::from_value(value);
   if (!created) {
     throw std::logic_error{"invalid ordinal in submission-coordinator fixture"};
@@ -91,10 +92,9 @@ template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
 
 // --------------------------------------------------------
 // Resolve the exact heterogeneous scope subject from immutable startup route authority.
-[[nodiscard]] std::string scope_subject(const execution::ExecutionRoute& route,
-                                        const organization::BotAttribution& attribution,
-                                        const model::InstrumentMetadata& metadata,
-                                        risk::RiskScopeKind scope) {
+[[nodiscard]] std::string derive_risk_scope_subject_or_throw(
+    const execution::ExecutionRoute& route, const organization::BotAttribution& attribution,
+    const model::InstrumentMetadata& metadata, risk::RiskScopeKind scope) {
   switch (scope) {
   case risk::RiskScopeKind::Bot:
     return std::string{attribution.bot_id.value()};
@@ -117,29 +117,29 @@ template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
 
 // --------------------------------------------------------
 // Author one complete generous row so individual tests can tighten only the intended risk limit.
-[[nodiscard]] risk::RiskLimitSetParams limit_row(const execution::ExecutionRoute& route,
-                                                 const organization::BotAttribution& attribution,
-                                                 const model::InstrumentMetadata& metadata,
-                                                 risk::RiskScopeKind scope) {
+[[nodiscard]] risk::RiskLimitSetParams
+create_limit_row_or_throw(const execution::ExecutionRoute& route,
+                          const organization::BotAttribution& attribution,
+                          const model::InstrumentMetadata& metadata, risk::RiskScopeKind scope) {
   return risk::RiskLimitSetParams{
       attribution.firm_id,
       scope,
-      scope_subject(route, attribution, metadata, scope),
+      derive_risk_scope_subject_or_throw(route, attribution, metadata, scope),
       metadata.instrument_id(),
       std::string{metadata.quote_currency()},
-      decimal<model::Quantity>("1000"),
-      decimal<model::Notional>("100000"),
+      parse_decimal_or_throw<model::Quantity>("1000"),
+      parse_decimal_or_throw<model::Notional>("100000"),
       100U,
-      decimal<model::Notional>("1000000"),
-      decimal<model::Quantity>("10000"),
-      decimal<model::Notional>("1000000"),
+      parse_decimal_or_throw<model::Notional>("1000000"),
+      parse_decimal_or_throw<model::Quantity>("10000"),
+      parse_decimal_or_throw<model::Notional>("1000000"),
   };
 }
 
 // --------------------------------------------------------
 // Derive the exact revision list and seven complete scopes for every enabled configured route.
 [[nodiscard]] risk::RiskPolicyParams
-risk_policy_params(const configuration::StartupConfiguration& configuration) {
+create_risk_policy_params_or_throw(const configuration::StartupConfiguration& configuration) {
   std::vector<configuration::InstrumentMetadataRevisionEntry> metadata_revisions;
   std::vector<risk::RiskLimitSetParams> limits;
   for (const auto& route : configuration.routes().routes()) {
@@ -156,8 +156,8 @@ risk_policy_params(const configuration::StartupConfiguration& configuration) {
         metadata->venue_id(), metadata->instrument_id(), metadata->revision()});
     for (std::uint8_t value = static_cast<std::uint8_t>(risk::RiskScopeKind::Bot);
          value <= static_cast<std::uint8_t>(risk::RiskScopeKind::Venue); ++value) {
-      limits.push_back(
-          limit_row(route, *attribution, *metadata, static_cast<risk::RiskScopeKind>(value)));
+      limits.push_back(create_limit_row_or_throw(route, *attribution, *metadata,
+                                                 static_cast<risk::RiskScopeKind>(value)));
     }
   }
   std::sort(metadata_revisions.begin(), metadata_revisions.end(),
@@ -168,7 +168,7 @@ risk_policy_params(const configuration::StartupConfiguration& configuration) {
   metadata_revisions.erase(std::unique(metadata_revisions.begin(), metadata_revisions.end()),
                            metadata_revisions.end());
   return risk::RiskPolicyParams{
-      model::RiskPolicyRevision::initial(),
+      model::RiskPolicyRevision::create_initial(),
       configuration.fingerprint(),
       configuration.revision(),
       configuration.organization().revision(),
@@ -184,7 +184,7 @@ risk_policy_params(const configuration::StartupConfiguration& configuration) {
 
 // ########################################################################
 // One fixture value keeps the M1 startup authority and its exact M2 policy alive together.
-struct TestAuthority {
+struct SubmissionCoordinatorTestAuthority {
   configuration::StartupConfiguration configuration;
   runtime::RuntimePolicy runtime_policy;
 };
@@ -193,51 +193,57 @@ struct TestAuthority {
 
 // --------------------------------------------------------
 // Seal the enabled multi-firm startup fixture and a deterministic policy for its public source.
-[[nodiscard]] TestAuthority authority() {
-  auto params = test_support::m3_enabled_two_firm_configuration_params();
-  params.subscriptions.push_back(market_data::Subscription{
-      id<model::SubscriptionId>("subscription.deribit-subsidiary-btc-perpetual-book"),
-      id<model::BotId>("bot.subsidiary-reference"), id<model::VenueId>("deribit"),
-      id<model::InstrumentId>("BTC-USD-PERPETUAL"), market_data::SubscriptionChannel::OrderBook});
-  auto configured = configuration::StartupConfiguration::create(std::move(params));
+[[nodiscard]] SubmissionCoordinatorTestAuthority create_test_authority_or_throw() {
+  auto params = test_support::create_m3_enabled_two_firm_configuration_params_or_throw();
+  params.subscriptions.push_back(
+      market_data::Subscription{parse_identifier_or_throw<model::SubscriptionId>(
+                                    "subscription.deribit-subsidiary-btc-perpetual-book"),
+                                parse_identifier_or_throw<model::BotId>("bot.subsidiary-reference"),
+                                parse_identifier_or_throw<model::VenueId>("deribit"),
+                                parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+                                market_data::SubscriptionChannel::OrderBook});
+  auto configured =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
   if (!configured) {
     throw std::logic_error{"invalid startup authority in submission-coordinator fixture"};
   }
   auto configuration = std::move(configured).value();
-  auto policy = runtime::RuntimePolicy::create(
+  auto policy = runtime::RuntimePolicy::create_runtime_policy(
       configuration,
       runtime::RuntimePolicyParams{
           runtime::RuntimePolicyLimits{8U, 4096U, 64U, 20U, 5'000'000'000U, 4U, 64U, 128U, 32U,
                                        100'000U},
-          {{id<model::MarketSourceId>("source.deribit-btc-perpetual"),
-            id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-            id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-            model::InstrumentMetadataRevision::initial()}},
+          {{parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+            parse_identifier_or_throw<model::VenueId>("deribit"),
+            parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+            parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+            model::InstrumentMetadataRevision::create_initial()}},
       });
   if (!policy) {
     throw std::logic_error{"invalid runtime policy in submission-coordinator fixture"};
   }
-  return TestAuthority{std::move(configuration), std::move(policy).value()};
+  return SubmissionCoordinatorTestAuthority{std::move(configuration), std::move(policy).value()};
 }
 
 // --------------------------------------------------------
 // Supply balanced positive defaults with enough evidence for every longest ordinary attempt.
 [[nodiscard]] execution::SubmissionPolicyCapacities
-capacities(std::uint64_t maximum_attempts = 8U, std::uint32_t reservations = 8U,
-           std::uint32_t oms_orders = 8U, std::uint32_t accepted_writes = 8U,
-           std::uint32_t trace_records = 88U, std::uint32_t diagnostics = 32U) {
+create_submission_capacities(std::uint64_t maximum_attempts = 8U, std::uint32_t reservations = 8U,
+                             std::uint32_t oms_orders = 8U, std::uint32_t accepted_writes = 8U,
+                             std::uint32_t trace_records = 88U, std::uint32_t diagnostics = 32U) {
   return execution::SubmissionPolicyCapacities{maximum_attempts, reservations,  oms_orders, 512U,
                                                accepted_writes,  trace_records, diagnostics};
 }
 
 // --------------------------------------------------------
 // Create a deterministic namespace/counter stream used by ordinary and replay scenarios.
-[[nodiscard]] model::DeterministicOrderIdSource order_provider(std::uint8_t namespace_byte = 0x42U,
-                                                               std::uint64_t initial_counter = 1U) {
+[[nodiscard]] model::DeterministicOrderIdSource
+create_order_id_source_or_throw(std::uint8_t namespace_byte = 0x42U,
+                                std::uint64_t initial_counter = 1U) {
   model::OrderNamespace::Bytes bytes{};
   bytes.fill(namespace_byte);
-  auto created =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{bytes}, initial_counter);
+  auto created = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{bytes}, initial_counter);
   if (!created) {
     throw std::logic_error{"invalid order provider in submission-coordinator fixture"};
   }
@@ -246,9 +252,9 @@ capacities(std::uint64_t maximum_attempts = 8U, std::uint32_t reservations = 8U,
 
 // --------------------------------------------------------
 // Assemble one complete fake-only runtime parameter value with scripts bounded by outer attempts.
-[[nodiscard]] runtime::FakeSubmissionRuntimeParams submission_params(
+[[nodiscard]] runtime::FakeSubmissionRuntimeParams create_submission_params_or_throw(
     const configuration::StartupConfiguration& configuration,
-    execution::SubmissionPolicyCapacities selected_capacities = capacities(),
+    execution::SubmissionPolicyCapacities selected_capacities = create_submission_capacities(),
     execution::FakeEncodingAction encoder_default = execution::FakeEncodingAction::Encode,
     execution::FakeInitiationOutcome initiator_default =
         execution::FakeInitiationOutcome::AcceptedAndInitiated,
@@ -256,32 +262,36 @@ capacities(std::uint64_t maximum_attempts = 8U, std::uint32_t reservations = 8U,
     std::vector<execution::FakeInitiationOverride> initiator_overrides = {},
     std::optional<model::DeterministicOrderIdSource> identities = std::nullopt,
     std::unique_ptr<execution::SubmissionMeasurementClock> measurement_clock = nullptr) {
-  auto encoder = execution::FakeEncoderScript::create(
+  auto encoder = execution::FakeEncoderScript::create_fake_encoder_script(
       encoder_default, selected_capacities.maximum_submission_attempts,
       std::move(encoder_overrides));
-  auto initiator = execution::FakeInitiatorScript::create(
+  auto initiator = execution::FakeInitiatorScript::create_fake_initiator_script(
       initiator_default, selected_capacities.maximum_submission_attempts,
       std::move(initiator_overrides));
   if (!encoder || !initiator) {
     throw std::logic_error{"invalid fake script in submission-coordinator fixture"};
   }
   if (!identities) {
-    identities.emplace(order_provider());
+    identities.emplace(create_order_id_source_or_throw());
   }
   if (!measurement_clock) {
     measurement_clock = std::make_unique<execution::SteadySubmissionMeasurementClock>();
   }
-  return runtime::FakeSubmissionRuntimeParams{
-      risk_policy_params(configuration), selected_capacities,          std::move(encoder).value(),
-      std::move(initiator).value(),      std::move(measurement_clock), std::move(*identities)};
+  return runtime::FakeSubmissionRuntimeParams{create_risk_policy_params_or_throw(configuration),
+                                              selected_capacities,
+                                              std::move(encoder).value(),
+                                              std::move(initiator).value(),
+                                              std::move(measurement_clock),
+                                              std::move(*identities)};
 }
 
 // --------------------------------------------------------
 // Create a complete coordinator or fail immediately when a supposedly valid fixture is rejected.
 [[nodiscard]] std::unique_ptr<runtime::SubmissionCoordinator>
-coordinator_from(const TestAuthority& accepted, runtime::FakeSubmissionRuntimeParams params) {
-  auto created = runtime::SubmissionCoordinator::create(accepted.configuration,
-                                                        accepted.runtime_policy, std::move(params));
+create_coordinator_from_authority_or_throw(const SubmissionCoordinatorTestAuthority& accepted,
+                                           runtime::FakeSubmissionRuntimeParams params) {
+  auto created = runtime::SubmissionCoordinator::create_submission_coordinator(
+      accepted.configuration, accepted.runtime_policy, std::move(params));
   if (!created) {
     throw std::logic_error{"invalid coordinator fixture: " + created.error().context.field};
   }
@@ -290,7 +300,7 @@ coordinator_from(const TestAuthority& accepted, runtime::FakeSubmissionRuntimePa
 
 // ########################################################################
 // A target names only the configured bot whose genuine BotContext must execute a test submission.
-struct CallbackTarget {
+struct SubmissionCallbackTarget {
   const configuration::StartupConfiguration* configuration;
   const runtime::RuntimePolicy* runtime_policy;
   const organization::BotAttribution* attribution;
@@ -306,20 +316,23 @@ class SubmissionProbeStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
+  // Copy one immutable request and borrow the result slot that outlives canonical dispatch.
   SubmissionProbeStrategy(execution::OrderRequest request,
                           std::optional<execution::SubmitResult>& result) noexcept
       : request_{std::move(request)}, result_{&result} {}
 
   // --------------------------------------------------------
+  // Submit from the first Ready market-data callback selected by the fixture.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext& context) noexcept override {
-    invoke(context);
+    submit_request_once(context);
   }
 
   // --------------------------------------------------------
+  // Submit from the first readiness callback selected by the fixture.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext& context) noexcept override {
-    invoke(context);
+    submit_request_once(context);
   }
 
   // --------------------------------------------------------
@@ -327,12 +340,12 @@ private:
 
   // --------------------------------------------------------
   // Invoke the sole outer submission while canonical dispatch owns the active BotContext.
-  void invoke(runtime::BotContext& context) noexcept {
+  void submit_request_once(runtime::BotContext& context) noexcept {
     if (invoked_) {
       return;
     }
     invoked_ = true;
-    result_->emplace(context.submit(request_));
+    result_->emplace(context.submit_order(request_));
   }
 
   // --------------------------------------------------------
@@ -349,10 +362,12 @@ class IdleStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
+  // Accept an unreachable peer market-data callback without creating submission effects.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext&) noexcept override {}
 
   // --------------------------------------------------------
+  // Accept an unreachable peer state callback without creating submission effects.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext&) noexcept override {}
 
@@ -363,34 +378,38 @@ public:
 
 // --------------------------------------------------------
 // Resolve one immutable configured bot identity without manufacturing private callback authority.
-[[nodiscard]] CallbackTarget binding(const TestAuthority& authority, std::string_view bot) {
+[[nodiscard]] SubmissionCallbackTarget
+find_callback_binding_or_throw(const SubmissionCoordinatorTestAuthority& authority,
+                               std::string_view bot) {
   const auto* const attribution =
-      authority.configuration.organization().find_bot(id<model::BotId>(bot));
+      authority.configuration.organization().find_bot(parse_identifier_or_throw<model::BotId>(bot));
   if (attribution == nullptr) {
     throw std::logic_error{"missing bot in submission-coordinator fixture"};
   }
-  return CallbackTarget{&authority.configuration, &authority.runtime_policy, attribution,
-                        attribution->bot_id};
+  return SubmissionCallbackTarget{&authority.configuration, &authority.runtime_policy, attribution,
+                                  attribution->bot_id};
 }
 
 // --------------------------------------------------------
 // Build the sole supported exact limit/GTC request for the baseline enabled route.
-[[nodiscard]] execution::OrderRequest valid_request() {
-  return execution::OrderRequest{id<model::RouteId>("route.deribit-testnet-btc-perpetual"),
-                                 id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-                                 execution::OrderSide::Buy,
-                                 execution::OrderType::Limit,
-                                 execution::TimeInForce::GoodTilCancelled,
-                                 decimal<model::Price>("100"),
-                                 decimal<model::Quantity>("2")};
+[[nodiscard]] execution::OrderRequest create_valid_order_request_or_throw() {
+  return execution::OrderRequest{
+      parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      execution::OrderSide::Buy,
+      execution::OrderType::Limit,
+      execution::TimeInForce::GoodTilCancelled,
+      parse_decimal_or_throw<model::Price>("100"),
+      parse_decimal_or_throw<model::Quantity>("2")};
 }
 
 // --------------------------------------------------------
 // Execute one synchronous submission from a genuine active BotContext issued by canonical dispatch;
 // the private coordinator remains available only for immutable post-call inspection.
-[[nodiscard]] execution::SubmitResult submit(runtime::SubmissionCoordinator& coordinator,
-                                             const CallbackTarget& callback,
-                                             const execution::OrderRequest& request) {
+[[nodiscard]] execution::SubmitResult
+submit_from_active_context_or_throw(runtime::SubmissionCoordinator& coordinator,
+                                    const SubmissionCallbackTarget& callback,
+                                    const execution::OrderRequest& request) {
   const auto& configuration = *callback.configuration;
   const auto& policy = *callback.runtime_policy;
   trace::RuntimeTraceSink trace_sink{policy};
@@ -422,24 +441,27 @@ public:
   if (metadata == nullptr) {
     throw std::logic_error{"missing metadata in submission BotContext harness"};
   }
-  auto state = market_data::MarketStateMachine::create(policy, source, *metadata);
-  auto bots = runtime::BotRuntime::create(configuration, policy, callback_clock, trace_sink,
-                                          diagnostics, std::move(registrations), {}, &coordinator);
+  auto state =
+      market_data::MarketStateMachine::create_market_state_machine(policy, source, *metadata);
+  auto bots = runtime::BotRuntime::create_bot_runtime(configuration, policy, callback_clock,
+                                                      trace_sink, diagnostics,
+                                                      std::move(registrations), {}, &coordinator);
   if (!state || !bots) {
     throw std::logic_error{"invalid submission BotContext harness"};
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One genuine initializing state callback activates the target context for the synchronous call.
-  auto plan = bots.value().preflight(source.ordinal(), model::TurnOrdinal::initial(), 1U);
-  auto outcome = state.value().initialize(
-      market_data::OwnerMarketTurnContext{model::TurnOrdinal::initial(),
+  auto plan = bots.value().preflight_dispatch_callbacks(source.ordinal(),
+                                                        model::TurnOrdinal::create_initial(), 1U);
+  auto outcome = state.value().initialize_market_state(
+      market_data::OwnerMarketTurnContext{model::TurnOrdinal::create_initial(),
                                           model::ProcessingTimestamp{1'234'567U}},
       trace_sink);
   if (!plan || !outcome) {
     throw std::logic_error{"failed submission BotContext harness preflight"};
   }
-  auto dispatched = bots.value().dispatch(plan.value(), outcome.value());
+  auto dispatched = bots.value().dispatch_callbacks(plan.value(), outcome.value());
   if (!dispatched || !result) {
     throw std::logic_error{"failed submission BotContext harness dispatch"};
   }
@@ -479,11 +501,11 @@ void check_trace(const runtime::SubmissionCoordinator& coordinator,
 // --------------------------------------------------------
 // Count one bounded noncanonical diagnostic kind without assuming unrelated invariant-observation
 // multiplicity in defensive paths.
-[[nodiscard]] std::uint64_t diagnostic_count(const runtime::SubmissionCoordinator& coordinator,
-                                             runtime::SubmissionDiagnosticKind expected) {
+[[nodiscard]] std::uint64_t count_diagnostics(const runtime::SubmissionCoordinator& coordinator,
+                                              runtime::SubmissionDiagnosticKind expected) {
   std::uint64_t count = 0U;
-  for (std::size_t index = 0U; index < coordinator.diagnostics().size(); ++index) {
-    const auto* const record = coordinator.diagnostics().at(index);
+  for (std::size_t index = 0U; index < coordinator.diagnostics().diagnostic_count(); ++index) {
+    const auto* const record = coordinator.diagnostics().diagnostic_at(index);
     if (record != nullptr && record->kind == expected) {
       ++count;
     }
@@ -493,7 +515,8 @@ void check_trace(const runtime::SubmissionCoordinator& coordinator,
 
 // --------------------------------------------------------
 // Derive the reservation identity that must equal a result's creating attempt identity.
-[[nodiscard]] model::ReservationId reservation_id(const execution::SubmitResult& result) {
+[[nodiscard]] model::ReservationId
+derive_reservation_id_or_throw(const execution::SubmitResult& result) {
   if (!result.attempt_id()) {
     throw std::logic_error{"missing attempt on reservation-bearing result"};
   }
@@ -508,15 +531,16 @@ void check_trace(const runtime::SubmissionCoordinator& coordinator,
 
 // --------------------------------------------------------
 // Mint one valid identity once, then close two copies into the finite scripted source alternative.
-[[nodiscard]] model::DeterministicOrderIdSource repeated_order_provider() {
+[[nodiscard]] model::DeterministicOrderIdSource create_repeated_order_id_source_or_throw() {
   model::OrderNamespace::Bytes bytes{};
   bytes.fill(0x51U);
-  auto created = model::DeterministicOrderIdProvider::create(model::OrderNamespace{bytes});
+  auto created = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{bytes});
   if (!created) {
     throw std::logic_error{"failed to create repeated order identity source"};
   }
   auto provider = std::move(created).value();
-  auto identity = provider.next();
+  auto identity = provider.generate_next_order_id();
   if (!identity) {
     throw std::logic_error{"failed to mint repeated order identity"};
   }
@@ -530,38 +554,44 @@ TEST_CASE("submission coordinator rejects route, canonical, and risk failures in
           "[runtime][submission][coordinator][rejection][m3]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove callback attribution cannot borrow an otherwise valid route owned by a peer firm.
   SECTION("route ownership comes only from callback attribution") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(accepted, submission_params(accepted.configuration));
-    const auto peer = binding(accepted, "bot.subsidiary-reference");
-    const auto result = submit(*coordinator, peer, valid_request());
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration));
+    const auto peer = find_callback_binding_or_throw(accepted, "bot.subsidiary-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, peer,
+                                                            create_valid_order_request_or_throw());
 
     check_rejection(result, execution::SubmissionStage::Route,
                     execution::SubmissionReason::RouteNotOwned);
     REQUIRE(result.attempt_id());
     CHECK_FALSE(result.order_id());
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     CHECK(coordinator->encoder().invocations_consumed() == 0U);
     check_trace(*coordinator, {trace::SubmissionTraceEventKind::Attempt,
                                trace::SubmissionTraceEventKind::SubmissionCompleted});
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove canonical validation rejects zero quantity before consuming identity or risk capacity.
   SECTION("invalid canonical quantity is rejected before identity and risk") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(accepted, submission_params(accepted.configuration));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    auto request = valid_request();
-    request.quantity = decimal<model::Quantity>("0");
-    const auto result = submit(*coordinator, callback, request);
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    auto request = create_valid_order_request_or_throw();
+    request.quantity = parse_decimal_or_throw<model::Quantity>("0");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback, request);
 
     check_rejection(result, execution::SubmissionStage::CanonicalValidation,
                     execution::SubmissionReason::QuantityNotPositive);
     REQUIRE(result.attempt_id());
     CHECK_FALSE(result.order_id());
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     CHECK(coordinator->encoder().invocations_consumed() == 0U);
     check_trace(*coordinator, {trace::SubmissionTraceEventKind::Attempt,
                                trace::SubmissionTraceEventKind::RouteAuthorized,
@@ -569,15 +599,18 @@ TEST_CASE("submission coordinator rejects route, canonical, and risk failures in
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove the first fixed limit wins with exact attempt identity and immutable risk evidence.
   SECTION("first fixed risk limit rejection carries identity and exact evidence") {
-    const auto accepted = authority();
-    auto params = submission_params(accepted.configuration);
+    const auto accepted = create_test_authority_or_throw();
+    auto params = create_submission_params_or_throw(accepted.configuration);
     for (auto& row : params.risk_policy.limit_sets) {
-      row.maximum_single_order_quantity = decimal<model::Quantity>("1");
+      row.maximum_single_order_quantity = parse_decimal_or_throw<model::Quantity>("1");
     }
-    auto coordinator = coordinator_from(accepted, std::move(params));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    auto coordinator = create_coordinator_from_authority_or_throw(accepted, std::move(params));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     check_rejection(result, execution::SubmissionStage::Risk,
                     execution::SubmissionReason::SingleOrderQuantityExceeded);
@@ -585,10 +618,11 @@ TEST_CASE("submission coordinator rejects route, canonical, and risk failures in
     REQUIRE(result.order_id());
     REQUIRE(result.risk_evidence());
     CHECK(result.risk_evidence()->scope() == risk::RiskScopeKind::Bot);
-    CHECK(result.risk_evidence()->observed_quantity() == decimal<model::Quantity>("2"));
-    CHECK(result.risk_evidence()->quantity_limit() == decimal<model::Quantity>("1"));
+    CHECK(result.risk_evidence()->observed_quantity() ==
+          parse_decimal_or_throw<model::Quantity>("2"));
+    CHECK(result.risk_evidence()->quantity_limit() == parse_decimal_or_throw<model::Quantity>("1"));
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     check_trace(*coordinator, {trace::SubmissionTraceEventKind::Attempt,
                                trace::SubmissionTraceEventKind::RouteAuthorized,
                                trace::SubmissionTraceEventKind::CanonicalValidated,
@@ -606,35 +640,43 @@ TEST_CASE("submission coordinator rolls back every OMS non-admission",
           "[runtime][submission][coordinator][oms][release][m3]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove duplicate identity precedence wins before an independently full OMS table.
   SECTION("complete duplicate identity wins before OMS capacity") {
-    const auto accepted = authority();
-    const auto selected = capacities(2U, 2U, 2U, 2U, 22U, 8U);
-    auto coordinator = coordinator_from(
-        accepted,
-        submission_params(accepted.configuration, selected, execution::FakeEncodingAction::Encode,
-                          execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                          repeated_order_provider()));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto accepted = create_test_authority_or_throw();
+    const auto selected = create_submission_capacities(2U, 2U, 2U, 2U, 22U, 8U);
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(
+                      accepted.configuration, selected, execution::FakeEncodingAction::Encode,
+                      execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
+                      create_repeated_order_id_source_or_throw()));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
 
-    const auto first = submit(*coordinator, callback, valid_request());
+    const auto first = submit_from_active_context_or_throw(*coordinator, callback,
+                                                           create_valid_order_request_or_throw());
     REQUIRE(first.disposition() == execution::SubmitDisposition::WriteInitiated);
-    const auto duplicate = submit(*coordinator, callback, valid_request());
+    const auto duplicate = submit_from_active_context_or_throw(
+        *coordinator, callback, create_valid_order_request_or_throw());
     check_rejection(duplicate, execution::SubmissionStage::Oms,
                     execution::SubmissionReason::DuplicateOrderIdentity);
     REQUIRE(first.order_id());
     REQUIRE(duplicate.order_id());
     CHECK(*first.order_id() == *duplicate.order_id());
-    CHECK(coordinator->outbound_oms().size() == 1U);
-    REQUIRE(coordinator->outbound_oms().find(*first.order_id()) != nullptr);
-    CHECK(coordinator->outbound_oms().find(*first.order_id())->state() ==
+    CHECK(coordinator->outbound_oms().order_count() == 1U);
+    REQUIRE(coordinator->outbound_oms().find_order(*first.order_id()) != nullptr);
+    CHECK(coordinator->outbound_oms().find_order(*first.order_id())->state() ==
           oms::OutboundOrderState::WriteInitiated);
     CHECK(coordinator->reservations().held_reservation_count() == 1U);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(first)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(first))->state ==
-          risk::ReservationState::Held);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(duplicate)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(duplicate))->state ==
-          risk::ReservationState::Released);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(first)) !=
+            nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(first))
+              ->state == risk::ReservationState::Held);
+    REQUIRE(coordinator->reservations().find_reservation(
+                derive_reservation_id_or_throw(duplicate)) != nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(duplicate))
+              ->state == risk::ReservationState::Released);
     CHECK(coordinator->encoder().invocations_consumed() == 1U);
     CHECK(coordinator->initiator().invocations_consumed() == 1U);
     check_trace(*coordinator,
@@ -650,27 +692,33 @@ TEST_CASE("submission coordinator rolls back every OMS non-admission",
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove a later unique identity reaches the retained OMS capacity boundary.
   SECTION("retained OMS history makes the next unique order hit table capacity") {
-    const auto accepted = authority();
-    const auto selected = capacities(2U, 2U, 1U, 1U, 22U, 8U);
-    auto coordinator = coordinator_from(
-        accepted,
-        submission_params(accepted.configuration, selected, execution::FakeEncodingAction::Encode,
-                          execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto accepted = create_test_authority_or_throw();
+    const auto selected = create_submission_capacities(2U, 2U, 1U, 1U, 22U, 8U);
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(
+                      accepted.configuration, selected, execution::FakeEncodingAction::Encode,
+                      execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
 
-    const auto first = submit(*coordinator, callback, valid_request());
+    const auto first = submit_from_active_context_or_throw(*coordinator, callback,
+                                                           create_valid_order_request_or_throw());
     check_rejection(first, execution::SubmissionStage::Initiation,
                     execution::SubmissionReason::InitiationDefinitelyFailed);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    const auto full = submit(*coordinator, callback, valid_request());
+    const auto full = submit_from_active_context_or_throw(*coordinator, callback,
+                                                          create_valid_order_request_or_throw());
     check_rejection(full, execution::SubmissionStage::Oms,
                     execution::SubmissionReason::OmsCapacityExceeded);
-    CHECK(coordinator->outbound_oms().size() == 1U);
+    CHECK(coordinator->outbound_oms().order_count() == 1U);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(full)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(full))->state ==
-          risk::ReservationState::Released);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(full)) !=
+            nullptr);
+    CHECK(
+        coordinator->reservations().find_reservation(derive_reservation_id_or_throw(full))->state ==
+        risk::ReservationState::Released);
     CHECK(coordinator->encoder().invocations_consumed() == 1U);
     CHECK(coordinator->initiator().invocations_consumed() == 1U);
     check_trace(*coordinator,
@@ -695,23 +743,29 @@ TEST_CASE("submission coordinator distinguishes every fake outcome boundary",
           "[runtime][submission][coordinator][fake][outcome][m3]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove a pre-acceptance encoding failure releases its reservation once and remains definite.
   SECTION("scripted encoding failure is definite and releases exactly once") {
-    const auto accepted = authority();
-    auto coordinator =
-        coordinator_from(accepted, submission_params(accepted.configuration, capacities(),
-                                                     execution::FakeEncodingAction::Fail));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Fail));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     check_rejection(result, execution::SubmissionStage::Encoding,
                     execution::SubmissionReason::EncodingFailed);
     REQUIRE(result.order_id());
-    REQUIRE(coordinator->outbound_oms().find(*result.order_id()) != nullptr);
-    CHECK(coordinator->outbound_oms().find(*result.order_id())->state() ==
+    REQUIRE(coordinator->outbound_oms().find_order(*result.order_id()) != nullptr);
+    CHECK(coordinator->outbound_oms().find_order(*result.order_id())->state() ==
           oms::OutboundOrderState::LocallyFailed);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(result)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(result))->state ==
-          risk::ReservationState::Released);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(result)) !=
+            nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(result))
+              ->state == risk::ReservationState::Released);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
     CHECK(coordinator->initiator().invocations_consumed() == 0U);
     CHECK(coordinator->diagnostics().accepted_count() == 1U);
@@ -727,24 +781,30 @@ TEST_CASE("submission coordinator distinguishes every fake outcome boundary",
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove definite initiation failure before acceptance releases once without uncertain exposure.
   SECTION("definite pre-acceptance initiation failure releases exactly once") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(
-        accepted, submission_params(
-                      accepted.configuration, capacities(), execution::FakeEncodingAction::Encode,
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(
+                      accepted.configuration, create_submission_capacities(),
+                      execution::FakeEncodingAction::Encode,
                       execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     check_rejection(result, execution::SubmissionStage::Initiation,
                     execution::SubmissionReason::InitiationDefinitelyFailed);
     REQUIRE(result.order_id());
-    REQUIRE(coordinator->outbound_oms().find(*result.order_id()) != nullptr);
-    CHECK(coordinator->outbound_oms().find(*result.order_id())->state() ==
+    REQUIRE(coordinator->outbound_oms().find_order(*result.order_id()) != nullptr);
+    CHECK(coordinator->outbound_oms().find_order(*result.order_id())->state() ==
           oms::OutboundOrderState::LocallyFailed);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(result)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(result))->state ==
-          risk::ReservationState::Released);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(result)) !=
+            nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(result))
+              ->state == risk::ReservationState::Released);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
     CHECK(coordinator->initiator().accepted_writes().empty());
     CHECK(coordinator->diagnostics().accepted_count() == 1U);
@@ -761,25 +821,31 @@ TEST_CASE("submission coordinator distinguishes every fake outcome boundary",
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove lost post-acceptance outcome retains conservative exposure and is never retried locally.
   SECTION("accepted then outcome lost is uncertain, retained, and never retried") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedThenOutcomeLost));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(
+                      accepted.configuration, create_submission_capacities(),
+                      execution::FakeEncodingAction::Encode,
+                      execution::FakeInitiationOutcome::AcceptedThenOutcomeLost));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     CHECK(result.disposition() == execution::SubmitDisposition::SubmissionUnknown);
     CHECK(result.stage() == execution::SubmissionStage::Initiation);
     CHECK(result.reason() == execution::SubmissionReason::InitiationOutcomeUnknown);
     REQUIRE(result.order_id());
-    REQUIRE(coordinator->outbound_oms().find(*result.order_id()) != nullptr);
-    CHECK(coordinator->outbound_oms().find(*result.order_id())->state() ==
+    REQUIRE(coordinator->outbound_oms().find_order(*result.order_id()) != nullptr);
+    CHECK(coordinator->outbound_oms().find_order(*result.order_id())->state() ==
           oms::OutboundOrderState::SubmissionUnknown);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(result)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(result))->state ==
-          risk::ReservationState::Held);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(result)) !=
+            nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(result))
+              ->state == risk::ReservationState::Held);
     CHECK(coordinator->reservations().held_reservation_count() == 1U);
     CHECK(coordinator->encoder().invocations_consumed() == 1U);
     CHECK(coordinator->initiator().invocations_consumed() == 1U);
@@ -798,29 +864,35 @@ TEST_CASE("submission coordinator distinguishes every fake outcome boundary",
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove successful fake initiation retains exact attribution without implying acknowledgement.
   SECTION("successful local write initiation retains exact runtime attribution but is never ack") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(accepted, submission_params(accepted.configuration));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     CHECK(result.disposition() == execution::SubmitDisposition::WriteInitiated);
     CHECK(result.stage() == execution::SubmissionStage::Initiation);
     CHECK(result.reason() == execution::SubmissionReason::None);
     REQUIRE(result.order_id());
-    const auto* const order = coordinator->outbound_oms().find(*result.order_id());
+    const auto* const order = coordinator->outbound_oms().find_order(*result.order_id());
     REQUIRE(order != nullptr);
     CHECK(order->state() == oms::OutboundOrderState::WriteInitiated);
     CHECK(order->provenance().firm_id == callback.attribution->firm_id);
     CHECK(order->provenance().desk_id == callback.attribution->desk_id);
     CHECK(order->provenance().bot_id == callback.attribution->bot_id);
     CHECK(order->provenance().strategy_id == callback.attribution->strategy_id);
-    CHECK(order->economics().price == valid_request().price);
-    CHECK(order->economics().quantity == valid_request().quantity);
+    CHECK(order->economics().price == create_valid_order_request_or_throw().price);
+    CHECK(order->economics().quantity == create_valid_order_request_or_throw().quantity);
     CHECK(coordinator->reservations().held_reservation_count() == 1U);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(result)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(result))->state ==
-          risk::ReservationState::Held);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(result)) !=
+            nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(result))
+              ->state == risk::ReservationState::Held);
     REQUIRE(coordinator->initiator().accepted_writes().size() == 1U);
     const auto& completed = coordinator->trace_sink().records().back();
     CHECK(completed.fields().context.attribution.firm_id == callback.attribution->firm_id);
@@ -843,33 +915,36 @@ TEST_CASE("submission coordinator distinguishes every fake outcome boundary",
 // Missing and invalid fixed risk policy must prevent publication of any submission-capable stack.
 TEST_CASE("submission coordinator construction fails closed without valid complete risk policy",
           "[runtime][submission][coordinator][policy][m3]") {
-  const auto accepted = authority();
+  const auto accepted = create_test_authority_or_throw();
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove an incomplete seven-scope policy prevents construction before submission is reachable.
   SECTION("missing one required scope is incomplete policy") {
-    auto params = submission_params(accepted.configuration);
+    auto params = create_submission_params_or_throw(accepted.configuration);
     params.risk_policy.limit_sets.pop_back();
-    const auto created = runtime::SubmissionCoordinator::create(
+    const auto created = runtime::SubmissionCoordinator::create_submission_coordinator(
         accepted.configuration, accepted.runtime_policy, std::move(params));
     REQUIRE_FALSE(created);
     CHECK(created.error().code == model::DomainErrorCode::InvalidRiskPolicy);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove zero capacity remains invalid rather than acquiring an implicit unlimited meaning.
   SECTION("zero never means unlimited") {
-    auto params = submission_params(accepted.configuration);
+    auto params = create_submission_params_or_throw(accepted.configuration);
     params.risk_policy.limit_sets.front().maximum_open_order_count = 0U;
-    const auto created = runtime::SubmissionCoordinator::create(
+    const auto created = runtime::SubmissionCoordinator::create_submission_coordinator(
         accepted.configuration, accepted.runtime_policy, std::move(params));
     REQUIRE_FALSE(created);
     CHECK(created.error().code == model::DomainErrorCode::InvalidRiskPolicy);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove construction requires an explicit submission measurement clock dependency.
   SECTION("missing submission measurement clock also prevents construction") {
-    auto params = submission_params(accepted.configuration);
+    auto params = create_submission_params_or_throw(accepted.configuration);
     params.measurement_clock.reset();
-    const auto created = runtime::SubmissionCoordinator::create(
+    const auto created = runtime::SubmissionCoordinator::create_submission_coordinator(
         accepted.configuration, accepted.runtime_policy, std::move(params));
     REQUIRE_FALSE(created);
     CHECK(created.error().code == model::DomainErrorCode::InvalidRelationship);
@@ -884,48 +959,55 @@ TEST_CASE("submission coordinator exhausts every bounded identity and evidence a
           "[runtime][submission][coordinator][capacity][exhaustion][m3]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove exhausted attempt identity rejects without advancing trace or owner-local state.
   SECTION("submission attempt exhaustion consumes no new attempt or trace") {
-    const auto accepted = authority();
-    const auto selected = capacities(1U, 1U, 1U, 1U, 11U, 4U);
-    auto coordinator =
-        coordinator_from(accepted, submission_params(accepted.configuration, selected));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    auto request = valid_request();
-    request.route_id = id<model::RouteId>("route.missing");
-    const auto first = submit(*coordinator, callback, request);
+    const auto accepted = create_test_authority_or_throw();
+    const auto selected = create_submission_capacities(1U, 1U, 1U, 1U, 11U, 4U);
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration, selected));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    auto request = create_valid_order_request_or_throw();
+    request.route_id = parse_identifier_or_throw<model::RouteId>("route.missing");
+    const auto first = submit_from_active_context_or_throw(*coordinator, callback, request);
     check_rejection(first, execution::SubmissionStage::Route,
                     execution::SubmissionReason::RouteNotFound);
-    const auto before = coordinator->trace_sink().size();
-    const auto exhausted = submit(*coordinator, callback, request);
+    const auto before = coordinator->trace_sink().record_count();
+    const auto exhausted = submit_from_active_context_or_throw(*coordinator, callback, request);
     check_rejection(exhausted, execution::SubmissionStage::Evidence,
                     execution::SubmissionReason::SubmissionAttemptExhausted);
     CHECK_FALSE(exhausted.attempt_id());
     CHECK_FALSE(exhausted.order_id());
     CHECK_FALSE(exhausted.local_path_nanoseconds());
-    CHECK(coordinator->trace_sink().size() == before);
+    CHECK(coordinator->trace_sink().record_count() == before);
     CHECK(coordinator->diagnostics().accepted_count() == 0U);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove order counter exhaustion occurs after validation but before any risk reservation.
   SECTION("order counter exhaustion occurs after validation and before risk") {
-    const auto accepted = authority();
-    const auto selected = capacities(2U, 2U, 2U, 2U, 22U, 8U);
-    auto coordinator = coordinator_from(
+    const auto accepted = create_test_authority_or_throw();
+    const auto selected = create_submission_capacities(2U, 2U, 2U, 2U, 22U, 8U);
+    auto coordinator = create_coordinator_from_authority_or_throw(
         accepted,
-        submission_params(accepted.configuration, selected, execution::FakeEncodingAction::Encode,
-                          execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, {}, {},
-                          order_provider(0x63U, std::numeric_limits<std::uint64_t>::max())));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto first = submit(*coordinator, callback, valid_request());
+        create_submission_params_or_throw(
+            accepted.configuration, selected, execution::FakeEncodingAction::Encode,
+            execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, {}, {},
+            create_order_id_source_or_throw(0x63U, std::numeric_limits<std::uint64_t>::max())));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto first = submit_from_active_context_or_throw(*coordinator, callback,
+                                                           create_valid_order_request_or_throw());
     check_rejection(first, execution::SubmissionStage::Initiation,
                     execution::SubmissionReason::InitiationDefinitelyFailed);
-    const auto exhausted = submit(*coordinator, callback, valid_request());
+    const auto exhausted = submit_from_active_context_or_throw(
+        *coordinator, callback, create_valid_order_request_or_throw());
     check_rejection(exhausted, execution::SubmissionStage::Identity,
                     execution::SubmissionReason::OrderIdentityExhausted);
     REQUIRE(exhausted.attempt_id());
     CHECK_FALSE(exhausted.order_id());
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    CHECK(coordinator->outbound_oms().size() == 1U);
+    CHECK(coordinator->outbound_oms().order_count() == 1U);
     check_trace(*coordinator,
                 {trace::SubmissionTraceEventKind::Attempt,
                  trace::SubmissionTraceEventKind::RouteAuthorized,
@@ -935,32 +1017,35 @@ TEST_CASE("submission coordinator exhausts every bounded identity and evidence a
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove evidence preflight failure leaves route, risk, OMS, and trace state untouched.
   SECTION("evidence preflight rejects before route, risk, and trace mutation") {
-    const auto accepted = authority();
-    const auto selected = capacities(2U, 2U, 2U, 2U, 11U, 8U);
-    auto coordinator =
-        coordinator_from(accepted, submission_params(accepted.configuration, selected));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    auto request = valid_request();
-    request.route_id = id<model::RouteId>("route.missing");
-    const auto first = submit(*coordinator, callback, request);
+    const auto accepted = create_test_authority_or_throw();
+    const auto selected = create_submission_capacities(2U, 2U, 2U, 2U, 11U, 8U);
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration, selected));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    auto request = create_valid_order_request_or_throw();
+    request.route_id = parse_identifier_or_throw<model::RouteId>("route.missing");
+    const auto first = submit_from_active_context_or_throw(*coordinator, callback, request);
     check_rejection(first, execution::SubmissionStage::Route,
                     execution::SubmissionReason::RouteNotFound);
-    CHECK(coordinator->trace_sink().size() == 2U);
-    const auto exhausted = submit(*coordinator, callback, valid_request());
+    CHECK(coordinator->trace_sink().record_count() == 2U);
+    const auto exhausted = submit_from_active_context_or_throw(
+        *coordinator, callback, create_valid_order_request_or_throw());
     check_rejection(exhausted, execution::SubmissionStage::Evidence,
                     execution::SubmissionReason::EvidenceCapacityExceeded);
     REQUIRE(exhausted.attempt_id());
     CHECK(exhausted.attempt_id()->value() == 2U);
     CHECK_FALSE(exhausted.order_id());
-    CHECK(coordinator->trace_sink().size() == 2U);
+    CHECK(coordinator->trace_sink().record_count() == 2U);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     CHECK(coordinator->encoder().invocations_consumed() == 0U);
     CHECK(coordinator->diagnostics().accepted_count() == 1U);
     CHECK_FALSE(exhausted.local_path_nanoseconds());
-    REQUIRE(coordinator->diagnostics().at(0U) != nullptr);
-    CHECK(coordinator->diagnostics().at(0U)->kind ==
+    REQUIRE(coordinator->diagnostics().diagnostic_at(0U) != nullptr);
+    CHECK(coordinator->diagnostics().diagnostic_at(0U)->kind ==
           runtime::SubmissionDiagnosticKind::EvidenceCapacityExceeded);
   }
 
@@ -974,20 +1059,23 @@ TEST_CASE("submission coordinator measures only valid owner-authorized local pat
           "[runtime][submission][coordinator][measurement][m3]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove a definitive route rejection records its assigned completion endpoint and no later stage.
   SECTION("definitive route rejection ends after its canonical completion") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{100U, 145U});
     auto* const measurement_access = measurement.get();
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                                    std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    auto request = valid_request();
-    request.route_id = id<model::RouteId>("route.missing");
-    const auto result = submit(*coordinator, callback, request);
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Encode,
+                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                          {}, {}, std::nullopt, std::move(measurement)));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    auto request = create_valid_order_request_or_throw();
+    request.route_id = parse_identifier_or_throw<model::RouteId>("route.missing");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback, request);
 
     check_rejection(result, execution::SubmissionStage::Route,
                     execution::SubmissionReason::RouteNotFound);
@@ -997,18 +1085,22 @@ TEST_CASE("submission coordinator measures only valid owner-authorized local pat
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove definite fake failure records no post-acceptance timing endpoint.
   SECTION("definite fake failure consumes no premature acceptance endpoint") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{200U, 260U});
     auto* const measurement_access = measurement.get();
-    auto coordinator = coordinator_from(
-        accepted, submission_params(
-                      accepted.configuration, capacities(), execution::FakeEncodingAction::Encode,
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(
+                      accepted.configuration, create_submission_capacities(),
+                      execution::FakeEncodingAction::Encode,
                       execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, {}, {},
                       std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     check_rejection(result, execution::SubmissionStage::Initiation,
                     execution::SubmissionReason::InitiationDefinitelyFailed);
@@ -1017,18 +1109,22 @@ TEST_CASE("submission coordinator measures only valid owner-authorized local pat
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove successful acceptance ends timing at the captured fake initiation outcome.
   SECTION("accepted success ends at the captured fake outcome") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{300U, 325U});
     auto* const measurement_access = measurement.get();
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                                    std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Encode,
+                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                          {}, {}, std::nullopt, std::move(measurement)));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     CHECK(result.disposition() == execution::SubmitDisposition::WriteInitiated);
     CHECK(result.local_path_nanoseconds() == 25U);
@@ -1036,22 +1132,26 @@ TEST_CASE("submission coordinator measures only valid owner-authorized local pat
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove a regressing endpoint omits duration and emits one bounded diagnostic after preflight.
   SECTION("regression yields absence and one post-preflight diagnostic") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{500U, 499U});
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                                    std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Encode,
+                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                          {}, {}, std::nullopt, std::move(measurement)));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     CHECK(result.disposition() == execution::SubmitDisposition::WriteInitiated);
     CHECK_FALSE(result.local_path_nanoseconds());
     REQUIRE(coordinator->diagnostics().accepted_count() == 1U);
-    const auto* const diagnostic = coordinator->diagnostics().at(0U);
+    const auto* const diagnostic = coordinator->diagnostics().diagnostic_at(0U);
     REQUIRE(diagnostic != nullptr);
     CHECK(diagnostic->kind == runtime::SubmissionDiagnosticKind::MeasurementUnavailable);
     CHECK(diagnostic->fields.stage == execution::SubmissionStage::Initiation);
@@ -1059,23 +1159,27 @@ TEST_CASE("submission coordinator measures only valid owner-authorized local pat
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove an unavailable entry omits duration and emits one bounded diagnostic after preflight.
   SECTION("unavailable entry yields absence and one post-preflight diagnostic") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{std::nullopt, 700U});
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                                    std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    const auto result = submit(*coordinator, callback, valid_request());
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Encode,
+                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                          {}, {}, std::nullopt, std::move(measurement)));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
 
     CHECK(result.disposition() == execution::SubmitDisposition::WriteInitiated);
     CHECK_FALSE(result.local_path_nanoseconds());
     REQUIRE(coordinator->diagnostics().accepted_count() == 1U);
-    REQUIRE(coordinator->diagnostics().at(0U) != nullptr);
-    CHECK(coordinator->diagnostics().at(0U)->kind ==
+    REQUIRE(coordinator->diagnostics().diagnostic_at(0U) != nullptr);
+    CHECK(coordinator->diagnostics().diagnostic_at(0U)->kind ==
           runtime::SubmissionDiagnosticKind::MeasurementUnavailable);
   }
 
@@ -1087,32 +1191,34 @@ TEST_CASE("submission coordinator measures only valid owner-authorized local pat
 // a second order path.
 TEST_CASE("submission coordinator rejects recursive submission without a second attempt",
           "[runtime][submission][coordinator][reentry][m3]") {
-  const auto accepted = authority();
-  const auto selected = capacities(2U, 2U, 2U, 2U, 22U, 8U);
-  auto coordinator = coordinator_from(
-      accepted,
-      submission_params(accepted.configuration, selected, execution::FakeEncodingAction::Encode,
-                        execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                        order_provider(0x74U)));
-  const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-  auto nested_request = valid_request();
-  nested_request.quantity = decimal<model::Quantity>("3");
+  const auto accepted = create_test_authority_or_throw();
+  const auto selected = create_submission_capacities(2U, 2U, 2U, 2U, 22U, 8U);
+  auto coordinator = create_coordinator_from_authority_or_throw(
+      accepted, create_submission_params_or_throw(
+                    accepted.configuration, selected, execution::FakeEncodingAction::Encode,
+                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
+                    create_order_id_source_or_throw(0x74U)));
+  const auto callback =
+      find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+  auto nested_request = create_valid_order_request_or_throw();
+  nested_request.quantity = parse_decimal_or_throw<model::Quantity>("3");
   CHECK_FALSE(coordinator->arm_reentry_probe_for_test(nested_request, 0U));
   CHECK_FALSE(coordinator->arm_reentry_probe_for_test(nested_request, 4U));
   REQUIRE(coordinator->arm_reentry_probe_for_test(nested_request, 3U));
   CHECK_FALSE(coordinator->arm_reentry_probe_for_test(nested_request, 1U));
 
-  const auto outer = submit(*coordinator, callback, valid_request());
+  const auto outer = submit_from_active_context_or_throw(*coordinator, callback,
+                                                         create_valid_order_request_or_throw());
   REQUIRE(outer.disposition() == execution::SubmitDisposition::WriteInitiated);
-  CHECK(coordinator->outbound_oms().size() == 1U);
+  CHECK(coordinator->outbound_oms().order_count() == 1U);
   CHECK(coordinator->reservations().held_reservation_count() == 1U);
   CHECK(coordinator->encoder().invocations_consumed() == 1U);
   CHECK(coordinator->initiator().invocations_consumed() == 1U);
   CHECK(coordinator->diagnostics().accepted_count() == 1U);
-  REQUIRE(coordinator->diagnostics().at(0U) != nullptr);
-  CHECK(coordinator->diagnostics().at(0U)->kind ==
+  REQUIRE(coordinator->diagnostics().diagnostic_at(0U) != nullptr);
+  CHECK(coordinator->diagnostics().diagnostic_at(0U)->kind ==
         runtime::SubmissionDiagnosticKind::ReentryDetected);
-  CHECK(coordinator->diagnostics().at(0U)->fields.occurrence_count == 3U);
+  CHECK(coordinator->diagnostics().diagnostic_at(0U)->fields.occurrence_count == 3U);
   const auto reentry =
       std::find_if(coordinator->trace_sink().records().begin(),
                    coordinator->trace_sink().records().end(), [](const auto& record) {
@@ -1146,12 +1252,15 @@ TEST_CASE("submission coordinator contains every injected canonical append fault
           "[runtime][submission][coordinator][evidence-fault][m3]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove first re-entry evidence exhaustion rejects before local identities are assigned.
   SECTION("first re-entry evidence failure stops before local identity") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(accepted, submission_params(accepted.configuration));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
-    auto nested_request = valid_request();
-    nested_request.quantity = decimal<model::Quantity>("3");
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
+    auto nested_request = create_valid_order_request_or_throw();
+    nested_request.quantity = parse_decimal_or_throw<model::Quantity>("3");
     REQUIRE(coordinator->arm_reentry_probe_for_test(nested_request, 1U));
     CHECK_FALSE(coordinator->arm_trace_append_fault_for_test(
         static_cast<runtime::TraceAppendFaultPointForTest>(0U)));
@@ -1160,13 +1269,14 @@ TEST_CASE("submission coordinator contains every injected canonical append fault
     CHECK_FALSE(coordinator->arm_trace_append_fault_for_test(
         runtime::TraceAppendFaultPointForTest::RiskReservedBeforeOms));
 
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
     check_rejection(result, execution::SubmissionStage::Internal,
                     execution::SubmissionReason::SubmissionRuntimeFaulted);
     REQUIRE(result.attempt_id());
     CHECK(result.attempt_id()->value() == 1U);
     CHECK_FALSE(result.order_id());
-    CHECK(coordinator->runtime_faulted());
+    CHECK(coordinator->is_runtime_faulted());
     CHECK_FALSE(coordinator->arm_trace_append_fault_for_test(
         runtime::TraceAppendFaultPointForTest::RiskReservedBeforeOms));
     REQUIRE(coordinator->terminal_error());
@@ -1175,102 +1285,115 @@ TEST_CASE("submission coordinator contains every injected canonical append fault
     check_trace(*coordinator, {trace::SubmissionTraceEventKind::Attempt,
                                trace::SubmissionTraceEventKind::RouteAuthorized,
                                trace::SubmissionTraceEventKind::CanonicalValidated});
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
     CHECK(coordinator->encoder().invocations_consumed() == 0U);
     CHECK(coordinator->initiator().invocations_consumed() == 0U);
     CHECK(coordinator->initiator().accepted_writes().empty());
-    CHECK(diagnostic_count(*coordinator,
-                           runtime::SubmissionDiagnosticKind::InternalInvariantFailure) >= 1U);
-    CHECK(diagnostic_count(*coordinator, runtime::SubmissionDiagnosticKind::ReentryDetected) == 1U);
-    CHECK(diagnostic_count(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
+    CHECK(count_diagnostics(*coordinator,
+                            runtime::SubmissionDiagnosticKind::InternalInvariantFailure) >= 1U);
+    CHECK(count_diagnostics(*coordinator, runtime::SubmissionDiagnosticKind::ReentryDetected) ==
+          1U);
+    CHECK(count_diagnostics(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
           0U);
-    CHECK(diagnostic_count(*coordinator,
-                           runtime::SubmissionDiagnosticKind::UnknownExposureRetained) == 0U);
+    CHECK(count_diagnostics(*coordinator,
+                            runtime::SubmissionDiagnosticKind::UnknownExposureRetained) == 0U);
 
-    const auto trace_size = coordinator->trace_sink().size();
-    const auto diagnostic_size = coordinator->diagnostics().size();
-    const auto later = submit(*coordinator, callback, valid_request());
+    const auto trace_size = coordinator->trace_sink().record_count();
+    const auto diagnostic_size = coordinator->diagnostics().diagnostic_count();
+    const auto later = submit_from_active_context_or_throw(*coordinator, callback,
+                                                           create_valid_order_request_or_throw());
     check_rejection(later, execution::SubmissionStage::Internal,
                     execution::SubmissionReason::SubmissionRuntimeFaulted);
     CHECK_FALSE(later.attempt_id());
     CHECK_FALSE(later.order_id());
-    CHECK(coordinator->trace_sink().size() == trace_size);
-    CHECK(coordinator->diagnostics().size() == diagnostic_size);
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->trace_sink().record_count() == trace_size);
+    CHECK(coordinator->diagnostics().diagnostic_count() == diagnostic_size);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     CHECK(coordinator->encoder().invocations_consumed() == 0U);
     CHECK(coordinator->initiator().invocations_consumed() == 0U);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove post-reservation evidence exhaustion releases the reservation once before OMS admission.
   SECTION("RiskReserved evidence failure releases exactly once before OMS") {
-    const auto accepted = authority();
-    auto coordinator = coordinator_from(accepted, submission_params(accepted.configuration));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
+    const auto accepted = create_test_authority_or_throw();
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted, create_submission_params_or_throw(accepted.configuration));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
     REQUIRE(coordinator->arm_trace_append_fault_for_test(
         runtime::TraceAppendFaultPointForTest::RiskReservedBeforeOms));
 
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
     check_rejection(result, execution::SubmissionStage::Internal,
                     execution::SubmissionReason::SubmissionRuntimeFaulted);
     REQUIRE(result.attempt_id());
     REQUIRE(result.order_id());
-    CHECK(coordinator->runtime_faulted());
+    CHECK(coordinator->is_runtime_faulted());
     check_trace(*coordinator, {trace::SubmissionTraceEventKind::Attempt,
                                trace::SubmissionTraceEventKind::RouteAuthorized,
                                trace::SubmissionTraceEventKind::CanonicalValidated,
                                trace::SubmissionTraceEventKind::IdentityGenerated});
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
     const auto* const released =
-        coordinator->reservations().find_reservation(reservation_id(result));
+        coordinator->reservations().find_reservation(derive_reservation_id_or_throw(result));
     REQUIRE(released != nullptr);
     CHECK(released->state == risk::ReservationState::Released);
-    CHECK(coordinator->outbound_oms().size() == 0U);
+    CHECK(coordinator->outbound_oms().order_count() == 0U);
     CHECK(coordinator->encoder().invocations_consumed() == 0U);
     CHECK(coordinator->initiator().invocations_consumed() == 0U);
-    CHECK(diagnostic_count(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
+    CHECK(count_diagnostics(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
           1U);
-    CHECK(diagnostic_count(*coordinator,
-                           runtime::SubmissionDiagnosticKind::UnknownExposureRetained) == 0U);
+    CHECK(count_diagnostics(*coordinator,
+                            runtime::SubmissionDiagnosticKind::UnknownExposureRetained) == 0U);
 
-    const auto trace_size = coordinator->trace_sink().size();
-    const auto diagnostic_size = coordinator->diagnostics().size();
-    const auto later = submit(*coordinator, callback, valid_request());
+    const auto trace_size = coordinator->trace_sink().record_count();
+    const auto diagnostic_size = coordinator->diagnostics().diagnostic_count();
+    const auto later = submit_from_active_context_or_throw(*coordinator, callback,
+                                                           create_valid_order_request_or_throw());
     check_rejection(later, execution::SubmissionStage::Internal,
                     execution::SubmissionReason::SubmissionRuntimeFaulted);
     CHECK_FALSE(later.attempt_id());
-    CHECK(coordinator->trace_sink().size() == trace_size);
-    CHECK(coordinator->diagnostics().size() == diagnostic_size);
+    CHECK(coordinator->trace_sink().record_count() == trace_size);
+    CHECK(coordinator->diagnostics().diagnostic_count() == diagnostic_size);
     CHECK(coordinator->reservations().held_reservation_count() == 0U);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove post-initiation evidence exhaustion conservatively downgrades the authoritative OMS row.
   SECTION("WriteInitiated evidence failure downgrades authoritative OMS uncertainty") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{100U, 125U});
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                                    std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Encode,
+                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                          {}, {}, std::nullopt, std::move(measurement)));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
     REQUIRE(coordinator->arm_trace_append_fault_for_test(
         runtime::TraceAppendFaultPointForTest::WriteInitiatedAfterAcceptance));
 
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
     CHECK(result.disposition() == execution::SubmitDisposition::SubmissionUnknown);
     CHECK(result.stage() == execution::SubmissionStage::Initiation);
     CHECK(result.reason() == execution::SubmissionReason::InitiationOutcomeUnknown);
     CHECK(result.local_path_nanoseconds() == 25U);
     REQUIRE(result.order_id());
-    REQUIRE(coordinator->outbound_oms().find(*result.order_id()) != nullptr);
-    CHECK(coordinator->outbound_oms().find(*result.order_id())->state() ==
+    REQUIRE(coordinator->outbound_oms().find_order(*result.order_id()) != nullptr);
+    CHECK(coordinator->outbound_oms().find_order(*result.order_id())->state() ==
           oms::OutboundOrderState::SubmissionUnknown);
     CHECK(coordinator->reservations().held_reservation_count() == 1U);
-    REQUIRE(coordinator->reservations().find_reservation(reservation_id(result)) != nullptr);
-    CHECK(coordinator->reservations().find_reservation(reservation_id(result))->state ==
-          risk::ReservationState::Held);
+    REQUIRE(coordinator->reservations().find_reservation(derive_reservation_id_or_throw(result)) !=
+            nullptr);
+    CHECK(coordinator->reservations()
+              .find_reservation(derive_reservation_id_or_throw(result))
+              ->state == risk::ReservationState::Held);
     REQUIRE(coordinator->initiator().accepted_writes().size() == 1U);
     check_trace(*coordinator, {trace::SubmissionTraceEventKind::Attempt,
                                trace::SubmissionTraceEventKind::RouteAuthorized,
@@ -1279,43 +1402,48 @@ TEST_CASE("submission coordinator contains every injected canonical append fault
                                trace::SubmissionTraceEventKind::RiskReserved,
                                trace::SubmissionTraceEventKind::OmsAdmitted,
                                trace::SubmissionTraceEventKind::Encoded});
-    CHECK(diagnostic_count(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
+    CHECK(count_diagnostics(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
           0U);
-    CHECK(coordinator->runtime_faulted());
+    CHECK(coordinator->is_runtime_faulted());
 
-    const auto trace_size = coordinator->trace_sink().size();
+    const auto trace_size = coordinator->trace_sink().record_count();
     const auto accepted_writes = coordinator->initiator().accepted_writes().size();
-    const auto later = submit(*coordinator, callback, valid_request());
+    const auto later = submit_from_active_context_or_throw(*coordinator, callback,
+                                                           create_valid_order_request_or_throw());
     check_rejection(later, execution::SubmissionStage::Internal,
                     execution::SubmissionReason::SubmissionRuntimeFaulted);
     CHECK_FALSE(later.attempt_id());
-    CHECK(coordinator->trace_sink().size() == trace_size);
+    CHECK(coordinator->trace_sink().record_count() == trace_size);
     CHECK(coordinator->initiator().accepted_writes().size() == accepted_writes);
     CHECK(coordinator->reservations().held_reservation_count() == 1U);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prove completion-evidence exhaustion preserves the initiated prefix while downgrading this row.
   SECTION("completion evidence failure preserves initiated prefix but downgrades current OMS") {
-    const auto accepted = authority();
+    const auto accepted = create_test_authority_or_throw();
     auto measurement = std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
         std::vector<std::optional<std::uint64_t>>{200U, 225U});
-    auto coordinator = coordinator_from(
-        accepted, submission_params(accepted.configuration, capacities(),
-                                    execution::FakeEncodingAction::Encode,
-                                    execution::FakeInitiationOutcome::AcceptedAndInitiated, {}, {},
-                                    std::nullopt, std::move(measurement)));
-    const auto callback = binding(accepted, "bot.deribit-btc-perpetual-reference");
+    auto coordinator = create_coordinator_from_authority_or_throw(
+        accepted,
+        create_submission_params_or_throw(accepted.configuration, create_submission_capacities(),
+                                          execution::FakeEncodingAction::Encode,
+                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
+                                          {}, {}, std::nullopt, std::move(measurement)));
+    const auto callback =
+        find_callback_binding_or_throw(accepted, "bot.deribit-btc-perpetual-reference");
     REQUIRE(coordinator->arm_trace_append_fault_for_test(
         runtime::TraceAppendFaultPointForTest::SubmissionCompletedAfterInitiation));
 
-    const auto result = submit(*coordinator, callback, valid_request());
+    const auto result = submit_from_active_context_or_throw(*coordinator, callback,
+                                                            create_valid_order_request_or_throw());
     CHECK(result.disposition() == execution::SubmitDisposition::SubmissionUnknown);
     CHECK(result.stage() == execution::SubmissionStage::Initiation);
     CHECK(result.reason() == execution::SubmissionReason::InitiationOutcomeUnknown);
     CHECK(result.local_path_nanoseconds() == 25U);
     REQUIRE(result.order_id());
-    REQUIRE(coordinator->outbound_oms().find(*result.order_id()) != nullptr);
-    CHECK(coordinator->outbound_oms().find(*result.order_id())->state() ==
+    REQUIRE(coordinator->outbound_oms().find_order(*result.order_id()) != nullptr);
+    CHECK(coordinator->outbound_oms().find_order(*result.order_id())->state() ==
           oms::OutboundOrderState::SubmissionUnknown);
     CHECK(coordinator->reservations().held_reservation_count() == 1U);
     REQUIRE(coordinator->initiator().accepted_writes().size() == 1U);
@@ -1333,9 +1461,9 @@ TEST_CASE("submission coordinator contains every injected canonical append fault
     REQUIRE(initiated.fields().initiation);
     CHECK(initiated.fields().initiation->outcome ==
           execution::FakeInitiationOutcome::AcceptedAndInitiated);
-    CHECK(diagnostic_count(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
+    CHECK(count_diagnostics(*coordinator, runtime::SubmissionDiagnosticKind::ReservationReleased) ==
           0U);
-    CHECK(coordinator->runtime_faulted());
+    CHECK(coordinator->is_runtime_faulted());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -1345,28 +1473,35 @@ TEST_CASE("submission coordinator contains every injected canonical append fault
 // Identical authority, scripts, identities, bindings, and ordered inputs reproduce canonical bytes.
 TEST_CASE("submission coordinator reproduces result and trace sequences exactly",
           "[runtime][submission][coordinator][deterministic][m3]") {
-  const auto first_authority = authority();
-  const auto second_authority = authority();
-  const auto selected = capacities(2U, 2U, 2U, 2U, 22U, 8U);
-  auto first = coordinator_from(
-      first_authority, submission_params(first_authority.configuration, selected,
-                                         execution::FakeEncodingAction::Encode,
-                                         execution::FakeInitiationOutcome::AcceptedAndInitiated, {},
-                                         {}, order_provider(0x85U)));
-  auto second = coordinator_from(
-      second_authority, submission_params(second_authority.configuration, selected,
-                                          execution::FakeEncodingAction::Encode,
-                                          execution::FakeInitiationOutcome::AcceptedAndInitiated,
-                                          {}, {}, order_provider(0x85U)));
-  const auto first_binding = binding(first_authority, "bot.deribit-btc-perpetual-reference");
-  const auto second_binding = binding(second_authority, "bot.deribit-btc-perpetual-reference");
-  auto missing = valid_request();
-  missing.route_id = id<model::RouteId>("route.missing");
+  const auto first_authority = create_test_authority_or_throw();
+  const auto second_authority = create_test_authority_or_throw();
+  const auto selected = create_submission_capacities(2U, 2U, 2U, 2U, 22U, 8U);
+  auto first = create_coordinator_from_authority_or_throw(
+      first_authority,
+      create_submission_params_or_throw(first_authority.configuration, selected,
+                                        execution::FakeEncodingAction::Encode,
+                                        execution::FakeInitiationOutcome::AcceptedAndInitiated, {},
+                                        {}, create_order_id_source_or_throw(0x85U)));
+  auto second = create_coordinator_from_authority_or_throw(
+      second_authority,
+      create_submission_params_or_throw(second_authority.configuration, selected,
+                                        execution::FakeEncodingAction::Encode,
+                                        execution::FakeInitiationOutcome::AcceptedAndInitiated, {},
+                                        {}, create_order_id_source_or_throw(0x85U)));
+  const auto first_binding =
+      find_callback_binding_or_throw(first_authority, "bot.deribit-btc-perpetual-reference");
+  const auto second_binding =
+      find_callback_binding_or_throw(second_authority, "bot.deribit-btc-perpetual-reference");
+  auto missing = create_valid_order_request_or_throw();
+  missing.route_id = parse_identifier_or_throw<model::RouteId>("route.missing");
 
-  const auto first_success = submit(*first, first_binding, valid_request());
-  const auto second_success = submit(*second, second_binding, valid_request());
-  const auto first_rejection = submit(*first, first_binding, missing);
-  const auto second_rejection = submit(*second, second_binding, missing);
+  const auto first_success = submit_from_active_context_or_throw(
+      *first, first_binding, create_valid_order_request_or_throw());
+  const auto second_success = submit_from_active_context_or_throw(
+      *second, second_binding, create_valid_order_request_or_throw());
+  const auto first_rejection = submit_from_active_context_or_throw(*first, first_binding, missing);
+  const auto second_rejection =
+      submit_from_active_context_or_throw(*second, second_binding, missing);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Noncanonical measured durations may differ; every canonical result field and identity matches.
@@ -1383,8 +1518,8 @@ TEST_CASE("submission coordinator reproduces result and trace sequences exactly"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Trace bytes and accepted fake payloads are exact replay identities, independent of wall timing.
-  const auto first_trace = first->trace_sink().canonical_bytes();
-  const auto second_trace = second->trace_sink().canonical_bytes();
+  const auto first_trace = first->trace_sink().encode_canonical_bytes();
+  const auto second_trace = second->trace_sink().encode_canonical_bytes();
   REQUIRE(first_trace);
   REQUIRE(second_trace);
   CHECK(first_trace.value() == second_trace.value());

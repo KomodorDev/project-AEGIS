@@ -31,7 +31,8 @@ namespace {
 using namespace aegis;
 
 // ########################################################################
-// The scenario must fail to compile if local submission ever acquires an acknowledgement API.
+// Interesting syntax: this requires-expression makes an accidental acknowledgement API a
+// compile-time scenario failure without invoking the operation.
 template <typename Value>
 concept HasExchangeAcknowledgement =
     requires(const Value& value) { value.exchange_acknowledged(); };
@@ -43,7 +44,7 @@ static_assert(!HasExchangeAcknowledgement<execution::SubmitResult>);
 // ########################################################################
 // Replay mode changes only owner mechanics; every input, clock, script, identity, and capacity is
 // otherwise identical.
-enum class ReplayMode : std::uint8_t {
+enum class M3SubmissionReplayMode : std::uint8_t {
   Manual = 1,
   Dedicated = 2,
 };
@@ -64,6 +65,7 @@ struct ObservedBotContext {
   runtime::RuntimePolicyFingerprint runtime_policy_fingerprint;
 
   // --------------------------------------------------------
+  // Compare every copied callback-context field for deterministic replay equality.
   friend bool operator==(const ObservedBotContext&, const ObservedBotContext&) = default;
 
   // --------------------------------------------------------
@@ -78,6 +80,7 @@ struct ObservedStateCallback {
   market_data::MarketStateEventFields event;
 
   // --------------------------------------------------------
+  // Compare the complete copied state callback and its bound context.
   friend bool operator==(const ObservedStateCallback&, const ObservedStateCallback&) = default;
 
   // --------------------------------------------------------
@@ -95,6 +98,7 @@ struct ObservedMarketCallback {
   std::vector<market_data::BookLevel> asks;
 
   // --------------------------------------------------------
+  // Compare the complete copied market callback, commit identity, and visible book.
   friend bool operator==(const ObservedMarketCallback&, const ObservedMarketCallback&) = default;
 
   // --------------------------------------------------------
@@ -121,6 +125,7 @@ struct ObservedSubmitResult {
   std::optional<std::uint64_t> local_path_nanoseconds;
 
   // --------------------------------------------------------
+  // Compare every deterministic submission result field while retaining optional-value identity.
   friend bool operator==(const ObservedSubmitResult&, const ObservedSubmitResult&) = default;
 
   // --------------------------------------------------------
@@ -141,8 +146,9 @@ struct ExpectedSubmitResultShape {
 
 // --------------------------------------------------------
 // Parse one nominal identifier or stop before a fixture-authoring mistake reaches production code.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view value) {
-  auto parsed = Identifier::parse(value);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view value) {
+  auto parsed = Identifier::parse_identifier(value);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M3 reference scenario"};
   }
@@ -151,7 +157,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view valu
 
 // --------------------------------------------------------
 // Parse exact decimal input without introducing any binary floating-point representation.
-template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view value) {
+template <typename Decimal> [[nodiscard]] Decimal parse_decimal_or_throw(std::string_view value) {
   auto parsed = Decimal::parse_ascii(value);
   if (!parsed) {
     throw std::logic_error{"invalid decimal in M3 reference scenario"};
@@ -161,7 +167,7 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view value
 
 // --------------------------------------------------------
 // Construct a checked one-based ordinal or reject an invalid test-authored value immediately.
-template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
+template <typename Ordinal> [[nodiscard]] Ordinal create_ordinal_or_throw(std::uint64_t value) {
   auto created = Ordinal::from_value(value);
   if (!created) {
     throw std::logic_error{"invalid ordinal in M3 reference scenario"};
@@ -171,7 +177,7 @@ template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
 
 // --------------------------------------------------------
 // Copy all public BotContext fields while the synchronous callback capability remains active.
-[[nodiscard]] ObservedBotContext observe_context(const runtime::BotContext& context) {
+[[nodiscard]] ObservedBotContext copy_callback_context(const runtime::BotContext& context) {
   return ObservedBotContext{context.firm_id(),
                             context.desk_id(),
                             context.bot_id(),
@@ -184,7 +190,7 @@ template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
 
 // --------------------------------------------------------
 // Copy all SubmitResult fields, including exact deterministic local-path measurement.
-[[nodiscard]] ObservedSubmitResult observe_result(const execution::SubmitResult& result) {
+[[nodiscard]] ObservedSubmitResult copy_submit_result(const execution::SubmitResult& result) {
   return ObservedSubmitResult{result.disposition(),
                               result.stage(),
                               result.reason(),
@@ -196,8 +202,8 @@ template <typename Ordinal> [[nodiscard]] Ordinal ordinal(std::uint64_t value) {
 
 // --------------------------------------------------------
 // Render a fixed-width digest for compact canonical golden assertions.
-[[nodiscard]] std::string digest_hex(const model::Sha256Digest& digest) {
-  const auto encoded = model::sha256_hex(digest);
+[[nodiscard]] std::string digest_to_hex(const model::Sha256Digest& digest) {
+  const auto encoded = model::sha256_hex_from_digest(digest);
   return std::string{encoded.begin(), encoded.end()};
 }
 
@@ -221,7 +227,7 @@ public:
   void on_market_data(const market_data::MarketEvent& event, const market_data::ReadyBookView& book,
                       runtime::BotContext& context) noexcept override {
     ObservedMarketCallback observation{
-        observe_context(context), event.update(), event.context(), {}, {}};
+        copy_callback_context(context), event.update(), event.context(), {}, {}};
     observation.bids.reserve(book.bid_count());
     observation.asks.reserve(book.ask_count());
     for (std::size_t index = 0U; index < book.bid_count(); ++index) {
@@ -240,7 +246,7 @@ public:
     }
     submitted_ = true;
     for (const auto& request : requests_) {
-      results_->push_back(observe_result(context.submit(request)));
+      results_->push_back(copy_submit_result(context.submit_order(request)));
     }
   }
 
@@ -248,7 +254,7 @@ public:
   // Copy startup and Ready transitions without submitting before canonical market readiness.
   void on_market_state(const market_data::MarketStateEvent& event,
                        runtime::BotContext& context) noexcept override {
-    callbacks_->emplace_back(ObservedStateCallback{observe_context(context), event.fields()});
+    callbacks_->emplace_back(ObservedStateCallback{copy_callback_context(context), event.fields()});
   }
 
   // --------------------------------------------------------
@@ -263,20 +269,23 @@ private:
 
 // ########################################################################
 // The peer-firm strategy exposes any accidental observation grant through a race-free counter.
-class UnrelatedStrategy final : public runtime::Strategy {
+class UnrelatedBotStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
-  explicit UnrelatedStrategy(std::atomic_uint32_t& callback_count) noexcept
+  // Borrow the peer callback counter whose lifetime encloses this strategy.
+  explicit UnrelatedBotStrategy(std::atomic_uint32_t& callback_count) noexcept
       : callback_count_{&callback_count} {}
 
   // --------------------------------------------------------
+  // Record any unexpected peer market-data callback without retaining turn-scoped authority.
   void on_market_data(const market_data::MarketEvent&, const market_data::ReadyBookView&,
                       runtime::BotContext&) noexcept override {
     callback_count_->fetch_add(1U, std::memory_order_relaxed);
   }
 
   // --------------------------------------------------------
+  // Record any unexpected peer state callback without retaining turn-scoped authority.
   void on_market_state(const market_data::MarketStateEvent&,
                        runtime::BotContext&) noexcept override {
     callback_count_->fetch_add(1U, std::memory_order_relaxed);
@@ -291,11 +300,11 @@ private:
 
 // --------------------------------------------------------
 // Mint the six canonical identities consumed after the three pre-identity rejection attempts.
-[[nodiscard]] std::vector<model::OrderId> unique_order_ids() {
+[[nodiscard]] std::vector<model::OrderId> create_unique_order_ids_or_throw() {
   model::OrderNamespace::Bytes namespace_bytes{};
   namespace_bytes.fill(0xa3U);
-  auto created =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{namespace_bytes}, 100U);
+  auto created = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{namespace_bytes}, 100U);
   if (!created) {
     throw std::logic_error{"invalid order identity namespace in M3 reference scenario"};
   }
@@ -303,7 +312,7 @@ private:
   std::vector<model::OrderId> identities;
   identities.reserve(6U);
   for (std::size_t index = 0U; index < 6U; ++index) {
-    auto next = provider.next();
+    auto next = provider.generate_next_order_id();
     if (!next) {
       throw std::logic_error{"failed to mint order identity in M3 reference scenario"};
     }
@@ -315,8 +324,8 @@ private:
 // --------------------------------------------------------
 // Repeat identity five in the sixth closed-source position so duplicate precedence is
 // deterministic.
-[[nodiscard]] model::DeterministicOrderIdSource scripted_order_provider() {
-  const auto unique = unique_order_ids();
+[[nodiscard]] model::DeterministicOrderIdSource create_scripted_order_id_source_or_throw() {
+  const auto unique = create_unique_order_ids_or_throw();
   std::vector<model::OrderId> scripted;
   scripted.reserve(7U);
   scripted.push_back(unique[0U]);
@@ -331,9 +340,9 @@ private:
 
 // --------------------------------------------------------
 // Seal the separately enabled two-firm M3 authority without altering the accepted M1/M2 fixture.
-[[nodiscard]] configuration::StartupConfiguration m3_configuration() {
-  auto created = configuration::StartupConfiguration::create(
-      test_support::m3_enabled_two_firm_configuration_params());
+[[nodiscard]] configuration::StartupConfiguration create_m3_configuration_or_throw() {
+  auto created = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_m3_enabled_two_firm_configuration_params_or_throw());
   if (!created) {
     throw std::logic_error{"invalid startup configuration in M3 reference scenario"};
   }
@@ -343,16 +352,17 @@ private:
 // --------------------------------------------------------
 // Bind the one public recorded source and bounded callback/trace storage to sealed configuration.
 [[nodiscard]] runtime::RuntimePolicy
-m3_runtime_policy(const configuration::StartupConfiguration& configuration) {
-  auto created = runtime::RuntimePolicy::create(
+create_m3_runtime_policy_or_throw(const configuration::StartupConfiguration& configuration) {
+  auto created = runtime::RuntimePolicy::create_runtime_policy(
       configuration,
       runtime::RuntimePolicyParams{
           runtime::RuntimePolicyLimits{2U, 4096U, 64U, 20U, 5'000'000'000U, 4U, 64U, 128U, 32U,
                                        100'000U},
-          {{id<model::MarketSourceId>("source.deribit-btc-perpetual"),
-            id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-            id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-            model::InstrumentMetadataRevision::initial()}},
+          {{parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+            parse_identifier_or_throw<model::VenueId>("deribit"),
+            parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+            parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+            model::InstrumentMetadataRevision::create_initial()}},
       });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M3 reference scenario"};
@@ -362,33 +372,36 @@ m3_runtime_policy(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Build one canonical baseline request while allowing exact route, price, and quantity variants.
-[[nodiscard]] execution::OrderRequest request(std::string_view route, std::string_view price,
-                                              std::string_view quantity) {
-  return execution::OrderRequest{id<model::RouteId>(route),
-                                 id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-                                 execution::OrderSide::Buy,
-                                 execution::OrderType::Limit,
-                                 execution::TimeInForce::GoodTilCancelled,
-                                 decimal<model::Price>(price),
-                                 decimal<model::Quantity>(quantity)};
+[[nodiscard]] execution::OrderRequest create_order_request_or_throw(std::string_view route,
+                                                                    std::string_view price,
+                                                                    std::string_view quantity) {
+  return execution::OrderRequest{
+      parse_identifier_or_throw<model::RouteId>(route),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      execution::OrderSide::Buy,
+      execution::OrderType::Limit,
+      execution::TimeInForce::GoodTilCancelled,
+      parse_decimal_or_throw<model::Price>(price),
+      parse_decimal_or_throw<model::Quantity>(quantity)};
 }
 
 // --------------------------------------------------------
 // Order every exit so route/canonical failures consume no identity and later identities are fixed.
-[[nodiscard]] std::vector<execution::OrderRequest> request_matrix() {
+[[nodiscard]] std::vector<execution::OrderRequest> create_request_matrix_or_throw() {
   constexpr std::string_view baseline_route = "route.deribit-testnet-btc-perpetual";
   std::vector<execution::OrderRequest> requests;
   requests.reserve(10U);
-  requests.push_back(request("route.deribit-testnet-subsidiary-btc-perpetual", "100", "1"));
-  requests.push_back(request(baseline_route, "100.1", "1"));
-  requests.push_back(request(baseline_route, "100", "2.5"));
-  requests.push_back(request(baseline_route, "100", "1000001"));
-  requests.push_back(request(baseline_route, "100", "1"));
-  requests.push_back(request(baseline_route, "100", "2"));
-  requests.push_back(request(baseline_route, "100", "3"));
-  requests.push_back(request(baseline_route, "100", "4"));
-  requests.push_back(request(baseline_route, "100", "5"));
-  requests.push_back(request(baseline_route, "100", "6"));
+  requests.push_back(
+      create_order_request_or_throw("route.deribit-testnet-subsidiary-btc-perpetual", "100", "1"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100.1", "1"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "2.5"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "1000001"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "1"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "2"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "3"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "4"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "5"));
+  requests.push_back(create_order_request_or_throw(baseline_route, "100", "6"));
   return requests;
 }
 
@@ -396,12 +409,12 @@ m3_runtime_policy(const configuration::StartupConfiguration& configuration) {
 // Script one encoding failure, one definite pre-copy failure, one accepted uncertainty, then
 // ordinary success; all storage is fixed before callbacks begin.
 [[nodiscard]] runtime::FakeSubmissionRuntimeParams
-submission_params(const configuration::StartupConfiguration& configuration) {
+create_submission_params_or_throw(const configuration::StartupConfiguration& configuration) {
   constexpr std::uint64_t maximum_attempts = 10U;
-  auto encoder =
-      execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, maximum_attempts,
-                                           {{1U, execution::FakeEncodingAction::Fail}});
-  auto initiator = execution::FakeInitiatorScript::create(
+  auto encoder = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, maximum_attempts,
+      {{1U, execution::FakeEncodingAction::Fail}});
+  auto initiator = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, maximum_attempts,
       {{1U, execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance},
        {2U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}});
@@ -421,23 +434,25 @@ submission_params(const configuration::StartupConfiguration& configuration) {
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Transfer the complete fixed policy, scripts, clock, and identity source as one runtime input.
   return runtime::FakeSubmissionRuntimeParams{
-      test_support::m3_reference_risk_policy_params(configuration),
+      test_support::create_m3_reference_risk_policy_params_or_throw(configuration),
       execution::SubmissionPolicyCapacities{maximum_attempts, 4U, 4U, 1'024U, 2U, 110U, 8U},
       std::move(encoder).value(),
       std::move(initiator).value(),
       std::make_unique<execution::DeterministicSubmissionMeasurementClock>(
           std::move(measurement_readings)),
-      scripted_order_provider()};
+      create_scripted_order_id_source_or_throw()};
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Own the sole exact recorded snapshot admitted after bootstrap and before the submission callback.
-[[nodiscard]] market_data::IngressFrameAttempt snapshot_attempt() {
-  auto created = market_data::IngressFrameAttempt::create(
-      id<model::MarketSourceId>("source.deribit-btc-perpetual"), model::SessionEpoch{1U},
+[[nodiscard]] market_data::IngressFrameAttempt create_snapshot_attempt_or_throw() {
+  auto created = market_data::IngressFrameAttempt::create_ingress_frame_attempt(
+      parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+      model::SessionEpoch{1U},
       "AEGISMD|1|source.deribit-btc-perpetual|snapshot|100|none|1000|1|ok:m3-submit|2|"
       "B,50000,2|A,50000.5,3");
   if (!created) {
@@ -448,7 +463,8 @@ submission_params(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Bound dedicated-owner observation so a regression cannot hang the deterministic scenario target.
-template <typename Predicate> void wait_until(Predicate predicate, std::string_view failure) {
+template <typename Predicate>
+void wait_until_condition_or_throw(Predicate predicate, std::string_view failure) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate()) {
@@ -464,26 +480,27 @@ template <typename Predicate> void wait_until(Predicate predicate, std::string_v
 // ########################################################################
 // The harness keeps borrowed clocks and capture storage alive through owner shutdown and copies
 // evidence only after the selected owner has fully released the runtime.
-class ReplayHarness final {
+class M3SubmissionReplayHarness final {
 public:
 
   // --------------------------------------------------------
   // Compose the exact same runtime, strategies, scripts, and capacity ceilings in either mode.
-  explicit ReplayHarness(ReplayMode mode)
+  explicit M3SubmissionReplayHarness(M3SubmissionReplayMode mode)
       : mode_{mode}, executor_clock_{1'000U}, callback_clock_{100'000U} {
     callbacks_.reserve(4U);
     results_.reserve(10U);
-    auto configuration = m3_configuration();
-    auto policy = m3_runtime_policy(configuration);
-    auto fake_submission = submission_params(configuration);
+    auto configuration = create_m3_configuration_or_throw();
+    auto policy = create_m3_runtime_policy_or_throw(configuration);
+    auto fake_submission = create_submission_params_or_throw(configuration);
     std::vector<runtime::BotStrategyRegistration> registrations;
     registrations.reserve(2U);
     registrations.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-        std::make_unique<MatrixSubmittingStrategy>(request_matrix(), callbacks_, results_)});
+        parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+        std::make_unique<MatrixSubmittingStrategy>(create_request_matrix_or_throw(), callbacks_,
+                                                   results_)});
     registrations.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.subsidiary-reference"),
-        std::make_unique<UnrelatedStrategy>(unrelated_callback_count_)});
+        parse_identifier_or_throw<model::BotId>("bot.subsidiary-reference"),
+        std::make_unique<UnrelatedBotStrategy>(unrelated_callback_count_)});
     auto created = runtime::MarketRuntime::create_with_fake_submission(
         std::move(configuration), std::move(policy), executor_clock_, callback_clock_,
         std::move(registrations), std::move(fake_submission));
@@ -496,42 +513,42 @@ public:
 
   // --------------------------------------------------------
   // Complete the one bootstrap turn under the chosen owner and require an idle Running state.
-  void start() {
-    if (mode_ == ReplayMode::Manual) {
+  void start_runtime_or_throw() {
+    if (mode_ == M3SubmissionReplayMode::Manual) {
       if (!runtime_->bind_to_current_thread()) {
         throw std::logic_error{"failed to bind manual M3 owner"};
       }
-      run_one_manual();
+      execute_one_manual_turn_or_throw();
       return;
     }
     if (!runtime_->start_dedicated()) {
       throw std::logic_error{"failed to start dedicated M3 owner"};
     }
-    wait_for_completed(1U);
+    wait_for_completed_turn_count_or_throw(1U);
   }
 
   // --------------------------------------------------------
-  // Admit and process the sole snapshot at the same deterministic owner timestamp in both modes.
-  void process_snapshot() {
-    if (!executor_clock_.advance(100U)) {
+  // Apply the sole admitted snapshot at the same deterministic owner timestamp in both modes.
+  void apply_snapshot_or_throw() {
+    if (!executor_clock_.advance_nanoseconds(100U)) {
       throw std::logic_error{"failed to advance M3 reference clock"};
     }
-    auto admitted = runtime_->try_admit(snapshot_attempt());
+    auto admitted = runtime_->try_admit(create_snapshot_attempt_or_throw());
     if (!admitted || admitted.value().outcome != runtime::AdmissionOutcome::Accepted ||
         !admitted.value().receipt.has_value() || admitted.value().discontinuity_recorded) {
       throw std::logic_error{"M3 reference snapshot was not accepted"};
     }
-    if (mode_ == ReplayMode::Manual) {
-      run_one_manual();
+    if (mode_ == M3SubmissionReplayMode::Manual) {
+      execute_one_manual_turn_or_throw();
       return;
     }
-    wait_for_completed(2U);
+    wait_for_completed_turn_count_or_throw(2U);
   }
 
   // --------------------------------------------------------
   // Release ownership, then copy complete immutable callback, result, and runtime evidence.
-  [[nodiscard]] runtime::MarketRuntimeEvidence finish() {
-    if (mode_ == ReplayMode::Manual) {
+  [[nodiscard]] runtime::MarketRuntimeEvidence finish_replay_or_throw() {
+    if (mode_ == M3SubmissionReplayMode::Manual) {
       runtime_->close();
       if (!runtime_->release_from_current_thread()) {
         throw std::logic_error{"failed to release manual M3 owner"};
@@ -539,7 +556,7 @@ public:
     } else {
       runtime_->close_and_wait();
     }
-    auto evidence = runtime_->quiescent_evidence();
+    auto evidence = runtime_->collect_quiescent_evidence();
     if (!evidence) {
       throw std::logic_error{"failed to collect quiescent M3 evidence"};
     }
@@ -547,16 +564,19 @@ public:
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] const std::vector<CallbackObservation>& callbacks() const noexcept {
+  // Borrow the complete callback sequence after all callback-local authority has expired.
+  [[nodiscard]] const std::vector<CallbackObservation>& callback_observations() const noexcept {
     return callbacks_;
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] const std::vector<ObservedSubmitResult>& results() const noexcept {
+  // Borrow the copied synchronous result sequence produced by the request matrix.
+  [[nodiscard]] const std::vector<ObservedSubmitResult>& submission_results() const noexcept {
     return results_;
   }
 
   // --------------------------------------------------------
+  // Return the number of callbacks that escaped the baseline bot's configured grant.
   [[nodiscard]] std::uint32_t unrelated_callback_count() const noexcept {
     return unrelated_callback_count_.load(std::memory_order_relaxed);
   }
@@ -565,9 +585,9 @@ public:
 private:
 
   // --------------------------------------------------------
-  // Complete exactly one nonempty deterministic turn and reject silent owner progression failure.
-  void run_one_manual() {
-    auto completed = runtime_->run_one();
+  // Execute exactly one nonempty deterministic turn and throw on owner progression failure.
+  void execute_one_manual_turn_or_throw() {
+    auto completed = runtime_->execute_next_turn();
     if (!completed || !completed.value().has_value()) {
       throw std::logic_error{"manual M3 owner did not complete one turn"};
     }
@@ -575,8 +595,8 @@ private:
 
   // --------------------------------------------------------
   // Observe synchronized status until the dedicated owner is fully idle at the expected prefix.
-  void wait_for_completed(std::uint64_t expected_turns) {
-    wait_until(
+  void wait_for_completed_turn_count_or_throw(std::uint64_t expected_turns) {
+    wait_until_condition_or_throw(
         [this, expected_turns] {
           const auto status = runtime_->status();
           if (status.lifecycle == runtime::MarketRuntimeLifecycle::Faulted) {
@@ -591,7 +611,7 @@ private:
   }
 
   // --------------------------------------------------------
-  ReplayMode mode_;
+  M3SubmissionReplayMode mode_;
   std::vector<CallbackObservation> callbacks_;
   std::vector<ObservedSubmitResult> results_;
   std::atomic_uint32_t unrelated_callback_count_{0U};
@@ -604,14 +624,16 @@ private:
 
 // ########################################################################
 // One replay result owns all strategy-visible and cold canonical products after owner release.
-struct ReplayResult {
+struct M3SubmissionReplayResult {
   std::vector<CallbackObservation> callbacks;
   std::vector<ObservedSubmitResult> results;
   runtime::MarketRuntimeEvidence evidence;
   std::uint32_t unrelated_callback_count;
 
   // --------------------------------------------------------
-  friend bool operator==(const ReplayResult&, const ReplayResult&) = default;
+  // Compare every strategy-visible and cold canonical product after both replays are quiescent.
+  friend bool operator==(const M3SubmissionReplayResult&,
+                         const M3SubmissionReplayResult&) = default;
 
   // --------------------------------------------------------
 };
@@ -620,18 +642,18 @@ struct ReplayResult {
 
 // --------------------------------------------------------
 // Execute the exact matrix through the public MarketRuntime boundary and return only cold copies.
-[[nodiscard]] ReplayResult replay(ReplayMode mode) {
-  ReplayHarness harness{mode};
-  harness.start();
-  harness.process_snapshot();
-  auto evidence = harness.finish();
-  return ReplayResult{harness.callbacks(), harness.results(), std::move(evidence),
-                      harness.unrelated_callback_count()};
+[[nodiscard]] M3SubmissionReplayResult execute_replay_or_throw(M3SubmissionReplayMode mode) {
+  M3SubmissionReplayHarness harness{mode};
+  harness.start_runtime_or_throw();
+  harness.apply_snapshot_or_throw();
+  auto evidence = harness.finish_replay_or_throw();
+  return M3SubmissionReplayResult{harness.callback_observations(), harness.submission_results(),
+                                  std::move(evidence), harness.unrelated_callback_count()};
 }
 
 // --------------------------------------------------------
 // Verify all three callbacks and their source, owner-turn, readiness, and book identities.
-void check_callback_sequence(const ReplayResult& replayed) {
+void check_callback_sequence(const M3SubmissionReplayResult& replayed) {
   REQUIRE(replayed.callbacks.size() == 3U);
   REQUIRE(std::holds_alternative<ObservedStateCallback>(replayed.callbacks[0U]));
   REQUIRE(std::holds_alternative<ObservedStateCallback>(replayed.callbacks[1U]));
@@ -643,39 +665,45 @@ void check_callback_sequence(const ReplayResult& replayed) {
   // ++++++++++++++++++++++++++++++++++++++++
   // Bootstrap and snapshot callbacks share immutable bot-derived attribution and policy identity.
   for (const auto* const context : {&synchronizing.context, &ready.context, &market.context}) {
-    CHECK(context->firm_id == id<model::FirmId>("firm.aegis-lab"));
-    CHECK(context->desk_id == id<model::DeskId>("desk.digital-assets"));
-    CHECK(context->bot_id == id<model::BotId>("bot.deribit-btc-perpetual-reference"));
-    CHECK(context->strategy_id == id<model::StrategyId>("strategy.deterministic-reference"));
-    CHECK(context->subscription_id ==
-          id<model::SubscriptionId>("subscription.deribit-btc-perpetual-book"));
+    CHECK(context->firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-lab"));
+    CHECK(context->desk_id == parse_identifier_or_throw<model::DeskId>("desk.digital-assets"));
+    CHECK(context->bot_id ==
+          parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"));
+    CHECK(context->strategy_id ==
+          parse_identifier_or_throw<model::StrategyId>("strategy.deterministic-reference"));
+    CHECK(context->subscription_id == parse_identifier_or_throw<model::SubscriptionId>(
+                                          "subscription.deribit-btc-perpetual-book"));
     CHECK(context->configuration_fingerprint == replayed.evidence.configuration_fingerprint);
     CHECK(context->runtime_policy_fingerprint == replayed.evidence.runtime_policy_fingerprint);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  CHECK(synchronizing.context.callback_ordinal == ordinal<model::CallbackOrdinal>(1U));
-  CHECK(synchronizing.event.turn_ordinal == ordinal<model::TurnOrdinal>(1U));
+  // Pin callback and owner-turn ordinals together with the exact Ready book produced by snapshot.
+  CHECK(synchronizing.context.callback_ordinal ==
+        create_ordinal_or_throw<model::CallbackOrdinal>(1U));
+  CHECK(synchronizing.event.turn_ordinal == create_ordinal_or_throw<model::TurnOrdinal>(1U));
   CHECK(synchronizing.event.readiness == market_data::MarketReadiness::Synchronizing);
-  CHECK(ready.context.callback_ordinal == ordinal<model::CallbackOrdinal>(2U));
-  CHECK(ready.event.turn_ordinal == ordinal<model::TurnOrdinal>(2U));
+  CHECK(ready.context.callback_ordinal == create_ordinal_or_throw<model::CallbackOrdinal>(2U));
+  CHECK(ready.event.turn_ordinal == create_ordinal_or_throw<model::TurnOrdinal>(2U));
   CHECK(ready.event.readiness == market_data::MarketReadiness::Ready);
-  CHECK(market.context.callback_ordinal == ordinal<model::CallbackOrdinal>(3U));
-  CHECK(market.commit.turn_ordinal == ordinal<model::TurnOrdinal>(2U));
+  CHECK(market.context.callback_ordinal == create_ordinal_or_throw<model::CallbackOrdinal>(3U));
+  CHECK(market.commit.turn_ordinal == create_ordinal_or_throw<model::TurnOrdinal>(2U));
   CHECK(market.update.source_sequence() == model::SequenceNumber{100U});
   REQUIRE(market.bids.size() == 1U);
   REQUIRE(market.asks.size() == 1U);
   CHECK(market.bids.front() ==
-        market_data::BookLevel{decimal<model::Price>("50000"), decimal<model::Quantity>("2")});
+        market_data::BookLevel{parse_decimal_or_throw<model::Price>("50000"),
+                               parse_decimal_or_throw<model::Quantity>("2")});
   CHECK(market.asks.front() ==
-        market_data::BookLevel{decimal<model::Price>("50000.5"), decimal<model::Quantity>("3")});
+        market_data::BookLevel{parse_decimal_or_throw<model::Price>("50000.5"),
+                               parse_decimal_or_throw<model::Quantity>("3")});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Verify the stable disposition/stage/reason matrix plus precise identity and risk-evidence shape.
-void check_results(const ReplayResult& replayed) {
+void check_submission_results(const M3SubmissionReplayResult& replayed) {
   constexpr std::array expected{
       ExpectedSubmitResultShape{execution::SubmitDisposition::LocallyRejected,
                                 execution::SubmissionStage::Route,
@@ -709,7 +737,7 @@ void check_results(const ReplayResult& replayed) {
                                 execution::SubmissionReason::OmsCapacityExceeded, true},
   };
   REQUIRE(replayed.results.size() == expected.size());
-  const auto identities = unique_order_ids();
+  const auto identities = create_unique_order_ids_or_throw();
   constexpr std::array<std::optional<std::size_t>, 10U> identity_indices{
       std::nullopt, std::nullopt, std::nullopt, 0U, 1U, 2U, 3U, 4U, 4U, 5U};
 
@@ -721,7 +749,7 @@ void check_results(const ReplayResult& replayed) {
     CHECK(observed.stage == expected[index].stage);
     CHECK(observed.reason == expected[index].reason);
     REQUIRE(observed.attempt_id.has_value());
-    CHECK(*observed.attempt_id == ordinal<model::SubmissionAttemptId>(index + 1U));
+    CHECK(*observed.attempt_id == create_ordinal_or_throw<model::SubmissionAttemptId>(index + 1U));
     CHECK(observed.order_id.has_value() == expected[index].has_order_id);
     if (identity_indices[index]) {
       REQUIRE(observed.order_id.has_value());
@@ -736,8 +764,8 @@ void check_results(const ReplayResult& replayed) {
   const auto& risk_rejection = *replayed.results[3U].risk_evidence;
   CHECK(risk_rejection.scope() == risk::RiskScopeKind::Bot);
   CHECK(risk_rejection.measure_kind() == execution::RiskMeasureKind::Quantity);
-  CHECK(risk_rejection.observed_quantity() == decimal<model::Quantity>("1000001"));
-  CHECK(risk_rejection.quantity_limit() == decimal<model::Quantity>("1000000"));
+  CHECK(risk_rejection.observed_quantity() == parse_decimal_or_throw<model::Quantity>("1000001"));
+  CHECK(risk_rejection.quantity_limit() == parse_decimal_or_throw<model::Quantity>("1000000"));
   for (std::size_t index = 0U; index < replayed.results.size(); ++index) {
     if (index != 3U) {
       CHECK_FALSE(replayed.results[index].risk_evidence.has_value());
@@ -826,7 +854,7 @@ void check_submission_trace(const runtime::SubmissionRuntimeEvidence& submission
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Record order, attempt grouping, callback identity, and runtime attribution are all canonical.
-  const auto requests = request_matrix();
+  const auto requests = create_request_matrix_or_throw();
   std::size_t record_index = 0U;
   for (std::size_t attempt_index = 0U; attempt_index < records_per_attempt.size();
        ++attempt_index) {
@@ -834,19 +862,23 @@ void check_submission_trace(const runtime::SubmissionRuntimeEvidence& submission
       const auto& record = submission.trace_records[record_index];
       CHECK(record.kind() == expected[record_index]);
       CHECK(record.fields().context.attempt_id ==
-            ordinal<model::SubmissionAttemptId>(attempt_index + 1U));
+            create_ordinal_or_throw<model::SubmissionAttemptId>(attempt_index + 1U));
       CHECK(record.fields().context.request == requests[attempt_index]);
-      CHECK(record.fields().context.owner_turn_ordinal == ordinal<model::TurnOrdinal>(2U));
-      CHECK(record.fields().context.callback_ordinal == ordinal<model::CallbackOrdinal>(3U));
+      CHECK(record.fields().context.owner_turn_ordinal ==
+            create_ordinal_or_throw<model::TurnOrdinal>(2U));
+      CHECK(record.fields().context.callback_ordinal ==
+            create_ordinal_or_throw<model::CallbackOrdinal>(3U));
       CHECK(record.fields().context.callback_processing_nanoseconds == 1'100U);
-      CHECK(record.fields().context.attribution.firm_id == id<model::FirmId>("firm.aegis-lab"));
+      CHECK(record.fields().context.attribution.firm_id ==
+            parse_identifier_or_throw<model::FirmId>("firm.aegis-lab"));
       CHECK(record.fields().context.attribution.bot_id ==
-            id<model::BotId>("bot.deribit-btc-perpetual-reference"));
+            parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"));
       ++record_index;
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Count terminal event kinds independently so a reordered or duplicated lifecycle is visible.
   const auto event_count = [&submission](Kind kind) {
     return static_cast<std::size_t>(
         std::count_if(submission.trace_records.begin(), submission.trace_records.end(),
@@ -877,20 +909,24 @@ void check_oms(const runtime::SubmissionRuntimeEvidence& submission) {
     const auto& admission = observed.admission;
     const auto& provenance = admission.provenance;
     CHECK(observed.state == expected_states[index]);
-    CHECK(admission.attempt_id == ordinal<model::SubmissionAttemptId>(index + 5U));
-    CHECK(admission.reservation_id == ordinal<model::ReservationId>(index + 5U));
-    CHECK(admission.economics.price == decimal<model::Price>("100"));
-    CHECK(admission.economics.quantity == decimal<model::Quantity>(expected_quantities[index]));
+    CHECK(admission.attempt_id == create_ordinal_or_throw<model::SubmissionAttemptId>(index + 5U));
+    CHECK(admission.reservation_id == create_ordinal_or_throw<model::ReservationId>(index + 5U));
+    CHECK(admission.economics.price == parse_decimal_or_throw<model::Price>("100"));
+    CHECK(admission.economics.quantity ==
+          parse_decimal_or_throw<model::Quantity>(expected_quantities[index]));
     CHECK(admission.exposure.quote_face_notional() ==
-          decimal<model::Notional>(std::to_string((index + 1U) * 10U)));
-    CHECK(provenance.route_id == id<model::RouteId>("route.deribit-testnet-btc-perpetual"));
+          parse_decimal_or_throw<model::Notional>(std::to_string((index + 1U) * 10U)));
+    CHECK(provenance.route_id ==
+          parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual"));
     CHECK(provenance.logical_account_id ==
-          id<model::LogicalAccountId>("account.deribit-testnet-aegis"));
-    CHECK(provenance.venue_id == id<model::VenueId>("deribit"));
-    CHECK(provenance.firm_id == id<model::FirmId>("firm.aegis-lab"));
-    CHECK(provenance.desk_id == id<model::DeskId>("desk.digital-assets"));
-    CHECK(provenance.bot_id == id<model::BotId>("bot.deribit-btc-perpetual-reference"));
-    CHECK(provenance.strategy_id == id<model::StrategyId>("strategy.deterministic-reference"));
+          parse_identifier_or_throw<model::LogicalAccountId>("account.deribit-testnet-aegis"));
+    CHECK(provenance.venue_id == parse_identifier_or_throw<model::VenueId>("deribit"));
+    CHECK(provenance.firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-lab"));
+    CHECK(provenance.desk_id == parse_identifier_or_throw<model::DeskId>("desk.digital-assets"));
+    CHECK(provenance.bot_id ==
+          parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"));
+    CHECK(provenance.strategy_id ==
+          parse_identifier_or_throw<model::StrategyId>("strategy.deterministic-reference"));
     CHECK(provenance.risk_policy_fingerprint == submission.risk_policy_fingerprint.bytes());
     CHECK(provenance.risk_policy_revision == submission.risk_policy_revision);
     CHECK(provenance.submission_policy_fingerprint ==
@@ -907,14 +943,14 @@ void check_reservations_and_scopes(const runtime::SubmissionRuntimeEvidence& sub
   REQUIRE(submission.held_reservations.size() == 2U);
   const auto& unknown = submission.held_reservations[0U];
   const auto& initiated = submission.held_reservations[1U];
-  CHECK(unknown.reservation_id == ordinal<model::ReservationId>(7U));
+  CHECK(unknown.reservation_id == create_ordinal_or_throw<model::ReservationId>(7U));
   CHECK(unknown.state == risk::ReservationState::Held);
-  CHECK(unknown.exposure.order_quantity() == decimal<model::Quantity>("3"));
-  CHECK(unknown.exposure.quote_face_notional() == decimal<model::Notional>("30"));
-  CHECK(initiated.reservation_id == ordinal<model::ReservationId>(8U));
+  CHECK(unknown.exposure.order_quantity() == parse_decimal_or_throw<model::Quantity>("3"));
+  CHECK(unknown.exposure.quote_face_notional() == parse_decimal_or_throw<model::Notional>("30"));
+  CHECK(initiated.reservation_id == create_ordinal_or_throw<model::ReservationId>(8U));
   CHECK(initiated.state == risk::ReservationState::Held);
-  CHECK(initiated.exposure.order_quantity() == decimal<model::Quantity>("4"));
-  CHECK(initiated.exposure.quote_face_notional() == decimal<model::Notional>("40"));
+  CHECK(initiated.exposure.order_quantity() == parse_decimal_or_throw<model::Quantity>("4"));
+  CHECK(initiated.exposure.quote_face_notional() == parse_decimal_or_throw<model::Notional>("40"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Each of the baseline firm's seven scopes contains only unknown plus initiated economics.
@@ -923,29 +959,34 @@ void check_reservations_and_scopes(const runtime::SubmissionRuntimeEvidence& sub
   std::uint32_t subsidiary_scopes = 0U;
   for (const auto& scope : submission.scope_exposures) {
     const auto& exposure = scope.exposure;
-    if (scope.firm_id == id<model::FirmId>("firm.aegis-lab")) {
+    if (scope.firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-lab")) {
       ++baseline_scopes;
       CHECK(exposure.open_order_count == 2U);
-      CHECK(exposure.gross_reserved_quote_notional == decimal<model::Notional>("70"));
-      CHECK(exposure.reserved_buy_quantity == decimal<model::Quantity>("7"));
-      CHECK(exposure.reserved_sell_quantity == decimal<model::Quantity>("0"));
-      CHECK(exposure.worst_case_position_quantity == decimal<model::Quantity>("7"));
-      CHECK(exposure.reserved_buy_quote_notional == decimal<model::Notional>("70"));
-      CHECK(exposure.reserved_sell_quote_notional == decimal<model::Notional>("0"));
-      CHECK(exposure.instrument_worst_case_quote_notional == decimal<model::Notional>("70"));
-      CHECK(exposure.worst_case_position_quote_notional == decimal<model::Notional>("70"));
+      CHECK(exposure.gross_reserved_quote_notional ==
+            parse_decimal_or_throw<model::Notional>("70"));
+      CHECK(exposure.reserved_buy_quantity == parse_decimal_or_throw<model::Quantity>("7"));
+      CHECK(exposure.reserved_sell_quantity == parse_decimal_or_throw<model::Quantity>("0"));
+      CHECK(exposure.worst_case_position_quantity == parse_decimal_or_throw<model::Quantity>("7"));
+      CHECK(exposure.reserved_buy_quote_notional == parse_decimal_or_throw<model::Notional>("70"));
+      CHECK(exposure.reserved_sell_quote_notional == parse_decimal_or_throw<model::Notional>("0"));
+      CHECK(exposure.instrument_worst_case_quote_notional ==
+            parse_decimal_or_throw<model::Notional>("70"));
+      CHECK(exposure.worst_case_position_quote_notional ==
+            parse_decimal_or_throw<model::Notional>("70"));
     } else {
-      CHECK(scope.firm_id == id<model::FirmId>("firm.aegis-subsidiary"));
+      CHECK(scope.firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-subsidiary"));
       ++subsidiary_scopes;
       CHECK(exposure.open_order_count == 0U);
-      CHECK(exposure.gross_reserved_quote_notional == decimal<model::Notional>("0"));
-      CHECK(exposure.reserved_buy_quantity == decimal<model::Quantity>("0"));
-      CHECK(exposure.reserved_sell_quantity == decimal<model::Quantity>("0"));
-      CHECK(exposure.worst_case_position_quantity == decimal<model::Quantity>("0"));
-      CHECK(exposure.reserved_buy_quote_notional == decimal<model::Notional>("0"));
-      CHECK(exposure.reserved_sell_quote_notional == decimal<model::Notional>("0"));
-      CHECK(exposure.instrument_worst_case_quote_notional == decimal<model::Notional>("0"));
-      CHECK(exposure.worst_case_position_quote_notional == decimal<model::Notional>("0"));
+      CHECK(exposure.gross_reserved_quote_notional == parse_decimal_or_throw<model::Notional>("0"));
+      CHECK(exposure.reserved_buy_quantity == parse_decimal_or_throw<model::Quantity>("0"));
+      CHECK(exposure.reserved_sell_quantity == parse_decimal_or_throw<model::Quantity>("0"));
+      CHECK(exposure.worst_case_position_quantity == parse_decimal_or_throw<model::Quantity>("0"));
+      CHECK(exposure.reserved_buy_quote_notional == parse_decimal_or_throw<model::Notional>("0"));
+      CHECK(exposure.reserved_sell_quote_notional == parse_decimal_or_throw<model::Notional>("0"));
+      CHECK(exposure.instrument_worst_case_quote_notional ==
+            parse_decimal_or_throw<model::Notional>("0"));
+      CHECK(exposure.worst_case_position_quote_notional ==
+            parse_decimal_or_throw<model::Notional>("0"));
     }
   }
   CHECK(baseline_scopes == 7U);
@@ -960,7 +1001,7 @@ void check_fake_writes(const runtime::SubmissionRuntimeEvidence& submission) {
   REQUIRE(submission.encoder_invocations_consumed == 4U);
   REQUIRE(submission.initiator_invocations_consumed == 3U);
   REQUIRE(submission.accepted_writes.size() == 2U);
-  const auto identities = unique_order_ids();
+  const auto identities = create_unique_order_ids_or_throw();
   constexpr std::array<std::uint64_t, 2U> attempts{7U, 8U};
   constexpr std::array<std::uint64_t, 2U> encoder_invocations{3U, 4U};
   constexpr std::array<std::uint64_t, 2U> initiator_invocations{2U, 3U};
@@ -969,12 +1010,12 @@ void check_fake_writes(const runtime::SubmissionRuntimeEvidence& submission) {
   // Two accepted slots and only two prove no automatic retry followed the uncertain result.
   for (std::size_t index = 0U; index < submission.accepted_writes.size(); ++index) {
     const auto& write = submission.accepted_writes[index];
-    CHECK(write.attempt_id == ordinal<model::SubmissionAttemptId>(attempts[index]));
+    CHECK(write.attempt_id == create_ordinal_or_throw<model::SubmissionAttemptId>(attempts[index]));
     CHECK(write.encoder_invocation_ordinal ==
-          ordinal<model::EncoderInvocationOrdinal>(encoder_invocations[index]));
+          create_ordinal_or_throw<model::EncoderInvocationOrdinal>(encoder_invocations[index]));
     CHECK(write.initiator_invocation_ordinal ==
-          ordinal<model::InitiatorInvocationOrdinal>(initiator_invocations[index]));
-    CHECK(write.write_ordinal == ordinal<model::FakeWriteOrdinal>(index + 1U));
+          create_ordinal_or_throw<model::InitiatorInvocationOrdinal>(initiator_invocations[index]));
+    CHECK(write.write_ordinal == create_ordinal_or_throw<model::FakeWriteOrdinal>(index + 1U));
     CHECK(write.bytes.size() <= execution::maximum_encoded_fake_order_bytes);
     CHECK_FALSE(write.bytes.empty());
     CHECK(submission.oms_orders[index + 2U].admission.order_id == identities[index + 3U]);
@@ -1007,14 +1048,15 @@ void check_submission_diagnostics(const runtime::SubmissionRuntimeEvidence& subm
   CHECK(submission.dropped_diagnostics == 0U);
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Match every retained diagnostic to its attempt, release identity, cause, and sealed provenance.
   for (std::size_t index = 0U; index < submission.diagnostics.size(); ++index) {
     const auto& diagnostic = submission.diagnostics[index];
     CHECK(diagnostic.ordinal == index + 1U);
     CHECK(diagnostic.kind == expected_kinds[index]);
     CHECK(diagnostic.fields.attempt_id ==
-          ordinal<model::SubmissionAttemptId>(expected_attempts[index]));
+          create_ordinal_or_throw<model::SubmissionAttemptId>(expected_attempts[index]));
     CHECK(diagnostic.fields.reservation_id ==
-          ordinal<model::ReservationId>(expected_attempts[index]));
+          create_ordinal_or_throw<model::ReservationId>(expected_attempts[index]));
     CHECK(diagnostic.fields.stage == expected_stages[index]);
     CHECK(diagnostic.fields.reason == expected_reasons[index]);
     CHECK(diagnostic.fields.occurrence_count == 1U);
@@ -1029,7 +1071,7 @@ void check_submission_diagnostics(const runtime::SubmissionRuntimeEvidence& subm
 
 // --------------------------------------------------------
 // Verify final runtime lifecycle, source state, bounded counters, and absence of hidden failures.
-void check_runtime_evidence(const ReplayResult& replayed) {
+void check_runtime_evidence(const M3SubmissionReplayResult& replayed) {
   const auto& evidence = replayed.evidence;
   CHECK_FALSE(evidence.fault.has_value());
   CHECK(evidence.diagnostics.empty());
@@ -1052,7 +1094,7 @@ void check_runtime_evidence(const ReplayResult& replayed) {
   CHECK_FALSE(evidence.executor.owner_bound);
   REQUIRE(evidence.sources.size() == 1U);
   const auto& source = evidence.sources.front();
-  CHECK(source.source_ordinal == model::MarketSourceOrdinal::initial());
+  CHECK(source.source_ordinal == model::MarketSourceOrdinal::create_initial());
   CHECK(source.readiness == market_data::MarketReadiness::Ready);
   CHECK(source.active_session == model::SessionEpoch{1U});
   CHECK(source.last_source_sequence == model::SequenceNumber{100U});
@@ -1061,6 +1103,7 @@ void check_runtime_evidence(const ReplayResult& replayed) {
   CHECK(source.book_identity->revision().value() == 1U);
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Require the optional submission bundle and prove it carries no hidden terminal fault.
   REQUIRE(evidence.submission.has_value());
   CHECK_FALSE(evidence.submission->runtime_faulted);
   CHECK_FALSE(evidence.submission->terminal_error.has_value());
@@ -1075,9 +1118,9 @@ TEST_CASE("the complete M3 reference workload is byte-identical across serialize
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Two fresh manual owners and one dedicated owner consume identical deterministic authorities.
-  const auto first = replay(ReplayMode::Manual);
-  const auto second = replay(ReplayMode::Manual);
-  const auto dedicated = replay(ReplayMode::Dedicated);
+  const auto first = execute_replay_or_throw(M3SubmissionReplayMode::Manual);
+  const auto second = execute_replay_or_throw(M3SubmissionReplayMode::Manual);
+  const auto dedicated = execute_replay_or_throw(M3SubmissionReplayMode::Dedicated);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Full structural equality includes callbacks, normalized results, both traces, diagnostics,
@@ -1086,7 +1129,7 @@ TEST_CASE("the complete M3 reference workload is byte-identical across serialize
   CHECK(first == dedicated);
   CHECK(first.unrelated_callback_count == 0U);
   check_callback_sequence(first);
-  check_results(first);
+  check_submission_results(first);
   check_runtime_evidence(first);
   REQUIRE(first.evidence.submission.has_value());
   const auto& submission = *first.evidence.submission;
@@ -1099,10 +1142,10 @@ TEST_CASE("the complete M3 reference workload is byte-identical across serialize
   // ++++++++++++++++++++++++++++++++++++++++
   // Exact byte sizes and digests pin the complete AEGISRTS and AEGISSTS schema-one streams.
   CHECK(first.evidence.canonical_trace_bytes.size() == 2'494U);
-  CHECK(digest_hex(first.evidence.canonical_trace_digest) ==
+  CHECK(digest_to_hex(first.evidence.canonical_trace_digest) ==
         "4d62d2c42bce7eeea8901b1c28baf4059190a21a46747f7fd70ef8fc67d71ed7");
   CHECK(submission.canonical_trace_bytes.size() == 35'616U);
-  CHECK(digest_hex(submission.canonical_trace_digest) ==
+  CHECK(digest_to_hex(submission.canonical_trace_digest) ==
         "ace82ff42d02074d512f743f9c3b5d8dc040911e57031e1d438db2715780943d");
   CHECK(first.evidence.configuration_fingerprint.to_hex() ==
         "442dbeb26f2a1251f8badb9cff75e020940ad63d743e8b29175b50749793e908");
@@ -1121,14 +1164,14 @@ TEST_CASE("the complete M3 reference workload is byte-identical across serialize
   for (std::size_t index = 0U; index < submission.accepted_writes.size(); ++index) {
     const auto& write = submission.accepted_writes[index];
     CHECK(write.bytes.size() == 442U);
-    const auto digest = model::sha256(std::span<const std::byte>{write.bytes});
-    CHECK(digest_hex(digest) == accepted_write_digests[index]);
+    const auto digest = model::calculate_sha256_digest(std::span<const std::byte>{write.bytes});
+    CHECK(digest_to_hex(digest) == accepted_write_digests[index]);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // M3 derives a separate enabled fixture; the accepted M1 fingerprint stays byte-for-byte fixed.
-  auto m1 =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  auto m1 = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
   REQUIRE(m1);
   CHECK(m1.value().fingerprint().to_hex() ==
         "e869459e338687fe372c4ee1c490a147e3c88261d3c2b89af4520cf990e35310");

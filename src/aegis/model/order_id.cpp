@@ -78,7 +78,8 @@ std::string OrderNamespace::to_hex() const { return bytes_to_hex(bytes_.data(), 
 
 // --------------------------------------------------------
 // Compose a portable order identity from opaque namespace bytes and a big-endian counter suffix.
-OrderId OrderId::from_parts(const OrderNamespace& order_namespace, std::uint64_t counter) noexcept {
+OrderId OrderId::order_id_from_namespace_and_counter(const OrderNamespace& order_namespace,
+                                                     std::uint64_t counter) noexcept {
   Bytes bytes{};
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -107,15 +108,15 @@ std::string OrderId::to_hex() const { return bytes_to_hex(bytes_.data(), bytes_.
 // --------------------------------------------------------
 // Reject the reserved zero counter before constructing the deterministic provider.
 Result<DeterministicOrderIdProvider>
-DeterministicOrderIdProvider::create_validated(OrderNamespace order_namespace,
-                                               std::uint64_t initial_counter) {
+DeterministicOrderIdProvider::create_validated_deterministic_order_id_provider(
+    OrderNamespace order_namespace, std::uint64_t initial_counter) {
   // Counter zero is reserved; public range checks have already mapped negative or unrepresentable
   // authored values to InvalidValue at order_counter before this fixed-width boundary.
   if (initial_counter == 0U) {
-    return Result<DeterministicOrderIdProvider>::failure(
-        DomainError::at_field(DomainErrorCode::InvalidValue, "order_counter"));
+    return Result<DeterministicOrderIdProvider>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::InvalidValue, "order_counter"));
   }
-  return Result<DeterministicOrderIdProvider>::success(
+  return Result<DeterministicOrderIdProvider>::create_success(
       DeterministicOrderIdProvider{order_namespace, initial_counter});
 }
 
@@ -150,57 +151,59 @@ DeterministicOrderIdProvider::operator=(DeterministicOrderIdProvider&& other) no
 
 // --------------------------------------------------------
 // Emit one checked counter value and make exhaustion a permanent provider state.
-Result<OrderId> DeterministicOrderIdProvider::next() {
+Result<OrderId> DeterministicOrderIdProvider::generate_next_order_id() {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Exhaustion is sticky, including on a moved-from provider.
   if (exhausted_) {
-    return Result<OrderId>::failure(
-        DomainError::at_field(DomainErrorCode::CounterExhausted, "order_counter"));
+    return Result<OrderId>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::CounterExhausted, "order_counter"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Build the identity before advancing so the current counter is emitted exactly once.
-  const auto order_id = OrderId::from_parts(namespace_, next_counter_);
+  const auto order_id = OrderId::order_id_from_namespace_and_counter(namespace_, next_counter_);
   // Emit UINT64_MAX once, then transition without incrementing through zero.
   if (next_counter_ == std::numeric_limits<std::uint64_t>::max()) {
     exhausted_ = true;
   } else {
     ++next_counter_;
   }
-  return Result<OrderId>::success(order_id);
+  return Result<OrderId>::create_success(order_id);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Emit one prebuilt trusted identity at a time; reaching the finite end is permanently exhausted.
-Result<OrderId> ScriptedOrderIdProvider::next() {
+Result<OrderId> ScriptedOrderIdProvider::generate_next_order_id() {
   if (next_index_ == identities_.size()) {
-    return Result<OrderId>::failure(
-        DomainError::at_field(DomainErrorCode::CounterExhausted, "order_counter"));
+    return Result<OrderId>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::CounterExhausted, "order_counter"));
   }
-  return Result<OrderId>::success(identities_[next_index_++]);
+  return Result<OrderId>::create_success(identities_[next_index_++]);
 }
 
 // --------------------------------------------------------
 // Production always selects the real operating-system source; injection remains private test
 // access.
-Result<ProductionOrderIdProvider> ProductionOrderIdProvider::create() {
-  return create_with_entropy(fill_order_namespace_from_operating_system);
+Result<ProductionOrderIdProvider> ProductionOrderIdProvider::create_production_order_id_provider() {
+  return create_production_order_id_provider_with_entropy(
+      fill_order_namespace_from_operating_system);
 }
 
 // --------------------------------------------------------
 // Convert the entropy callback's all-bytes-or-failure contract into one stable startup error. Bytes
 // written by a failing callback are discarded rather than treated as usable entropy.
 Result<ProductionOrderIdProvider>
-ProductionOrderIdProvider::create_with_entropy(EntropyFillCallback entropy_fill) {
+ProductionOrderIdProvider::create_production_order_id_provider_with_entropy(
+    EntropyFillCallback entropy_fill) {
   OrderNamespace::Bytes bytes{};
   if (entropy_fill == nullptr || !entropy_fill(bytes)) {
-    return Result<ProductionOrderIdProvider>::failure(
-        DomainError::at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
+    return Result<ProductionOrderIdProvider>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EntropyUnavailable, "order_namespace"));
   }
-  return Result<ProductionOrderIdProvider>::success(
+  return Result<ProductionOrderIdProvider>::create_success(
       ProductionOrderIdProvider{OrderNamespace{bytes}});
 }
 

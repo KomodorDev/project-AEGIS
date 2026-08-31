@@ -222,7 +222,7 @@ Result<void> OrderBook::add(Order order) {
   // ++++++++++++++++++++++++++++++++++++++++
   // Commit only after every fallible operation has succeeded.
   orders_.push_back(std::move(order));
-  return Result<void>::success();
+  return Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

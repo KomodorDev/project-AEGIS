@@ -166,15 +166,15 @@ struct RecoveryBootstrapIdentityObservation {
 [[nodiscard]] SubmissionOwnerStateObservation
 create_submission_owner_state_observation(const runtime::SubmissionCoordinator& owner) {
   return SubmissionOwnerStateObservation{
-      owner.outbound_oms().size(),
+      owner.outbound_oms().order_count(),
       owner.reservations().held_reservation_count(),
-      owner.trace_sink().size(),
-      owner.diagnostics().size(),
+      owner.trace_sink().record_count(),
+      owner.diagnostics().diagnostic_count(),
       owner.diagnostics().accepted_count(),
       owner.diagnostics().dropped_count(),
       owner.encoder().invocations_consumed(),
       owner.initiator().invocations_consumed(),
-      owner.runtime_faulted(),
+      owner.is_runtime_faulted(),
       owner.terminal_error(),
   };
 }
@@ -208,11 +208,12 @@ void check_recovery_medium_has_live_lease(const recovery::DeterministicFakeRecov
 // failure before comparing the production submission result.
 [[nodiscard]] model::OrderId
 create_expected_order_id_or_throw(model::OrderNamespace order_namespace, std::uint64_t counter) {
-  auto provider = model::DeterministicOrderIdProvider::create(order_namespace, counter);
+  auto provider = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      order_namespace, counter);
   if (!provider) {
     throw std::logic_error{"invalid expected order-ID provider"};
   }
-  auto order_id = provider.value().next();
+  auto order_id = provider.value().generate_next_order_id();
   if (!order_id) {
     throw std::logic_error{"invalid expected order ID"};
   }
@@ -253,13 +254,14 @@ create_idle_recovery_fence_registrations(const configuration::StartupConfigurati
 // Create a valid changed configuration whose fingerprint cannot match the authored M4 root; an
 // invalid fixture revision or configuration throws std::logic_error.
 [[nodiscard]] configuration::StartupConfiguration create_changed_configuration_or_throw() {
-  auto params = test_support::m3_enabled_two_firm_configuration_params();
-  auto next_revision = params.revision.next();
+  auto params = test_support::create_m3_enabled_two_firm_configuration_params_or_throw();
+  auto next_revision = params.revision.derive_next_revision();
   if (!next_revision) {
     throw std::logic_error{"invalid changed M4 configuration revision"};
   }
   params.revision = std::move(next_revision).value();
-  auto created = configuration::StartupConfiguration::create(std::move(params));
+  auto created =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
   if (!created) {
     throw std::logic_error{"invalid changed M4 configuration fixture"};
   }
@@ -272,8 +274,8 @@ create_idle_recovery_fence_registrations(const configuration::StartupConfigurati
 // Build a coherent foreign owner whose configuration and all derived M2-M4 policies agree with one
 // another but cannot match the primary coordinator; invalid fixture authority throws.
 [[nodiscard]] test_support::M4OwnerTestAuthority create_changed_owner_test_authority_or_throw() {
-  auto params = test_support::m3_enabled_two_firm_configuration_params();
-  auto next_revision = params.revision.next();
+  auto params = test_support::create_m3_enabled_two_firm_configuration_params_or_throw();
+  auto next_revision = params.revision.derive_next_revision();
   if (!next_revision) {
     throw std::logic_error{"invalid changed M4 owner revision"};
   }
@@ -345,7 +347,7 @@ TEST_CASE("M4 recovery installation closes before callback authority becomes rea
   trace::RuntimeTraceSink trace_sink{authority.runtime_policy};
   runtime::RuntimeDiagnosticSink diagnostics{authority.runtime_policy};
   model::DeterministicClockProvider callback_clock{50U};
-  auto callback_authority = runtime::BotRuntime::create(
+  auto callback_authority = runtime::BotRuntime::create_bot_runtime(
       authority.configuration, authority.runtime_policy, callback_clock, trace_sink, diagnostics,
       create_idle_recovery_fence_registrations(authority.configuration), {},
       authority.submission.get());
@@ -393,9 +395,9 @@ TEST_CASE("M4 failed callback composition leaves recovery installation open",
   trace::RuntimeTraceSink trace_sink{authority.runtime_policy};
   runtime::RuntimeDiagnosticSink diagnostics{authority.runtime_policy};
   model::DeterministicClockProvider callback_clock{50U};
-  auto rejected_callback_authority =
-      runtime::BotRuntime::create(authority.configuration, authority.runtime_policy, callback_clock,
-                                  trace_sink, diagnostics, {}, {}, authority.submission.get());
+  auto rejected_callback_authority = runtime::BotRuntime::create_bot_runtime(
+      authority.configuration, authority.runtime_policy, callback_clock, trace_sink, diagnostics,
+      {}, {}, authority.submission.get());
   REQUIRE_FALSE(rejected_callback_authority);
   CHECK(rejected_callback_authority.error().code == model::DomainErrorCode::StrategyNotConfigured);
   CHECK(create_submission_owner_state_observation(*authority.submission) == owner_state_before);
@@ -439,14 +441,14 @@ TEST_CASE("M4 callback composition rejects a foreign submission coordinator atom
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject the cross-authority pointer before creating contexts or closing the foreign seam.
-  auto rejected_callback_authority = runtime::BotRuntime::create(
+  auto rejected_callback_authority = runtime::BotRuntime::create_bot_runtime(
       authority.configuration, authority.runtime_policy, callback_clock, trace_sink, diagnostics,
       create_idle_recovery_fence_registrations(authority.configuration), {},
       foreign.submission.get());
   REQUIRE_FALSE(rejected_callback_authority);
   CHECK(rejected_callback_authority.error() ==
-        model::DomainError::at_field(model::DomainErrorCode::InvalidRelationship,
-                                     "bot_runtime.submission_coordinator_provenance"));
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidRelationship,
+                                            "bot_runtime.submission_coordinator_provenance"));
   CHECK(create_submission_owner_state_observation(*foreign.submission) == foreign_state_before);
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -657,7 +659,7 @@ TEST_CASE("M4 private reconciliation install rejects a consumed recovery bootstr
   CHECK(rejected.error().code == model::DomainErrorCode::InvalidJournalState);
   CHECK(rejected.error().context.field == "private_order_reconciler.recovery_bootstrap_state");
   CHECK(second_owner.submission->private_order_reconciler() == nullptr);
-  CHECK(second_owner.submission->outbound_oms().size() == 0U);
+  CHECK(second_owner.submission->outbound_oms().order_count() == 0U);
   CHECK(second_owner.submission->reservations().held_reservation_count() == 0U);
   check_recovery_medium_has_live_lease(*recovery.medium);
 
@@ -739,11 +741,11 @@ TEST_CASE("M4 owner fixture submits through a genuine active bot context",
   REQUIRE(result.order_id());
   CHECK(*result.order_id() == create_expected_order_id_or_throw(acknowledged_namespace, 1U));
   CHECK(authority.submission->private_order_reconciler() == reconciler);
-  CHECK(authority.submission->outbound_oms().size() == 1U);
-  const auto* const row = authority.submission->outbound_oms().find(*result.order_id());
+  CHECK(authority.submission->outbound_oms().order_count() == 1U);
+  const auto* const row = authority.submission->outbound_oms().find_order(*result.order_id());
   REQUIRE(row != nullptr);
   CHECK(row->state() == oms::OutboundOrderState::WriteInitiated);
-  const auto* const route = authority.configuration.routes().find(request.route_id);
+  const auto* const route = authority.configuration.routes().find_route(request.route_id);
   REQUIRE(route != nullptr);
   CHECK(row->provenance().bot_id == route->bot_id);
   CHECK(authority.submission->reservations().held_reservation_count() == 1U);
@@ -787,7 +789,7 @@ TEST_CASE("M4 owner fixture advances longitudinal callback and turn identities",
   CHECK(*first.order_id() == create_expected_order_id_or_throw(acknowledged_namespace, 1U));
   CHECK(*second.order_id() == create_expected_order_id_or_throw(acknowledged_namespace, 2U));
   CHECK(authority.submission->private_order_reconciler() == reconciler);
-  CHECK(authority.submission->outbound_oms().size() == 2U);
+  CHECK(authority.submission->outbound_oms().order_count() == 2U);
   CHECK(authority.submission->reservations().held_reservation_count() == 2U);
   REQUIRE(authority.last_callback_ordinal);
   CHECK(authority.last_callback_ordinal->value() == 2U);

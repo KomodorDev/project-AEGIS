@@ -210,7 +210,8 @@ public:
   // --------------------------------------------------------
   // Validate, canonicalize, encode, and fingerprint one complete M2 policy atomically.
   [[nodiscard]] static model::Result<RuntimePolicy>
-  create(const configuration::StartupConfiguration& configuration, RuntimePolicyParams params);
+  create_runtime_policy(const configuration::StartupConfiguration& configuration,
+                        RuntimePolicyParams params);
 
   // --------------------------------------------------------
   // Borrow the exact sealed M1 configuration identity referenced by this policy.

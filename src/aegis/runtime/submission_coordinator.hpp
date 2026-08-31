@@ -100,8 +100,9 @@ public:
   // Validate route projection and both immutable policies, then preallocate every owner-local
   // table/sink/fake before returning a submission-capable stack.
   [[nodiscard]] static model::Result<std::unique_ptr<SubmissionCoordinator>>
-  create(const configuration::StartupConfiguration& configuration,
-         const runtime::RuntimePolicy& runtime_policy, FakeSubmissionRuntimeParams params);
+  create_submission_coordinator(const configuration::StartupConfiguration& configuration,
+                                const runtime::RuntimePolicy& runtime_policy,
+                                FakeSubmissionRuntimeParams params);
 
   // --------------------------------------------------------
   // Keep the final coordinator address and every uniquely owned M3/M4 component stable.
@@ -173,7 +174,7 @@ public:
 
   // --------------------------------------------------------
   // Return whether an impossible lower-layer invariant has permanently faulted this owner.
-  [[nodiscard]] bool runtime_faulted() const noexcept { return runtime_faulted_; }
+  [[nodiscard]] bool is_runtime_faulted() const noexcept { return runtime_faulted_; }
 
   // --------------------------------------------------------
   // Borrow the first terminal owner error, or typed absence while no fault is latched.
@@ -251,7 +252,7 @@ private:
     // ########################################################################
     // The guard distinguishes an unused rollback right, an exact release, conservative retention,
     // and a consumed lower-layer fault that must never be retried.
-    enum class State : std::uint8_t {
+    enum class RollbackState : std::uint8_t {
       Armed = 1,
       Released = 2,
       Retained = 3,
@@ -277,8 +278,8 @@ private:
 
     // --------------------------------------------------------
     // Exercise the rollback right at most once, disarming before the lower-layer transition.
-    [[nodiscard]] bool release(execution::SubmissionStage stage,
-                               execution::SubmissionReason reason) noexcept;
+    [[nodiscard]] bool release_reservation(execution::SubmissionStage stage,
+                                           execution::SubmissionReason reason) noexcept;
 
     // --------------------------------------------------------
     // Retain conservative exposure exactly once after directly validating the fake's accepted slot.
@@ -287,7 +288,7 @@ private:
 
     // --------------------------------------------------------
     // Return the guard's exact one-way lifecycle state.
-    [[nodiscard]] State state() const noexcept { return state_; }
+    [[nodiscard]] RollbackState rollback_state() const noexcept { return state_; }
 
     // --------------------------------------------------------
     // Return the exact reservation protected by this guard.
@@ -299,7 +300,7 @@ private:
     model::ReservationId reservation_id_;
     CallbackBinding binding_;
     model::OrderId order_id_;
-    State state_{State::Armed};
+    RollbackState state_{RollbackState::Armed};
   };
 
   // ########################################################################
@@ -307,9 +308,9 @@ private:
   // --------------------------------------------------------
   // Execute the complete immediate route-to-fake path using BotContext's private binding and entry
   // timestamp; no queue, executor, coroutine, or I/O boundary is used.
-  [[nodiscard]] execution::SubmitResult submit(const CallbackBinding& binding,
-                                               const execution::OrderRequest& request,
-                                               std::optional<std::uint64_t> entry_started) noexcept;
+  [[nodiscard]] execution::SubmitResult
+  submit_order(const CallbackBinding& binding, const execution::OrderRequest& request,
+               std::optional<std::uint64_t> entry_started) noexcept;
 
   // --------------------------------------------------------
   // Read the dedicated thread-safe clock without consulting or mutating any owner-local state.

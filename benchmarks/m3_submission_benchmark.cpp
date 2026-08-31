@@ -1,5 +1,5 @@
 // Purpose: measure the two named M3 bot-bound submission workloads using only the duration captured
-// inside the synchronous route-to-fake path and allocations scoped exactly around submit().
+// inside the synchronous route-to-fake path and allocations scoped exactly around submit_order().
 
 #include "aegis/runtime/fake_submission_runtime.hpp"
 #include "aegis/runtime/market_runtime.hpp"
@@ -44,8 +44,9 @@ enum class SubmissionBenchmarkKind : std::uint8_t {
 
 // --------------------------------------------------------
 // Fail immediately when a benchmark fixture contains an invalid nominal identifier literal.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M3 benchmark fixture"};
   }
@@ -54,7 +55,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Fail immediately when a benchmark fixture contains an invalid exact decimal literal.
-template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text) {
+template <typename Decimal> [[nodiscard]] Decimal parse_decimal_or_throw(std::string_view text) {
   auto parsed = Decimal::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid decimal in M3 benchmark fixture"};
@@ -64,9 +65,9 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
 
 // --------------------------------------------------------
 // Seal the enabled two-firm startup authority independently for each workload fixture.
-[[nodiscard]] configuration::StartupConfiguration reference_configuration() {
-  auto created = configuration::StartupConfiguration::create(
-      test_support::m3_enabled_two_firm_configuration_params());
+[[nodiscard]] configuration::StartupConfiguration create_reference_configuration_or_throw() {
+  auto created = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_m3_enabled_two_firm_configuration_params_or_throw());
   if (!created) {
     throw std::logic_error{"invalid startup configuration in M3 benchmark fixture"};
   }
@@ -75,25 +76,25 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
 
 // --------------------------------------------------------
 // Define the same sole public BTC perpetual source already used by the accepted M2 fixture.
-[[nodiscard]] runtime::RuntimeSourceDefinition reference_source() {
+[[nodiscard]] runtime::RuntimeSourceDefinition create_reference_source_or_throw() {
   return runtime::RuntimeSourceDefinition{
-      id<model::MarketSourceId>("source.deribit-btc-perpetual"),
-      id<model::VenueId>("deribit"),
-      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-      id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-      model::InstrumentMetadataRevision::initial(),
+      parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+      parse_identifier_or_throw<model::VenueId>("deribit"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+      model::InstrumentMetadataRevision::create_initial(),
   };
 }
 
 // --------------------------------------------------------
 // Seal one value-identical runtime policy with enough trace space for bootstrap plus 10,001 frames.
 [[nodiscard]] runtime::RuntimePolicy
-reference_policy(const configuration::StartupConfiguration& configuration) {
-  auto created = runtime::RuntimePolicy::create(
+create_reference_policy_or_throw(const configuration::StartupConfiguration& configuration) {
+  auto created = runtime::RuntimePolicy::create_runtime_policy(
       configuration, runtime::RuntimePolicyParams{
                          runtime::RuntimePolicyLimits{1U, 4'096U, 64U, 20U, 1'000'000'000U, 2U, 32U,
                                                       runtime_trace_capacity, 32U, 1'000'000'000U},
-                         {reference_source()},
+                         {create_reference_source_or_throw()},
                      });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M3 benchmark fixture"};
@@ -105,7 +106,7 @@ reference_policy(const configuration::StartupConfiguration& configuration) {
 // Install the same route projection the coordinator will seal so benchmark labels derive from the
 // exact risk and submission policy bytes rather than from hard-coded fingerprint text.
 [[nodiscard]] execution::OwnerLocalRouteCatalog
-route_catalog(const configuration::StartupConfiguration& configuration) {
+create_route_catalog_or_throw(const configuration::StartupConfiguration& configuration) {
   std::vector<execution::SubmissionRouteInput> inputs;
   inputs.reserve(configuration.routes().routes().size());
   for (const auto& route : configuration.routes().routes()) {
@@ -118,7 +119,7 @@ route_catalog(const configuration::StartupConfiguration& configuration) {
     inputs.push_back(execution::SubmissionRouteInput{route, *attribution, *metadata});
   }
   const auto& provenance = configuration.provenance();
-  auto created = execution::OwnerLocalRouteCatalog::create(
+  auto created = execution::OwnerLocalRouteCatalog::create_owner_local_route_catalog(
       configuration.fingerprint(), provenance.configuration_revision(),
       provenance.organization_revision(), provenance.route_revision(), std::move(inputs));
   if (!created) {
@@ -131,7 +132,7 @@ route_catalog(const configuration::StartupConfiguration& configuration) {
 // Reproduce the assigned AEGISFOE positional-size proof over every installed route. This value is
 // a validation input only; it is not part of either measured submission interval.
 [[nodiscard]] std::uint64_t
-required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
+calculate_required_encoded_order_bytes_or_throw(const execution::OwnerLocalRouteCatalog& routes) {
   constexpr std::uint64_t fixed_bytes = 8U + 2U + model::OrderId::byte_size + (9U * 2U) + 3U +
                                         (2U * 9U) + (4U * model::sha256_digest_size) +
                                         (5U * sizeof(std::uint64_t));
@@ -164,7 +165,8 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Give both workloads exactly the same bounded owner-local storage and fake-script authority.
-[[nodiscard]] constexpr execution::SubmissionPolicyCapacities submission_capacities() noexcept {
+[[nodiscard]] constexpr execution::SubmissionPolicyCapacities
+create_submission_capacities() noexcept {
   return execution::SubmissionPolicyCapacities{
       distribution_iterations,
       submission_attempt_capacity,
@@ -178,9 +180,9 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Create the permanent all-encode script with exactly the outer-attempt invocation domain.
-[[nodiscard]] execution::FakeEncoderScript encoder_script() {
-  auto created = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode,
-                                                      distribution_iterations, {});
+[[nodiscard]] execution::FakeEncoderScript create_encoder_script_or_throw() {
+  auto created = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, distribution_iterations, {});
   if (!created) {
     throw std::logic_error{"invalid encoder script in M3 benchmark fixture"};
   }
@@ -189,8 +191,8 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Create the permanent accepted-and-initiated fake script with no failure override.
-[[nodiscard]] execution::FakeInitiatorScript initiator_script() {
-  auto created = execution::FakeInitiatorScript::create(
+[[nodiscard]] execution::FakeInitiatorScript create_initiator_script_or_throw() {
+  auto created = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, distribution_iterations, {});
   if (!created) {
     throw std::logic_error{"invalid initiator script in M3 benchmark fixture"};
@@ -223,8 +225,9 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Transfer one fresh deterministic identity stream into the concrete fake-only composition.
-[[nodiscard]] model::DeterministicOrderIdSource order_id_provider() {
-  auto created = model::DeterministicOrderIdProvider::create(benchmark_order_namespace());
+[[nodiscard]] model::DeterministicOrderIdSource create_order_id_source_or_throw() {
+  auto created = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      benchmark_order_namespace());
   if (!created) {
     throw std::logic_error{"invalid order identity stream in M3 benchmark fixture"};
   }
@@ -233,28 +236,30 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Give both workloads the exact same authorized, aligned, limit-only quantity-two request.
-[[nodiscard]] execution::OrderRequest benchmark_request() {
+[[nodiscard]] execution::OrderRequest create_benchmark_request_or_throw() {
   return execution::OrderRequest{
-      id<model::RouteId>("route.deribit-testnet-btc-perpetual"),
-      id<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
       execution::OrderSide::Buy,
       execution::OrderType::Limit,
       execution::TimeInForce::GoodTilCancelled,
-      decimal<model::Price>("100.0"),
-      decimal<model::Quantity>("2"),
+      parse_decimal_or_throw<model::Price>("100.0"),
+      parse_decimal_or_throw<model::Quantity>("2"),
   };
 }
 
 // --------------------------------------------------------
 // Encode the exact immutable fixture provenance grammar consumed by the M3 evidence collector.
-[[nodiscard]] std::string m3_evidence_label(
+[[nodiscard]] std::string create_m3_evidence_label_or_throw(
     std::string_view workload_id, const configuration::StartupConfiguration& configuration,
     const runtime::RuntimePolicy& runtime_policy, const risk::RiskPolicySnapshot& risk_policy,
     const execution::SubmissionPolicy& submission_policy) {
-  const auto route_id = id<model::RouteId>("route.deribit-testnet-btc-perpetual");
-  const auto* const route = configuration.routes().find(route_id);
+  const auto route_id =
+      parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual");
+  const auto* const route = configuration.routes().find_route(route_id);
   const auto* const metadata = configuration.find_instrument_metadata(
-      id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"));
+      parse_identifier_or_throw<model::VenueId>("deribit"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"));
   if (route == nullptr || metadata == nullptr) {
     throw std::logic_error{"missing label authority in M3 benchmark fixture"};
   }
@@ -278,14 +283,14 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Build one complete canonical snapshot that makes the market owner Ready before measurements.
-[[nodiscard]] std::string snapshot_frame() {
+[[nodiscard]] std::string create_snapshot_frame() {
   return "AEGISMD|1|source.deribit-btc-perpetual|snapshot|100|none|1000|1|"
          "ok:m3-benchmark-snapshot|2|B,100.0,1|A,100.5,1";
 }
 
 // --------------------------------------------------------
 // Build one contiguous absolute delta that changes both levels and therefore dispatches one event.
-[[nodiscard]] std::string delta_frame(std::uint64_t sequence) {
+[[nodiscard]] std::string create_delta_frame(std::uint64_t sequence) {
   const auto predecessor = sequence - 1U;
   const auto bid_quantity = sequence % 2U == 0U ? 1U : 2U;
   const auto ask_quantity = sequence % 2U == 0U ? 2U : 1U;
@@ -297,10 +302,10 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 
 // --------------------------------------------------------
 // Transfer one bounded recorded frame into a caller-owned credential-free ingress attempt.
-[[nodiscard]] market_data::IngressFrameAttempt attempt(std::string frame) {
-  auto created = market_data::IngressFrameAttempt::create(
-      id<model::MarketSourceId>("source.deribit-btc-perpetual"), model::SessionEpoch{1U},
-      std::move(frame));
+[[nodiscard]] market_data::IngressFrameAttempt create_ingress_attempt_or_throw(std::string frame) {
+  auto created = market_data::IngressFrameAttempt::create_ingress_frame_attempt(
+      parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+      model::SessionEpoch{1U}, std::move(frame));
   if (!created) {
     throw std::logic_error{"invalid recorded frame in M3 benchmark fixture"};
   }
@@ -310,7 +315,7 @@ required_encoded_order_bytes(const execution::OwnerLocalRouteCatalog& routes) {
 // ########################################################################
 // The scalar probe retains only one completed local result observation after the callback returns;
 // it never retains BotContext, MarketEvent, book-view, or any other owner-turn capability.
-struct SubmissionProbe {
+struct SubmissionMeasurementProbe {
   bool armed{false};
   bool completed{false};
   std::uint64_t callback_count{0U};
@@ -326,7 +331,7 @@ struct SubmissionProbe {
 
   // --------------------------------------------------------
   // Request exactly one submit on the next Ready market-data callback.
-  void arm() noexcept {
+  void arm_next_submission() noexcept {
     armed = true;
     completed = false;
     local_duration_nanoseconds.reset();
@@ -337,7 +342,8 @@ struct SubmissionProbe {
 
   // --------------------------------------------------------
   // Copy only stable result scalars after allocation tracking has already been disabled.
-  void capture(const execution::SubmitResult& result, std::uint64_t allocations) noexcept {
+  void capture_submission_result(const execution::SubmitResult& result,
+                                 std::uint64_t allocations) noexcept {
     local_duration_nanoseconds = result.local_path_nanoseconds();
     allocation_count = allocations;
     disposition = result.disposition();
@@ -361,12 +367,12 @@ struct SubmissionProbe {
 // ########################################################################
 // The baseline strategy invokes the sole public bot-bound submission capability and brackets no
 // operation except that exact synchronous call with benchmark-only allocation tracking.
-class SubmissionStrategy final : public runtime::Strategy {
+class MeasuredSubmissionStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
   // Copy one immutable request and borrow the scalar probe whose lifetime encloses this strategy.
-  SubmissionStrategy(execution::OrderRequest request, SubmissionProbe& probe)
+  MeasuredSubmissionStrategy(execution::OrderRequest request, SubmissionMeasurementProbe& probe)
       : request_{std::move(request)}, probe_{&probe} {}
 
   // --------------------------------------------------------
@@ -380,13 +386,14 @@ public:
 
     // ++++++++++++++++++++++++++++++++++++++++
     // These adjacent calls define the exact allocation interval required by BENCH-M3-SUBMIT.
-    aegis_benchmark_support::allocation_tracking::begin();
-    const auto result = context.submit(request_);
-    const auto allocations = aegis_benchmark_support::allocation_tracking::finish();
+    aegis_benchmark_support::allocation_tracking::begin_allocation_interval();
+    const auto result = context.submit_order(request_);
+    const auto allocations =
+        aegis_benchmark_support::allocation_tracking::finish_allocation_interval();
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Copy the returned noncanonical duration and stable result fields only after the interval.
-    probe_->capture(result, allocations);
+    probe_->capture_submission_result(result, allocations);
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -399,7 +406,7 @@ public:
   // --------------------------------------------------------
 private:
   execution::OrderRequest request_;
-  SubmissionProbe* probe_;
+  SubmissionMeasurementProbe* probe_;
 };
 
 // ########################################################################
@@ -437,40 +444,43 @@ public:
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Seal immutable startup/runtime authority and the selected complete risk authoring snapshot.
-    auto configuration = reference_configuration();
-    auto runtime_policy = reference_policy(configuration);
-    auto risk_params = kind == SubmissionBenchmarkKind::AuthorizedFakeInitiation
-                           ? test_support::m3_reference_risk_policy_params(configuration)
-                           : test_support::m3_rejecting_risk_policy_params(configuration);
-    auto routes = route_catalog(configuration);
-    auto risk_policy = risk::RiskPolicySnapshot::create(risk_params, configuration, routes);
+    auto configuration = create_reference_configuration_or_throw();
+    auto runtime_policy = create_reference_policy_or_throw(configuration);
+    auto risk_params =
+        kind == SubmissionBenchmarkKind::AuthorizedFakeInitiation
+            ? test_support::create_m3_reference_risk_policy_params_or_throw(configuration)
+            : test_support::create_m3_rejecting_risk_policy_params_or_throw(configuration);
+    auto routes = create_route_catalog_or_throw(configuration);
+    auto risk_policy =
+        risk::RiskPolicySnapshot::create_risk_policy_snapshot(risk_params, configuration, routes);
     if (!risk_policy) {
       throw std::logic_error{"invalid risk policy in M3 benchmark fixture"};
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Seal identical scripts/capacities and derive the exact bound submission fingerprint.
-    auto encoder = encoder_script();
-    auto initiator = initiator_script();
-    auto submission_policy = execution::SubmissionPolicy::create(execution::SubmissionPolicyParams{
-        execution::SubmissionCapability::DeterministicFakeOnly,
-        configuration.fingerprint().bytes(),
-        runtime_policy.fingerprint().bytes(),
-        risk_policy.value().fingerprint().bytes(),
-        risk_policy.value().revision(),
-        submission_capacities(),
-        required_encoded_order_bytes(routes),
-        encoder,
-        initiator,
-    });
+    auto encoder = create_encoder_script_or_throw();
+    auto initiator = create_initiator_script_or_throw();
+    auto submission_policy =
+        execution::SubmissionPolicy::create_submission_policy(execution::SubmissionPolicyParams{
+            execution::SubmissionCapability::DeterministicFakeOnly,
+            configuration.fingerprint().bytes(),
+            runtime_policy.fingerprint().bytes(),
+            risk_policy.value().fingerprint().bytes(),
+            risk_policy.value().revision(),
+            create_submission_capacities(),
+            calculate_required_encoded_order_bytes_or_throw(routes),
+            encoder,
+            initiator,
+        });
     if (!submission_policy) {
       throw std::logic_error{"invalid submission policy in M3 benchmark fixture"};
     }
     const auto workload_id = kind == SubmissionBenchmarkKind::AuthorizedFakeInitiation
                                  ? "BENCH-M3-SUBMIT-001"
                                  : "BENCH-M3-SUBMIT-002";
-    evidence_label_ = m3_evidence_label(workload_id, configuration, runtime_policy,
-                                        risk_policy.value(), submission_policy.value());
+    evidence_label_ = create_m3_evidence_label_or_throw(
+        workload_id, configuration, runtime_policy, risk_policy.value(), submission_policy.value());
     expected_risk_fingerprint_ = risk_policy.value().fingerprint().to_hex();
     expected_submission_fingerprint_ = submission_policy.value().fingerprint().to_hex();
 
@@ -478,20 +488,20 @@ public:
     // Transfer the concrete fake-only stack and both configured strategy owners into one runtime.
     std::vector<runtime::BotStrategyRegistration> strategies;
     strategies.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-        std::make_unique<SubmissionStrategy>(benchmark_request(), probe_),
+        parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+        std::make_unique<MeasuredSubmissionStrategy>(create_benchmark_request_or_throw(), probe_),
     });
     strategies.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.subsidiary-reference"),
+        parse_identifier_or_throw<model::BotId>("bot.subsidiary-reference"),
         std::make_unique<NoopStrategy>(),
     });
     auto created = runtime::MarketRuntime::create_with_fake_submission(
         std::move(configuration), std::move(runtime_policy), executor_clock_,
         callback_measurement_clock_, std::move(strategies),
         runtime::FakeSubmissionRuntimeParams{
-            std::move(risk_params), submission_capacities(), std::move(encoder),
+            std::move(risk_params), create_submission_capacities(), std::move(encoder),
             std::move(initiator), std::make_unique<execution::SteadySubmissionMeasurementClock>(),
-            order_id_provider()});
+            create_order_id_source_or_throw()});
     if (!created) {
       throw std::logic_error{"invalid market runtime in M3 benchmark fixture"};
     }
@@ -503,12 +513,12 @@ public:
       throw std::logic_error{"failed to bind M3 benchmark runtime"};
     }
     owner_bound_ = true;
-    const auto bootstrap = runtime_->run_one();
+    const auto bootstrap = runtime_->execute_next_turn();
     if (!bootstrap || !bootstrap.value()) {
       throw std::logic_error{"failed to bootstrap M3 benchmark runtime"};
     }
-    admit(snapshot_frame());
-    const auto snapshot = runtime_->run_one();
+    require_accepted_frame(create_snapshot_frame());
+    const auto snapshot = runtime_->execute_next_turn();
     if (!snapshot || !snapshot.value()) {
       throw std::logic_error{"failed to establish Ready M3 benchmark state"};
     }
@@ -528,11 +538,11 @@ public:
 
   // --------------------------------------------------------
   // Admit and run one market turn whose armed callback performs exactly one local submission.
-  [[nodiscard]] bool run_sample() {
+  [[nodiscard]] bool execute_submission_sample_or_throw() {
     const auto callbacks_before = probe_.callback_count;
-    probe_.arm();
-    admit(delta_frame(next_sequence_));
-    const auto completed = runtime_->run_one();
+    probe_.arm_next_submission();
+    require_accepted_frame(create_delta_frame(next_sequence_));
+    const auto completed = runtime_->execute_next_turn();
     ++next_sequence_;
     return completed && completed.value().has_value() && probe_.completed &&
            probe_.callback_count == callbacks_before + 1U &&
@@ -541,7 +551,7 @@ public:
 
   // --------------------------------------------------------
   // Check the exact expected local disposition, evidence shape, and allocation-free direct path.
-  [[nodiscard]] bool sample_matches_workload() const noexcept {
+  [[nodiscard]] bool is_sample_consistent_with_workload() const noexcept {
     if (!probe_.attempt_id_present || !probe_.order_id_present || probe_.allocation_count != 0U) {
       return false;
     }
@@ -559,7 +569,7 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return the one duration captured inside the completed BotContext::submit call.
+  // Return the one duration captured inside the completed BotContext::submit_order call.
   [[nodiscard]] std::uint64_t local_duration_nanoseconds() const noexcept {
     return probe_.local_duration_nanoseconds.value_or(0U);
   }
@@ -575,14 +585,14 @@ public:
   // --------------------------------------------------------
   // Prove the success workload retained every M4-pending object and the rejection workload reached
   // none of them, then cross-check the fingerprints used in the raw evidence label.
-  [[nodiscard]] bool finalize_and_verify() {
+  [[nodiscard]] bool finalize_and_verify_submission_evidence() {
     runtime_->close();
     const auto released = runtime_->release_from_current_thread();
     if (!released) {
       return false;
     }
     owner_bound_ = false;
-    auto evidence = runtime_->quiescent_evidence();
+    auto evidence = runtime_->collect_quiescent_evidence();
     if (!evidence || !evidence.value().submission || evidence.value().fault) {
       return false;
     }
@@ -617,8 +627,8 @@ private:
 
   // --------------------------------------------------------
   // Require one nonblocking accepted frame decision while all ingress work remains unmeasured.
-  void admit(std::string frame) {
-    auto admitted = runtime_->try_admit(attempt(std::move(frame)));
+  void require_accepted_frame(std::string frame) {
+    auto admitted = runtime_->try_admit(create_ingress_attempt_or_throw(std::move(frame)));
     if (!admitted || admitted.value().outcome != runtime::AdmissionOutcome::Accepted) {
       throw std::logic_error{"failed to admit M3 benchmark frame"};
     }
@@ -627,7 +637,7 @@ private:
   // --------------------------------------------------------
   // Retain fixture state in declaration order so both borrowed clocks outlive the runtime.
   SubmissionBenchmarkKind kind_;
-  SubmissionProbe probe_;
+  SubmissionMeasurementProbe probe_;
   model::DeterministicClockProvider executor_clock_{100U};
   model::DeterministicClockProvider callback_measurement_clock_{200U};
   std::string evidence_label_;
@@ -642,8 +652,9 @@ private:
 
 // --------------------------------------------------------
 // Run one fixed M3 distribution while selecting only its expected outcome and counter names.
-void run_submission_benchmark(benchmark::State& state, SubmissionBenchmarkKind kind,
-                              std::string_view throughput_name, std::string_view allocation_name) {
+void execute_submission_benchmark_or_throw(benchmark::State& state, SubmissionBenchmarkKind kind,
+                                           std::string_view throughput_name,
+                                           std::string_view allocation_name) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Construct and preallocate the complete fake-only runtime before collecting local durations.
@@ -657,47 +668,47 @@ void run_submission_benchmark(benchmark::State& state, SubmissionBenchmarkKind k
   // The owner turn is intentionally not wall-timed: each sample uses the duration captured inside
   // submit from bot-bound entry through rejection or accepted fake initiation.
   for ([[maybe_unused]] const auto iteration : state) {
-    if (!harness.run_sample()) {
+    if (!harness.execute_submission_sample_or_throw()) {
       state.SkipWithError("M3 benchmark owner turn did not produce one measured submit result");
       break;
     }
-    if (!harness.sample_matches_workload()) {
+    if (!harness.is_sample_consistent_with_workload()) {
       state.SkipWithError("M3 benchmark submit result did not match its named workload");
       break;
     }
     const auto duration = harness.local_duration_nanoseconds();
     samples.push_back(duration);
     allocation_count += harness.allocation_count();
-    state.SetIterationTime(aegis_benchmark_support::seconds(duration));
+    state.SetIterationTime(aegis_benchmark_support::nanoseconds_to_seconds(duration));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Only a complete 10,000-sample run may claim its exact retained or pre-OMS terminal state.
   if (samples.size() == static_cast<std::size_t>(distribution_iterations) &&
-      !harness.finalize_and_verify()) {
+      !harness.finalize_and_verify_submission_evidence()) {
     state.SkipWithError("M3 benchmark final bounded submission evidence did not match workload");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish the exact workload-specific rate and allocation vocabulary plus common percentiles.
-  aegis_benchmark_support::publish_distribution(state, samples, allocation_count, throughput_name,
-                                                allocation_name);
+  aegis_benchmark_support::publish_latency_distribution(state, samples, allocation_count,
+                                                        throughput_name, allocation_name);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // BENCH-M3-SUBMIT-001 reaches successful local fake write initiation without acknowledgement.
-void benchmark_authorized_fake_initiation(benchmark::State& state) {
-  run_submission_benchmark(state, SubmissionBenchmarkKind::AuthorizedFakeInitiation,
-                           "orders_per_second", "allocations_per_order");
+void benchmark_authorized_fake_initiation_or_throw(benchmark::State& state) {
+  execute_submission_benchmark_or_throw(state, SubmissionBenchmarkKind::AuthorizedFakeInitiation,
+                                        "orders_per_second", "allocations_per_order");
 }
 
 // --------------------------------------------------------
 // BENCH-M3-SUBMIT-002 rejects the value-identical request at the first bot quantity risk limit.
-void benchmark_inline_risk_rejection(benchmark::State& state) {
-  run_submission_benchmark(state, SubmissionBenchmarkKind::InlineRiskRejection,
-                           "rejections_per_second", "allocations_per_request");
+void benchmark_inline_risk_rejection_or_throw(benchmark::State& state) {
+  execute_submission_benchmark_or_throw(state, SubmissionBenchmarkKind::InlineRiskRejection,
+                                        "rejections_per_second", "allocations_per_request");
 }
 
 // --------------------------------------------------------
@@ -706,7 +717,7 @@ void benchmark_inline_risk_rejection(benchmark::State& state) {
 
 // --------------------------------------------------------
 // Register the full authorized route-to-fake path with the exact evidence-tooling identity.
-BENCHMARK(benchmark_authorized_fake_initiation)
+BENCHMARK(benchmark_authorized_fake_initiation_or_throw)
     ->Name("BENCH-M3-SUBMIT-001/submission.authorized-limit-fake-initiation")
     ->Iterations(distribution_iterations)
     ->UseManualTime()
@@ -714,7 +725,7 @@ BENCHMARK(benchmark_authorized_fake_initiation)
 
 // --------------------------------------------------------
 // Register the paired inline risk rejection with the exact evidence-tooling identity.
-BENCHMARK(benchmark_inline_risk_rejection)
+BENCHMARK(benchmark_inline_risk_rejection_or_throw)
     ->Name("BENCH-M3-SUBMIT-002/submission.inline-risk-rejection")
     ->Iterations(distribution_iterations)
     ->UseManualTime()

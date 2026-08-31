@@ -96,7 +96,7 @@ public:
 
   // --------------------------------------------------------
   // Arm exactly one later callback and clear the prior handshake state.
-  void arm() noexcept {
+  void arm_next_callback() noexcept {
     released_.store(false, std::memory_order_release);
     entered_.store(false, std::memory_order_release);
     armed_.store(true, std::memory_order_release);
@@ -116,11 +116,13 @@ public:
 
   // --------------------------------------------------------
   // Report callback entry to the producer through the release/acquire synchronization edge.
-  [[nodiscard]] bool entered() const noexcept { return entered_.load(std::memory_order_acquire); }
+  [[nodiscard]] bool has_callback_entered() const noexcept {
+    return entered_.load(std::memory_order_acquire);
+  }
 
   // --------------------------------------------------------
   // Let the held owner callback finish after the producer has recorded its capacity fence.
-  void release() noexcept { released_.store(true, std::memory_order_release); }
+  void release_waiting_callback() noexcept { released_.store(true, std::memory_order_release); }
 
   // --------------------------------------------------------
 private:
@@ -133,7 +135,7 @@ private:
 
 // --------------------------------------------------------
 // Copy all public callback-context fields while their borrowed configuration remains valid.
-[[nodiscard]] ObservedBotContext observe_context(const runtime::BotContext& context) {
+[[nodiscard]] ObservedBotContext copy_callback_context(const runtime::BotContext& context) {
   return ObservedBotContext{context.firm_id(),
                             context.desk_id(),
                             context.bot_id(),
@@ -149,12 +151,13 @@ private:
 // ########################################################################
 // The reference strategy copies complete callbacks and optionally supplies the capacity-test
 // handshake without retaining event, view, context, or runtime-owned storage.
-class CapturingStrategy final : public runtime::Strategy {
+class CallbackCapturingStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
   // Borrow pre-reserved observation and gate storage whose lifetime encloses the runtime.
-  CapturingStrategy(std::vector<CallbackObservation>& observations, CallbackGate& gate) noexcept
+  CallbackCapturingStrategy(std::vector<CallbackObservation>& observations,
+                            CallbackGate& gate) noexcept
       : observations_{&observations}, gate_{&gate} {}
 
   // --------------------------------------------------------
@@ -162,7 +165,7 @@ public:
   void on_market_data(const market_data::MarketEvent& event, const market_data::ReadyBookView& book,
                       runtime::BotContext& context) noexcept override {
     ObservedMarketCallback observation{
-        observe_context(context), event.update(), event.context(), {}, {}};
+        copy_callback_context(context), event.update(), event.context(), {}, {}};
     observation.bids.reserve(book.bid_count());
     observation.asks.reserve(book.ask_count());
     for (std::size_t index = 0U; index < book.bid_count(); ++index) {
@@ -185,7 +188,8 @@ public:
   // Copy the complete sanitized transition before any later owner turn can change source state.
   void on_market_state(const market_data::MarketStateEvent& event,
                        runtime::BotContext& context) noexcept override {
-    observations_->emplace_back(ObservedStateCallback{observe_context(context), event.fields()});
+    observations_->emplace_back(
+        ObservedStateCallback{copy_callback_context(context), event.fields()});
     gate_->wait_if_armed();
   }
 
@@ -199,12 +203,12 @@ private:
 
 // ########################################################################
 // An ungranted strategy counts any accidental callback without depending on callback contents.
-class UnrelatedStrategy final : public runtime::Strategy {
+class UnrelatedBotStrategy final : public runtime::Strategy {
 public:
 
   // --------------------------------------------------------
   // Borrow one atomic counter so dedicated-owner observations remain race-free.
-  explicit UnrelatedStrategy(std::atomic_uint32_t& callback_count) noexcept
+  explicit UnrelatedBotStrategy(std::atomic_uint32_t& callback_count) noexcept
       : callback_count_{&callback_count} {}
 
   // --------------------------------------------------------
@@ -319,7 +323,7 @@ constexpr ScriptedFrame final_recovery{
 // ########################################################################
 // Replay mode selects only ownership mechanics; all fixture bytes, clocks, and assertions remain
 // shared.
-enum class ReplayMode : std::uint8_t {
+enum class M2MarketReplayMode : std::uint8_t {
   Manual = 1,
   Dedicated = 2,
 };
@@ -328,8 +332,9 @@ enum class ReplayMode : std::uint8_t {
 
 // --------------------------------------------------------
 // Invalid identifier literals are fixture-authoring defects rather than runtime behavior.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M2 reference scenario"};
   }
@@ -338,7 +343,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Parse one exact price without binary floating-point fixture drift.
-[[nodiscard]] model::Price price(std::string_view text) {
+[[nodiscard]] model::Price parse_price_or_throw(std::string_view text) {
   auto parsed = model::Price::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid price in M2 reference scenario"};
@@ -348,7 +353,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Parse one exact quantity without binary floating-point fixture drift.
-[[nodiscard]] model::Quantity quantity(std::string_view text) {
+[[nodiscard]] model::Quantity parse_quantity_or_throw(std::string_view text) {
   auto parsed = model::Quantity::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid quantity in M2 reference scenario"};
@@ -358,15 +363,18 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Extend the single-firm reference with one bot that owns no subscription grant.
-[[nodiscard]] configuration::StartupConfiguration reference_configuration() {
-  auto params = test_support::reference_configuration_params();
-  const auto unrelated_bot = id<model::BotId>("bot.unrelated-reference");
-  const auto unrelated_strategy = id<model::StrategyId>("strategy.unrelated-reference");
+[[nodiscard]] configuration::StartupConfiguration create_reference_configuration_or_throw() {
+  auto params = test_support::create_reference_configuration_params_or_throw();
+  const auto unrelated_bot = parse_identifier_or_throw<model::BotId>("bot.unrelated-reference");
+  const auto unrelated_strategy =
+      parse_identifier_or_throw<model::StrategyId>("strategy.unrelated-reference");
   params.bots.push_back(organization::BotRegistration{
-      unrelated_bot, id<model::DeskId>("desk.digital-assets"), unrelated_strategy});
+      unrelated_bot, parse_identifier_or_throw<model::DeskId>("desk.digital-assets"),
+      unrelated_strategy});
   params.strategy_settings.push_back(configuration::BotStrategySettings{
       unrelated_bot, unrelated_strategy, configuration::StrategyMode::ObserveOnly});
-  auto created = configuration::StartupConfiguration::create(std::move(params));
+  auto created =
+      configuration::StartupConfiguration::create_startup_configuration(std::move(params));
   if (!created) {
     throw std::logic_error{"invalid startup configuration in M2 reference scenario"};
   }
@@ -376,16 +384,17 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 // --------------------------------------------------------
 // Bind one credential-free source and all scenario bounds to the sealed startup snapshot.
 [[nodiscard]] runtime::RuntimePolicy
-reference_policy(const configuration::StartupConfiguration& configuration) {
-  auto created = runtime::RuntimePolicy::create(
+create_reference_policy_or_throw(const configuration::StartupConfiguration& configuration) {
+  auto created = runtime::RuntimePolicy::create_runtime_policy(
       configuration,
       runtime::RuntimePolicyParams{
           runtime::RuntimePolicyLimits{1U, 4096U, 64U, 20U, 1'000U, 2U, 64U, 128U, 32U, 100'000U},
           {runtime::RuntimeSourceDefinition{
-              id<model::MarketSourceId>("source.deribit-btc-perpetual"),
-              id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-              id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-              model::InstrumentMetadataRevision::initial()}},
+              parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
+              parse_identifier_or_throw<model::VenueId>("deribit"),
+              parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+              parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+              model::InstrumentMetadataRevision::create_initial()}},
       });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M2 reference scenario"};
@@ -395,9 +404,10 @@ reference_policy(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Own one bounded ingress attempt while leaving attribution untrusted until policy resolution.
-[[nodiscard]] market_data::IngressFrameAttempt make_attempt(const ScriptedFrame& frame) {
-  auto created = market_data::IngressFrameAttempt::create(
-      id<model::MarketSourceId>("source.deribit-btc-perpetual"),
+[[nodiscard]] market_data::IngressFrameAttempt
+create_ingress_attempt_or_throw(const ScriptedFrame& frame) {
+  auto created = market_data::IngressFrameAttempt::create_ingress_frame_attempt(
+      parse_identifier_or_throw<model::MarketSourceId>("source.deribit-btc-perpetual"),
       model::SessionEpoch{frame.session_epoch}, std::string{frame.bytes});
   if (!created) {
     throw std::logic_error{"invalid ingress attempt in M2 reference scenario"};
@@ -407,7 +417,8 @@ reference_policy(const configuration::StartupConfiguration& configuration) {
 
 // --------------------------------------------------------
 // Bound every dedicated handshake so a broken owner cannot hang the deterministic test suite.
-template <typename Predicate> void wait_until(Predicate predicate, std::string_view failure) {
+template <typename Predicate>
+void wait_until_condition_or_throw(Predicate predicate, std::string_view failure) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
   while (std::chrono::steady_clock::now() < deadline) {
     if (predicate()) {
@@ -423,26 +434,26 @@ template <typename Predicate> void wait_until(Predicate predicate, std::string_v
 // ########################################################################
 // The harness owns clocks, callback storage, strategies, and runtime in an order that keeps every
 // borrowed capability alive until after owner shutdown.
-class ReplayHarness final {
+class M2MarketReplayHarness final {
 public:
 
   // --------------------------------------------------------
   // Construct the same one-slot runtime for either ownership driver.
-  explicit ReplayHarness(ReplayMode mode)
+  explicit M2MarketReplayHarness(M2MarketReplayMode mode)
       : mode_{mode}, executor_clock_{1'000U}, callback_clock_{100'000U} {
     observations_.reserve(32U);
-    auto configuration = reference_configuration();
-    auto policy = reference_policy(configuration);
+    auto configuration = create_reference_configuration_or_throw();
+    auto policy = create_reference_policy_or_throw(configuration);
     std::vector<runtime::BotStrategyRegistration> registrations;
     registrations.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.deribit-btc-perpetual-reference"),
-        std::make_unique<CapturingStrategy>(observations_, gate_)});
+        parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"),
+        std::make_unique<CallbackCapturingStrategy>(observations_, gate_)});
     registrations.push_back(runtime::BotStrategyRegistration{
-        id<model::BotId>("bot.unrelated-reference"),
-        std::make_unique<UnrelatedStrategy>(unrelated_callback_count_)});
-    auto created =
-        runtime::MarketRuntime::create(std::move(configuration), std::move(policy), executor_clock_,
-                                       callback_clock_, std::move(registrations));
+        parse_identifier_or_throw<model::BotId>("bot.unrelated-reference"),
+        std::make_unique<UnrelatedBotStrategy>(unrelated_callback_count_)});
+    auto created = runtime::MarketRuntime::create_market_runtime(
+        std::move(configuration), std::move(policy), executor_clock_, callback_clock_,
+        std::move(registrations));
     if (!created) {
       throw std::logic_error{"invalid composed runtime in M2 reference scenario"};
     }
@@ -451,18 +462,18 @@ public:
 
   // --------------------------------------------------------
   // Bootstrap through the selected owner and wait for the same first completed turn.
-  void start() {
-    if (mode_ == ReplayMode::Manual) {
+  void start_runtime_or_throw() {
+    if (mode_ == M2MarketReplayMode::Manual) {
       if (!runtime_->bind_to_current_thread()) {
         throw std::logic_error{"failed to bind manual M2 owner"};
       }
-      run_one_manual();
+      execute_one_manual_turn_or_throw();
       return;
     }
     if (!runtime_->start_dedicated()) {
       throw std::logic_error{"failed to start dedicated M2 owner"};
     }
-    wait_until(
+    wait_until_condition_or_throw(
         [this] {
           const auto status = runtime_->status();
           return status.lifecycle == runtime::MarketRuntimeLifecycle::Running &&
@@ -472,46 +483,47 @@ public:
   }
 
   // --------------------------------------------------------
-  // Advance only after the previous turn is complete, then admit and finish one ordinary frame.
-  void process(const ScriptedFrame& frame, std::uint64_t expected_completed_turns) {
-    advance_to(frame.clock_nanoseconds);
-    require_accepted(frame);
-    if (mode_ == ReplayMode::Manual) {
-      run_one_manual();
+  // Replay one ordinary frame only after the previous turn is complete, then require its owner
+  // turn.
+  void replay_frame_or_throw(const ScriptedFrame& frame, std::uint64_t expected_completed_turns) {
+    advance_clock_to_or_throw(frame.clock_nanoseconds);
+    require_accepted_frame(frame);
+    if (mode_ == M2MarketReplayMode::Manual) {
+      execute_one_manual_turn_or_throw();
       return;
     }
-    wait_for_completed(expected_completed_turns);
+    wait_for_completed_turn_count_or_throw(expected_completed_turns);
   }
 
   // --------------------------------------------------------
   // Hold the dedicated F22 callback after its clock read; manual ownership has no concurrent seam.
-  void begin_capacity_turn(const ScriptedFrame& frame) {
-    advance_to(frame.clock_nanoseconds);
-    if (mode_ == ReplayMode::Dedicated) {
-      gate_.arm();
+  void begin_capacity_turn_or_throw(const ScriptedFrame& frame) {
+    advance_clock_to_or_throw(frame.clock_nanoseconds);
+    if (mode_ == M2MarketReplayMode::Dedicated) {
+      gate_.arm_next_callback();
     }
-    auto admitted = runtime_->try_admit(make_attempt(frame));
+    auto admitted = runtime_->try_admit(create_ingress_attempt_or_throw(frame));
     if (!admitted || admitted.value().outcome != runtime::AdmissionOutcome::Accepted ||
         !admitted.value().receipt.has_value() || admitted.value().discontinuity_recorded) {
-      gate_.release();
+      gate_.release_waiting_callback();
       throw std::logic_error{"M2 capacity-anchor frame was not accepted"};
     }
-    if (mode_ == ReplayMode::Manual) {
-      run_one_manual();
+    if (mode_ == M2MarketReplayMode::Manual) {
+      execute_one_manual_turn_or_throw();
       return;
     }
-    wait_until([this] { return gate_.entered(); },
-               "dedicated M2 callback did not enter capacity gate");
+    wait_until_condition_or_throw([this] { return gate_.has_callback_entered(); },
+                                  "dedicated M2 callback did not enter capacity gate");
   }
 
   // --------------------------------------------------------
   // Fill the sole slot, reject the next attributable attempt, and drain command then loss fence.
-  void exercise_capacity_fence() {
-    advance_to(capacity_duplicate.clock_nanoseconds);
-    auto duplicate = runtime_->try_admit(make_attempt(capacity_duplicate));
-    auto rejected = runtime_->try_admit(make_attempt(capacity_rejected));
-    if (mode_ == ReplayMode::Dedicated) {
-      gate_.release();
+  void exercise_capacity_fence_or_throw() {
+    advance_clock_to_or_throw(capacity_duplicate.clock_nanoseconds);
+    auto duplicate = runtime_->try_admit(create_ingress_attempt_or_throw(capacity_duplicate));
+    auto rejected = runtime_->try_admit(create_ingress_attempt_or_throw(capacity_rejected));
+    if (mode_ == M2MarketReplayMode::Dedicated) {
+      gate_.release_waiting_callback();
     }
     if (!duplicate || duplicate.value().outcome != runtime::AdmissionOutcome::Accepted ||
         !duplicate.value().receipt.has_value() || duplicate.value().discontinuity_recorded ||
@@ -519,18 +531,18 @@ public:
         rejected.value().receipt.has_value() || !rejected.value().discontinuity_recorded) {
       throw std::logic_error{"capacity attempt did not produce an attributable M2 fence"};
     }
-    if (mode_ == ReplayMode::Manual) {
-      run_one_manual();
-      run_one_manual();
+    if (mode_ == M2MarketReplayMode::Manual) {
+      execute_one_manual_turn_or_throw();
+      execute_one_manual_turn_or_throw();
       return;
     }
-    wait_for_completed(25U);
+    wait_for_completed_turn_count_or_throw(25U);
   }
 
   // --------------------------------------------------------
   // Close and release the selected owner before copying immutable replay evidence.
-  [[nodiscard]] runtime::MarketRuntimeEvidence finish() {
-    if (mode_ == ReplayMode::Manual) {
+  [[nodiscard]] runtime::MarketRuntimeEvidence finish_replay_or_throw() {
+    if (mode_ == M2MarketReplayMode::Manual) {
       runtime_->close();
       if (!runtime_->release_from_current_thread()) {
         throw std::logic_error{"failed to release manual M2 owner"};
@@ -538,7 +550,7 @@ public:
     } else {
       runtime_->close_and_wait();
     }
-    auto evidence = runtime_->quiescent_evidence();
+    auto evidence = runtime_->collect_quiescent_evidence();
     if (!evidence) {
       throw std::logic_error{"failed to collect quiescent M2 evidence"};
     }
@@ -546,11 +558,13 @@ public:
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] const std::vector<CallbackObservation>& observations() const noexcept {
+  // Borrow the complete copied callback sequence after callback-local authority has expired.
+  [[nodiscard]] const std::vector<CallbackObservation>& callback_observations() const noexcept {
     return observations_;
   }
 
   // --------------------------------------------------------
+  // Return the number of callbacks that escaped the reference bot's configured grant.
   [[nodiscard]] std::uint32_t unrelated_callback_count() const noexcept {
     return unrelated_callback_count_.load(std::memory_order_relaxed);
   }
@@ -560,11 +574,11 @@ private:
 
   // --------------------------------------------------------
   // Advance the shared executor clock monotonically to the next scripted timestamp.
-  void advance_to(std::uint64_t target) {
+  void advance_clock_to_or_throw(std::uint64_t target) {
     if (target < current_clock_) {
       throw std::logic_error{"M2 reference clock regressed"};
     }
-    const auto advanced = executor_clock_.advance(target - current_clock_);
+    const auto advanced = executor_clock_.advance_nanoseconds(target - current_clock_);
     if (!advanced) {
       throw std::logic_error{"M2 reference clock exhausted"};
     }
@@ -573,8 +587,8 @@ private:
 
   // --------------------------------------------------------
   // Require ordinary acceptance and the one-slot receipt shape used by the replay script.
-  void require_accepted(const ScriptedFrame& frame) {
-    auto admitted = runtime_->try_admit(make_attempt(frame));
+  void require_accepted_frame(const ScriptedFrame& frame) {
+    auto admitted = runtime_->try_admit(create_ingress_attempt_or_throw(frame));
     if (!admitted || admitted.value().outcome != runtime::AdmissionOutcome::Accepted ||
         !admitted.value().receipt.has_value() || admitted.value().discontinuity_recorded) {
       throw std::logic_error{"M2 reference frame was not accepted"};
@@ -582,9 +596,9 @@ private:
   }
 
   // --------------------------------------------------------
-  // Execute exactly one available manual turn and reject an unexpected empty or failed result.
-  void run_one_manual() {
-    auto turn = runtime_->run_one();
+  // Execute exactly one available manual turn and throw on an unexpected empty or failed result.
+  void execute_one_manual_turn_or_throw() {
+    auto turn = runtime_->execute_next_turn();
     if (!turn || !turn.value().has_value()) {
       throw std::logic_error{"manual M2 owner did not complete one turn"};
     }
@@ -592,8 +606,8 @@ private:
 
   // --------------------------------------------------------
   // Observe public synchronized status until a dedicated turn and its queue have fully completed.
-  void wait_for_completed(std::uint64_t expected_completed_turns) {
-    wait_until(
+  void wait_for_completed_turn_count_or_throw(std::uint64_t expected_completed_turns) {
+    wait_until_condition_or_throw(
         [this, expected_completed_turns] {
           const auto status = runtime_->status();
           if (status.lifecycle == runtime::MarketRuntimeLifecycle::Faulted) {
@@ -607,7 +621,7 @@ private:
   }
 
   // --------------------------------------------------------
-  ReplayMode mode_;
+  M2MarketReplayMode mode_;
   std::vector<CallbackObservation> observations_;
   CallbackGate gate_;
   std::atomic_uint32_t unrelated_callback_count_{0U};
@@ -622,14 +636,14 @@ private:
 // ########################################################################
 // One replay result owns the complete callback vector and cold runtime evidence after owner
 // release.
-struct ReplayResult {
+struct M2MarketReplayResult {
   std::vector<CallbackObservation> callbacks;
   runtime::MarketRuntimeEvidence evidence;
   std::uint32_t unrelated_callback_count;
 
   // --------------------------------------------------------
   // Structural equality compares both strategy-visible and canonical replay products.
-  friend bool operator==(const ReplayResult&, const ReplayResult&) = default;
+  friend bool operator==(const M2MarketReplayResult&, const M2MarketReplayResult&) = default;
 
   // --------------------------------------------------------
 };
@@ -638,35 +652,35 @@ struct ReplayResult {
 
 // --------------------------------------------------------
 // Execute the exact accepted/rejected workload through only the public MarketRuntime boundary.
-[[nodiscard]] ReplayResult replay(ReplayMode mode) {
-  ReplayHarness harness{mode};
-  harness.start();
+[[nodiscard]] M2MarketReplayResult execute_replay_or_throw(M2MarketReplayMode mode) {
+  M2MarketReplayHarness harness{mode};
+  harness.start_runtime_or_throw();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Run through the pre-capacity table, reserving F22 for the dedicated producer handshake.
   for (std::size_t index = 0U; index + 1U < scripted_prefix.size(); ++index) {
-    harness.process(scripted_prefix[index], index + 2U);
+    harness.replay_frame_or_throw(scripted_prefix[index], index + 2U);
   }
-  harness.begin_capacity_turn(scripted_prefix.back());
+  harness.begin_capacity_turn_or_throw(scripted_prefix.back());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Turn 23 commits F22 while turns 24 and 25 consume the duplicate and ordered loss fence.
-  harness.exercise_capacity_fence();
-  harness.process(final_recovery, 26U);
+  harness.exercise_capacity_fence_or_throw();
+  harness.replay_frame_or_throw(final_recovery, 26U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy callbacks before harness destruction only after closure has made the vector immutable.
-  auto evidence = harness.finish();
-  return ReplayResult{harness.observations(), std::move(evidence),
-                      harness.unrelated_callback_count()};
+  auto evidence = harness.finish_replay_or_throw();
+  return M2MarketReplayResult{harness.callback_observations(), std::move(evidence),
+                              harness.unrelated_callback_count()};
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Render a fixed trace digest for a compact golden replay assertion.
-[[nodiscard]] std::string digest_hex(const model::Sha256Digest& digest) {
-  const auto encoded = model::sha256_hex(digest);
+[[nodiscard]] std::string digest_to_hex(const model::Sha256Digest& digest) {
+  const auto encoded = model::sha256_hex_from_digest(digest);
   return std::string{encoded.begin(), encoded.end()};
 }
 
@@ -713,7 +727,7 @@ void check_input_dispositions(const runtime::MarketRuntimeEvidence& evidence) {
 
 // --------------------------------------------------------
 // Verify every callback's route, ordinal, provenance, kind, and readiness in canonical order.
-void check_callback_sequence(const ReplayResult& replayed) {
+void check_callback_sequence(const M2MarketReplayResult& replayed) {
   constexpr std::array expected_state{
       market_data::MarketReadiness::Synchronizing, market_data::MarketReadiness::Ready,
       market_data::MarketReadiness::Invalid,       market_data::MarketReadiness::Ready,
@@ -742,12 +756,14 @@ void check_callback_sequence(const ReplayResult& replayed) {
     REQUIRE(std::holds_alternative<ObservedStateCallback>(callback) == is_state[index]);
     const auto* context =
         std::visit([](const auto& value) { return std::addressof(value.context); }, callback);
-    CHECK(context->firm_id == id<model::FirmId>("firm.aegis-lab"));
-    CHECK(context->desk_id == id<model::DeskId>("desk.digital-assets"));
-    CHECK(context->bot_id == id<model::BotId>("bot.deribit-btc-perpetual-reference"));
-    CHECK(context->strategy_id == id<model::StrategyId>("strategy.deterministic-reference"));
-    CHECK(context->subscription_id ==
-          id<model::SubscriptionId>("subscription.deribit-btc-perpetual-book"));
+    CHECK(context->firm_id == parse_identifier_or_throw<model::FirmId>("firm.aegis-lab"));
+    CHECK(context->desk_id == parse_identifier_or_throw<model::DeskId>("desk.digital-assets"));
+    CHECK(context->bot_id ==
+          parse_identifier_or_throw<model::BotId>("bot.deribit-btc-perpetual-reference"));
+    CHECK(context->strategy_id ==
+          parse_identifier_or_throw<model::StrategyId>("strategy.deterministic-reference"));
+    CHECK(context->subscription_id == parse_identifier_or_throw<model::SubscriptionId>(
+                                          "subscription.deribit-btc-perpetual-book"));
     CHECK(context->callback_ordinal.value() == index + 1U);
     CHECK(context->configuration_fingerprint == replayed.evidence.configuration_fingerprint);
     CHECK(context->runtime_policy_fingerprint == replayed.evidence.runtime_policy_fingerprint);
@@ -774,32 +790,43 @@ void check_callback_sequence(const ReplayResult& replayed) {
 // Build the exact final callback books in the same best-to-worst order exposed by ReadyBookView.
 [[nodiscard]] std::vector<
     std::pair<std::vector<market_data::BookLevel>, std::vector<market_data::BookLevel>>>
-expected_market_books() {
+create_expected_market_books_or_throw() {
   using Level = market_data::BookLevel;
   return {
-      {{Level{price("50000"), quantity("2")}, Level{price("49999.5"), quantity("4")}},
-       {Level{price("50000.5"), quantity("3")}, Level{price("50001"), quantity("5")}}},
-      {{Level{price("49999.5"), quantity("6")}},
-       {Level{price("50001"), quantity("5")}, Level{price("50001.5"), quantity("8")}}},
-      {{Level{price("50010"), quantity("7")}}, {Level{price("50010.5"), quantity("8")}}},
-      {{Level{price("50020"), quantity("9")}}, {Level{price("50020.5"), quantity("10")}}},
-      {{Level{price("50030"), quantity("11")}}, {Level{price("50030.5"), quantity("12")}}},
-      {{Level{price("50040"), quantity("13")}}, {Level{price("50040.5"), quantity("14")}}},
-      {{Level{price("50050"), quantity("15")}}, {Level{price("50050.5"), quantity("16")}}},
-      {{Level{price("50060"), quantity("19")}}, {Level{price("50060.5"), quantity("20")}}},
-      {{Level{price("50070"), quantity("22")}}, {Level{price("50070.5"), quantity("23")}}},
-      {{Level{price("50080"), quantity("25")}}, {Level{price("50080.5"), quantity("26")}}},
+      {{Level{parse_price_or_throw("50000"), parse_quantity_or_throw("2")},
+        Level{parse_price_or_throw("49999.5"), parse_quantity_or_throw("4")}},
+       {Level{parse_price_or_throw("50000.5"), parse_quantity_or_throw("3")},
+        Level{parse_price_or_throw("50001"), parse_quantity_or_throw("5")}}},
+      {{Level{parse_price_or_throw("49999.5"), parse_quantity_or_throw("6")}},
+       {Level{parse_price_or_throw("50001"), parse_quantity_or_throw("5")},
+        Level{parse_price_or_throw("50001.5"), parse_quantity_or_throw("8")}}},
+      {{Level{parse_price_or_throw("50010"), parse_quantity_or_throw("7")}},
+       {Level{parse_price_or_throw("50010.5"), parse_quantity_or_throw("8")}}},
+      {{Level{parse_price_or_throw("50020"), parse_quantity_or_throw("9")}},
+       {Level{parse_price_or_throw("50020.5"), parse_quantity_or_throw("10")}}},
+      {{Level{parse_price_or_throw("50030"), parse_quantity_or_throw("11")}},
+       {Level{parse_price_or_throw("50030.5"), parse_quantity_or_throw("12")}}},
+      {{Level{parse_price_or_throw("50040"), parse_quantity_or_throw("13")}},
+       {Level{parse_price_or_throw("50040.5"), parse_quantity_or_throw("14")}}},
+      {{Level{parse_price_or_throw("50050"), parse_quantity_or_throw("15")}},
+       {Level{parse_price_or_throw("50050.5"), parse_quantity_or_throw("16")}}},
+      {{Level{parse_price_or_throw("50060"), parse_quantity_or_throw("19")}},
+       {Level{parse_price_or_throw("50060.5"), parse_quantity_or_throw("20")}}},
+      {{Level{parse_price_or_throw("50070"), parse_quantity_or_throw("22")}},
+       {Level{parse_price_or_throw("50070.5"), parse_quantity_or_throw("23")}}},
+      {{Level{parse_price_or_throw("50080"), parse_quantity_or_throw("25")}},
+       {Level{parse_price_or_throw("50080.5"), parse_quantity_or_throw("26")}}},
   };
 }
 
 // --------------------------------------------------------
 // Verify all ten committed callbacks carry exact book identity and complete coherent level copies.
-void check_market_callbacks(const ReplayResult& replayed) {
+void check_market_callbacks(const M2MarketReplayResult& replayed) {
   constexpr std::array<std::uint64_t, 10U> sequences{100U, 101U, 104U, 105U, 107U,
                                                      109U, 110U, 112U, 2U,   4U};
   constexpr std::array<std::uint64_t, 10U> generations{1U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U};
   constexpr std::array<std::uint64_t, 10U> revisions{1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U};
-  const auto expected_books = expected_market_books();
+  const auto expected_books = create_expected_market_books_or_throw();
   std::size_t market_index = 0U;
   for (const auto& callback : replayed.callbacks) {
     const auto* market = std::get_if<ObservedMarketCallback>(&callback);
@@ -824,9 +851,9 @@ TEST_CASE("the complete M2 reference workload is byte-identical across serialize
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Two independent manual runtimes and one dedicated runtime consume the same scripted clocks.
-  const auto first = replay(ReplayMode::Manual);
-  const auto second = replay(ReplayMode::Manual);
-  const auto dedicated = replay(ReplayMode::Dedicated);
+  const auto first = execute_replay_or_throw(M2MarketReplayMode::Manual);
+  const auto second = execute_replay_or_throw(M2MarketReplayMode::Manual);
+  const auto dedicated = execute_replay_or_throw(M2MarketReplayMode::Dedicated);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Complete copied callback vectors and every cold evidence field are driver-independent.
@@ -861,7 +888,7 @@ TEST_CASE("the complete M2 reference workload is byte-identical across serialize
   // the strictly newer final snapshot recovered generation nine and global revision ten.
   REQUIRE(first.evidence.sources.size() == 1U);
   const auto& source = first.evidence.sources.front();
-  CHECK(source.source_ordinal == model::MarketSourceOrdinal::initial());
+  CHECK(source.source_ordinal == model::MarketSourceOrdinal::create_initial());
   CHECK(source.readiness == market_data::MarketReadiness::Ready);
   REQUIRE(source.book_identity.has_value());
   CHECK(source.book_identity->generation().value() == 9U);
@@ -878,7 +905,7 @@ TEST_CASE("the complete M2 reference workload is byte-identical across serialize
   // ++++++++++++++++++++++++++++++++++++++++
   // The digest and byte count pin the complete AEGISRTS schema-one stream, not a projected subset.
   CHECK(first.evidence.canonical_trace_bytes.size() == 29'610U);
-  CHECK(digest_hex(first.evidence.canonical_trace_digest) ==
+  CHECK(digest_to_hex(first.evidence.canonical_trace_digest) ==
         "e63b89b8c3a826fd1104f9e9949364606be5efbeedc112cb980260ccb70fda0b");
 
   // ++++++++++++++++++++++++++++++++++++++++

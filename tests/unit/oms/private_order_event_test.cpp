@@ -97,8 +97,8 @@ static_assert(!ExposesAttemptNormalization<runtime::PrivateOrderEventFactory>);
 [[nodiscard]] oms::PrivateOrderLocator
 create_private_order_locator_or_throw(std::optional<model::OrderId> local_order_id,
                                       std::optional<oms::ExchangeOrderId> exchange_order_id) {
-  auto created =
-      oms::PrivateOrderLocator::create(std::move(local_order_id), std::move(exchange_order_id));
+  auto created = oms::PrivateOrderLocator::create_private_order_locator(
+      std::move(local_order_id), std::move(exchange_order_id));
   if (!created) {
     throw std::logic_error{"invalid locator in private-event fixture"};
   }
@@ -111,7 +111,7 @@ create_private_order_locator_or_throw(std::optional<model::OrderId> local_order_
 create_both_identity_locator_or_throw(const test_support::M4PrivateEventFixture& fixture,
                                       std::uint8_t exchange_byte = 0x61U) {
   return create_private_order_locator_or_throw(
-      fixture.record().order_id(),
+      fixture.outbound_order_record().order_id(),
       test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(exchange_byte));
 }
 
@@ -154,7 +154,7 @@ void require_ingress_semantic_oracles_agree(const oms::NormalizedPrivateOrderInp
 // construction.
 TEST_CASE("normalized private event factory covers every accepted source shape", "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
   const auto exchange_id =
       test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x61U);
   const auto trade_id = test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(0x71U);
@@ -162,16 +162,17 @@ TEST_CASE("normalized private event factory covers every accepted source shape",
   const auto quantity_one = test_support::create_m4_decimal_or_throw<model::Quantity>(1);
   const auto quantity_two = test_support::create_m4_decimal_or_throw<model::Quantity>(2);
   const auto price = test_support::create_m4_decimal_or_throw<model::Price>(10);
-  const auto revision = fixture.record().provenance().metadata_revision;
+  const auto revision = fixture.outbound_order_record().provenance().metadata_revision;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The two authoritative origins accept acknowledgement, rejection, execution, and cancellation.
   const auto venue_ack = factory.normalize_venue_acknowledgement(
       fixture.create_venue_private_event_origin_or_throw(1U), exchange_id,
-      fixture.record().order_id());
+      fixture.outbound_order_record().order_id());
   const auto reconciliation_ack = factory.normalize_reconciliation_acknowledgement(
       fixture.create_reconciliation_private_event_origin_or_throw(1U), fixture.account_id(),
-      fixture.venue_id(), exchange_id, fixture.record().order_id(), fixture.instrument_id());
+      fixture.venue_id(), exchange_id, fixture.outbound_order_record().order_id(),
+      fixture.instrument_id());
   const auto venue_reject =
       factory.normalize_venue_rejection(fixture.create_venue_private_event_origin_or_throw(2U),
                                         create_both_identity_locator_or_throw(fixture),
@@ -253,7 +254,7 @@ TEST_CASE("normalized private event factory covers every accepted source shape",
 TEST_CASE("ordinary private ingress attempts preserve compatibility semantics without receive time",
           "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
   const auto exchange_id =
       test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x61U);
   const auto trade_id = test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(0x71U);
@@ -263,7 +264,7 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   const auto one = test_support::create_m4_decimal_or_throw<model::Quantity>(1);
   const auto two = test_support::create_m4_decimal_or_throw<model::Quantity>(2);
   const auto price = test_support::create_m4_decimal_or_throw<model::Price>(10);
-  const auto revision = fixture.record().provenance().metadata_revision;
+  const auto revision = fixture.outbound_order_record().provenance().metadata_revision;
   const auto acknowledgement_origin =
       fixture.create_venue_private_event_origin_or_throw(21U, 101U, 201U);
   const auto rejection_origin = fixture.create_venue_private_event_origin_or_throw(22U, 102U, 202U);
@@ -281,9 +282,9 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   const auto acknowledgement_attempt = factory.create_venue_acknowledgement_attempt(
       oms::VenuePrivateIngressOrigin{acknowledgement_origin.event_key,
                                      acknowledgement_origin.source_time},
-      exchange_id, fixture.record().order_id());
+      exchange_id, fixture.outbound_order_record().order_id());
   const auto acknowledgement = factory.normalize_venue_acknowledgement(
-      acknowledgement_origin, exchange_id, fixture.record().order_id());
+      acknowledgement_origin, exchange_id, fixture.outbound_order_record().order_id());
   const auto rejection_attempt = factory.create_venue_rejection_attempt(
       oms::VenuePrivateIngressOrigin{rejection_origin.event_key, rejection_origin.source_time},
       create_both_identity_locator_or_throw(fixture), oms::ExchangeRejectionCategory::InvalidOrder,
@@ -378,7 +379,7 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   auto later_acknowledgement_origin = acknowledgement_origin;
   later_acknowledgement_origin.receive_time = model::ReceiveTimestamp{999U};
   const auto later_acknowledgement = factory.normalize_venue_acknowledgement(
-      later_acknowledgement_origin, exchange_id, fixture.record().order_id());
+      later_acknowledgement_origin, exchange_id, fixture.outbound_order_record().order_id());
   REQUIRE(later_acknowledgement);
   CHECK_FALSE(acknowledgement.value() == later_acknowledgement.value());
   CHECK(acknowledgement.value().is_ingress_semantically_equal_to(later_acknowledgement.value()));
@@ -472,8 +473,8 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   // The projection also removes receive time from a reconciliation row without altering its key.
   const auto reconciliation = factory.normalize_reconciliation_acknowledgement(
       fixture.create_reconciliation_private_event_origin_or_throw(30U, 130U, 230U),
-      fixture.account_id(), fixture.venue_id(), exchange_id, fixture.record().order_id(),
-      fixture.instrument_id());
+      fixture.account_id(), fixture.venue_id(), exchange_id,
+      fixture.outbound_order_record().order_id(), fixture.instrument_id());
   REQUIRE(reconciliation);
   const auto reconciliation_semantic =
       oms::PrivateEventIngressSemanticValue::from_normalized_input(reconciliation.value());
@@ -503,8 +504,8 @@ TEST_CASE("private ingress attempts own their complete bounded source value", "[
   // Return a self-owned factory only after its configuration and policy-bearing fixture disappear.
   auto surviving_factory = [] {
     auto authority = test_support::create_m4_test_authority_or_throw();
-    auto resolver =
-        runtime::M4ProvenanceResolver::create(authority.configuration, authority.m4_policy);
+    auto resolver = runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+        authority.configuration, authority.m4_policy);
     if (!resolver) {
       throw std::logic_error{"invalid owning private-event factory fixture"};
     }
@@ -521,8 +522,8 @@ TEST_CASE("private ingress attempts own their complete bounded source value", "[
   // Return the attempt itself only after the complete resolver/factory construction stack vanishes.
   auto retained_attempt = [] {
     auto authority = test_support::create_m4_test_authority_or_throw();
-    auto resolver =
-        runtime::M4ProvenanceResolver::create(authority.configuration, authority.m4_policy);
+    auto resolver = runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+        authority.configuration, authority.m4_policy);
     if (!resolver) {
       throw std::logic_error{"invalid retained private-event attempt resolver"};
     }
@@ -556,12 +557,12 @@ TEST_CASE("private ingress attempts own their complete bounded source value", "[
 TEST_CASE("normalized private events never infer local ownership from source locators",
           "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
   const auto fill = factory.normalize_venue_execution(
       fixture.create_venue_private_event_origin_or_throw(),
       create_both_identity_locator_or_throw(fixture),
       test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(0x71U),
-      fixture.instrument_id(), fixture.record().provenance().metadata_revision,
+      fixture.instrument_id(), fixture.outbound_order_record().provenance().metadata_revision,
       test_support::create_m4_decimal_or_throw<model::Quantity>(1),
       test_support::create_m4_decimal_or_throw<model::Quantity>(2),
       test_support::create_m4_decimal_or_throw<model::Price>(10), execution::OrderSide::Buy);
@@ -582,8 +583,8 @@ TEST_CASE("normalized private events never infer local ownership from source loc
 TEST_CASE("normalized private event factory rejects every malformed dependent boundary",
           "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
-  const auto revision = fixture.record().provenance().metadata_revision;
+  const auto& factory = fixture.private_event_factory();
+  const auto revision = fixture.outbound_order_record().provenance().metadata_revision;
   const auto one = test_support::create_m4_decimal_or_throw<model::Quantity>(1);
   const auto two = test_support::create_m4_decimal_or_throw<model::Quantity>(2);
   const auto zero_quantity = test_support::create_m4_decimal_or_throw<model::Quantity>(0);
@@ -594,7 +595,7 @@ TEST_CASE("normalized private event factory rejects every malformed dependent bo
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A locator must contain at least one identity and rejection detail must fit exactly 256 bytes.
-  REQUIRE_FALSE(oms::PrivateOrderLocator::create(std::nullopt, std::nullopt));
+  REQUIRE_FALSE(oms::PrivateOrderLocator::create_private_order_locator(std::nullopt, std::nullopt));
   const std::array<std::byte, 256U> maximum_detail{};
   const std::array<std::byte, 257U> over_detail{};
   REQUIRE(factory.normalize_venue_rejection(fixture.create_venue_private_event_origin_or_throw(),
@@ -740,10 +741,10 @@ TEST_CASE("normalized private event factory rejects every malformed dependent bo
 // receive time and reacts to each major semantic group independently.
 TEST_CASE("normalized private event ingress equality excludes receive time only", "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
   const auto locator_value = create_both_identity_locator_or_throw(fixture);
   const auto trade = test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(0x71U);
-  const auto revision = fixture.record().provenance().metadata_revision;
+  const auto revision = fixture.outbound_order_record().provenance().metadata_revision;
   const auto one = test_support::create_m4_decimal_or_throw<model::Quantity>(1);
   const auto two = test_support::create_m4_decimal_or_throw<model::Quantity>(2);
   const auto price = test_support::create_m4_decimal_or_throw<model::Price>(10);
@@ -854,8 +855,8 @@ TEST_CASE("normalized private event ingress equality excludes receive time only"
   auto changed_capacities = test_support::create_ordinary_m4_policy_capacities();
   ++changed_capacities.max_event_identity_records;
   auto changed_authority = test_support::create_m4_test_authority_or_throw(changed_capacities);
-  auto changed_resolver = runtime::M4ProvenanceResolver::create(changed_authority.configuration,
-                                                                changed_authority.m4_policy);
+  auto changed_resolver = runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+      changed_authority.configuration, changed_authority.m4_policy);
   REQUIRE(changed_resolver);
   runtime::PrivateOrderEventFactory changed_factory{std::move(changed_resolver).value()};
   const auto changed_root =
@@ -876,7 +877,7 @@ TEST_CASE("normalized private event ingress equality excludes receive time only"
 TEST_CASE("normalized private event equality covers local and reconciliation origins",
           "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Local account facts ignore receive time but retain local identity and source time.
@@ -925,7 +926,7 @@ TEST_CASE("normalized private event equality covers local and reconciliation ori
         return take_normalized_private_order_input_or_throw(
             factory.normalize_reconciliation_acknowledgement(
                 std::move(origin), fixture.account_id(), fixture.venue_id(), exchange_id,
-                fixture.record().order_id(), fixture.instrument_id()));
+                fixture.outbound_order_record().order_id(), fixture.instrument_id()));
       };
   const auto reconciliation = create_reconciliation_acknowledgement_input_or_throw(
       fixture.create_reconciliation_private_event_origin_or_throw(1U, 100U, 200U));
@@ -934,8 +935,8 @@ TEST_CASE("normalized private event equality covers local and reconciliation ori
   const auto reconciliation_no_instrument =
       take_normalized_private_order_input_or_throw(factory.normalize_reconciliation_acknowledgement(
           fixture.create_reconciliation_private_event_origin_or_throw(1U, 100U, 200U),
-          fixture.account_id(), fixture.venue_id(), exchange_id, fixture.record().order_id(),
-          std::nullopt));
+          fixture.account_id(), fixture.venue_id(), exchange_id,
+          fixture.outbound_order_record().order_id(), std::nullopt));
   auto changed_epoch_origin =
       fixture.create_reconciliation_private_event_origin_or_throw(1U, 100U, 200U);
   changed_epoch_origin.reconciliation_epoch_id =
@@ -967,7 +968,7 @@ TEST_CASE("normalized private event equality covers local and reconciliation ori
   const auto venue_acknowledgement =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(1U, 100U, 200U), exchange_id,
-          fixture.record().order_id()));
+          fixture.outbound_order_record().order_id()));
   REQUIRE_FALSE(reconciliation.is_ingress_semantically_equal_to(venue_acknowledgement));
   require_ingress_semantic_oracles_agree(reconciliation, venue_acknowledgement);
 
@@ -981,8 +982,8 @@ TEST_CASE("normalized private event equality covers local and reconciliation ori
 // kind each participate independently in ingress equality.
 TEST_CASE("normalized private event equality covers every source payload family", "[m4][private]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
-  const auto local_order_id = fixture.record().order_id();
+  const auto& factory = fixture.private_event_factory();
+  const auto local_order_id = fixture.outbound_order_record().order_id();
   const auto exchange_id =
       test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x61U);
   const auto other_exchange_id =
@@ -1015,12 +1016,14 @@ TEST_CASE("normalized private event equality covers every source payload family"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Acknowledgement exchange identity and optional raw client locator both remain source facts.
-  const auto acknowledgement = take_normalized_private_order_input_or_throw(
-      factory.normalize_venue_acknowledgement(fixture.create_venue_private_event_origin_or_throw(),
-                                              exchange_id, fixture.record().order_id()));
-  const auto changed_exchange = take_normalized_private_order_input_or_throw(
-      factory.normalize_venue_acknowledgement(fixture.create_venue_private_event_origin_or_throw(),
-                                              other_exchange_id, fixture.record().order_id()));
+  const auto acknowledgement =
+      take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
+          fixture.create_venue_private_event_origin_or_throw(), exchange_id,
+          fixture.outbound_order_record().order_id()));
+  const auto changed_exchange =
+      take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
+          fixture.create_venue_private_event_origin_or_throw(), other_exchange_id,
+          fixture.outbound_order_record().order_id()));
   const auto absent_local =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(), exchange_id, std::nullopt));
@@ -1078,24 +1081,24 @@ TEST_CASE("normalized private rejection detail is bounded and semantic", "[m4][p
   test_support::M4PrivateEventFixture fixture;
   const std::array first{std::byte{0x01U}};
   const std::array second{std::byte{0x02U}};
-  const auto baseline =
-      take_normalized_private_order_input_or_throw(fixture.factory().normalize_venue_rejection(
+  const auto baseline = take_normalized_private_order_input_or_throw(
+      fixture.private_event_factory().normalize_venue_rejection(
           fixture.create_venue_private_event_origin_or_throw(),
           create_both_identity_locator_or_throw(fixture),
           oms::ExchangeRejectionCategory::InvalidOrder, first));
-  const auto changed =
-      take_normalized_private_order_input_or_throw(fixture.factory().normalize_venue_rejection(
+  const auto changed = take_normalized_private_order_input_or_throw(
+      fixture.private_event_factory().normalize_venue_rejection(
           fixture.create_venue_private_event_origin_or_throw(),
           create_both_identity_locator_or_throw(fixture),
           oms::ExchangeRejectionCategory::InvalidOrder, second));
-  const auto empty =
-      take_normalized_private_order_input_or_throw(fixture.factory().normalize_venue_rejection(
+  const auto empty = take_normalized_private_order_input_or_throw(
+      fixture.private_event_factory().normalize_venue_rejection(
           fixture.create_venue_private_event_origin_or_throw(),
           create_both_identity_locator_or_throw(fixture),
           oms::ExchangeRejectionCategory::InvalidOrder, std::span<const std::byte>{}));
   REQUIRE_FALSE(baseline.is_ingress_semantically_equal_to(changed));
   REQUIRE_FALSE(baseline.is_ingress_semantically_equal_to(empty));
-  REQUIRE(std::get<oms::ExchangeRejectedPayload>(empty.payload()).detail.size() == 0U);
+  REQUIRE(std::get<oms::ExchangeRejectedPayload>(empty.payload()).detail.active_byte_count() == 0U);
 }
 
 // --------------------------------------------------------

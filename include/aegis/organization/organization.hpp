@@ -73,10 +73,9 @@ public:
 
   // --------------------------------------------------------
   // Validate, canonicalize, and atomically publish a complete organization snapshot.
-  [[nodiscard]] static model::Result<Organization> create(model::OrganizationRevision revision,
-                                                          std::vector<Firm> firms,
-                                                          std::vector<Desk> desks,
-                                                          std::vector<BotRegistration> bots);
+  [[nodiscard]] static model::Result<Organization>
+  create_organization(model::OrganizationRevision revision, std::vector<Firm> firms,
+                      std::vector<Desk> desks, std::vector<BotRegistration> bots);
 
   // --------------------------------------------------------
   // Return the accepted organization-section revision.

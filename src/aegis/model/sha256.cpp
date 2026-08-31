@@ -57,7 +57,7 @@ Sha256::Sha256() noexcept
 
 // --------------------------------------------------------
 // Streaming updates preserve chunk-boundary independence while retaining at most one partial block.
-void Sha256::update(std::span<const std::byte> bytes) noexcept {
+void Sha256::append_bytes(std::span<const std::byte> bytes) noexcept {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Count original stream bytes across chunk boundaries; unsigned arithmetic supplies SHA-256's
@@ -98,7 +98,7 @@ void Sha256::update(std::span<const std::byte> bytes) noexcept {
 
 // --------------------------------------------------------
 // Finalization applies standard padding to a snapshot and returns canonical digest bytes.
-Sha256Digest Sha256::finalize() const noexcept {
+Sha256Digest Sha256::derive_digest() const noexcept {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Snapshot state so callers may inspect a prefix digest and then continue updating the original.
@@ -112,7 +112,7 @@ Sha256Digest Sha256::finalize() const noexcept {
   padding[0U] = std::byte{0x80U};
   const auto padding_size = final_hash.buffered_bytes_ < 56U ? 56U - final_hash.buffered_bytes_
                                                              : 120U - final_hash.buffered_bytes_;
-  final_hash.update(std::span<const std::byte>{padding.data(), padding_size});
+  final_hash.append_bytes(std::span<const std::byte>{padding.data(), padding_size});
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Append the pre-padding message length as the required 64-bit big-endian bit count.
@@ -121,7 +121,7 @@ Sha256Digest Sha256::finalize() const noexcept {
     const auto shift = static_cast<unsigned int>((encoded_bit_count.size() - 1U - index) * 8U);
     encoded_bit_count[index] = static_cast<std::byte>((bit_count >> shift) & 0xffU);
   }
-  final_hash.update(encoded_bit_count);
+  final_hash.append_bytes(encoded_bit_count);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Serialize working words in canonical network order rather than exposing host representation.
@@ -202,15 +202,15 @@ void Sha256::compress(std::span<const std::byte, block_size> block) noexcept {
 
 // --------------------------------------------------------
 // Keep one-shot hashing a thin composition of the streaming contract.
-Sha256Digest sha256(std::span<const std::byte> bytes) noexcept {
+Sha256Digest calculate_sha256_digest(std::span<const std::byte> bytes) noexcept {
   Sha256 hash;
-  hash.update(bytes);
-  return hash.finalize();
+  hash.append_bytes(bytes);
+  return hash.derive_digest();
 }
 
 // --------------------------------------------------------
 // Encode each digest nibble through a fixed lowercase table, producing exactly 64 characters.
-Sha256Hex sha256_hex(const Sha256Digest& digest) noexcept {
+Sha256Hex sha256_hex_from_digest(const Sha256Digest& digest) noexcept {
   constexpr std::array<char, 16U> digits{'0', '1', '2', '3', '4', '5', '6', '7',
                                          '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
   Sha256Hex encoded{};

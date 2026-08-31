@@ -11,13 +11,13 @@ namespace aegis::model {
 // --------------------------------------------------------
 // This is the only supported receive-to-processing subtraction; checking order first prevents an
 // unsigned underflow from masquerading as a very large latency.
-Result<ElapsedNanoseconds> processing_delay(ProcessingTimestamp processing,
-                                            ReceiveTimestamp receive) {
+Result<ElapsedNanoseconds> calculate_processing_delay(ProcessingTimestamp processing,
+                                                      ReceiveTimestamp receive) {
   if (processing.nanoseconds() < receive.nanoseconds()) {
-    return Result<ElapsedNanoseconds>::failure(
-        DomainError::at_field(DomainErrorCode::InvalidTimestampOrder, "processing_timestamp"));
+    return Result<ElapsedNanoseconds>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::InvalidTimestampOrder, "processing_timestamp"));
   }
-  return Result<ElapsedNanoseconds>::success(
+  return Result<ElapsedNanoseconds>::create_success(
       ElapsedNanoseconds{processing.nanoseconds() - receive.nanoseconds()});
 }
 
@@ -25,13 +25,13 @@ Result<ElapsedNanoseconds> processing_delay(ProcessingTimestamp processing,
 // The public template has already mapped negative or unrepresentable input to ArithmeticOverflow at
 // clock_nanoseconds. Subtraction-based capacity checking preserves that field and leaves state
 // unchanged when the normalized increment would overflow.
-Result<void> DeterministicClockProvider::advance_validated(std::uint64_t nanoseconds) {
+Result<void> DeterministicClockProvider::advance_validated_nanoseconds(std::uint64_t nanoseconds) {
   if (nanoseconds > std::numeric_limits<std::uint64_t>::max() - current_nanoseconds_) {
-    return Result<void>::failure(
-        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
+    return Result<void>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
   }
   current_nanoseconds_ += nanoseconds;
-  return Result<void>::success();
+  return Result<void>::create_success();
 }
 
 // --------------------------------------------------------

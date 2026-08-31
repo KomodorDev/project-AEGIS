@@ -9,7 +9,7 @@ namespace {
 
 // --------------------------------------------------------
 // Execute a stable, intentionally trivial mutation once per iteration selected by the runner.
-void harness_noop(benchmark::State& state) {
+void benchmark_harness_noop(benchmark::State& state) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Initialize the value whose mutation supplies the intentionally tiny workload.
@@ -37,7 +37,9 @@ void harness_noop(benchmark::State& state) {
 
 // --------------------------------------------------------
 // Register a stable workload ID and report its duration in nanoseconds.
-BENCHMARK(harness_noop)->Name("BENCH-M0-HARNESS-001/harness.noop")->Unit(benchmark::kNanosecond);
+BENCHMARK(benchmark_harness_noop)
+    ->Name("BENCH-M0-HARNESS-001/harness.noop")
+    ->Unit(benchmark::kNanosecond);
 
 // --------------------------------------------------------
 // Interesting syntax: this macro generates main() and starts every registered benchmark.

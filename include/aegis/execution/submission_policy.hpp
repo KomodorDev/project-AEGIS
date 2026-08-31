@@ -74,16 +74,20 @@ class SubmissionPolicyFingerprint final {
 public:
 
   // --------------------------------------------------------
+  // Wrap the already computed digest without altering its canonical bytes.
   explicit SubmissionPolicyFingerprint(model::Sha256Digest bytes) noexcept
       : bytes_{std::move(bytes)} {}
 
   // --------------------------------------------------------
+  // Borrow the exact 32-byte digest identifying the canonical policy.
   [[nodiscard]] const model::Sha256Digest& bytes() const noexcept { return bytes_; }
 
   // --------------------------------------------------------
+  // Render the digest as lowercase hexadecimal without recomputing it.
   [[nodiscard]] std::string to_hex() const;
 
   // --------------------------------------------------------
+  // Compare fingerprints by their complete digest bytes.
   friend bool operator==(const SubmissionPolicyFingerprint&,
                          const SubmissionPolicyFingerprint&) = default;
 
@@ -102,32 +106,39 @@ public:
 
   // --------------------------------------------------------
   // Validate, encode, and fingerprint one complete AEGISSUP artifact atomically.
-  [[nodiscard]] static model::Result<SubmissionPolicy> create(SubmissionPolicyParams params);
+  [[nodiscard]] static model::Result<SubmissionPolicy>
+  create_submission_policy(SubmissionPolicyParams params);
 
   // --------------------------------------------------------
+  // Return the sealed capability mode; schema one permits only the deterministic fake path.
   [[nodiscard]] constexpr SubmissionCapability capability() const noexcept { return capability_; }
 
   // --------------------------------------------------------
+  // Borrow the configuration digest to which this policy is bound.
   [[nodiscard]] const model::Sha256Digest& configuration_fingerprint() const noexcept {
     return configuration_fingerprint_;
   }
 
   // --------------------------------------------------------
+  // Borrow the runtime-policy digest to which this policy is bound.
   [[nodiscard]] const model::Sha256Digest& runtime_policy_fingerprint() const noexcept {
     return runtime_policy_fingerprint_;
   }
 
   // --------------------------------------------------------
+  // Borrow the risk-policy digest validated during policy construction.
   [[nodiscard]] const model::Sha256Digest& risk_policy_fingerprint() const noexcept {
     return risk_policy_fingerprint_;
   }
 
   // --------------------------------------------------------
+  // Return the exact risk-policy revision paired with the retained digest.
   [[nodiscard]] model::RiskPolicyRevision risk_policy_revision() const noexcept {
     return risk_policy_revision_;
   }
 
   // --------------------------------------------------------
+  // Borrow the coherent set of prevalidated owner-storage limits.
   [[nodiscard]] const SubmissionPolicyCapacities& capacities() const noexcept {
     return capacities_;
   }
@@ -139,19 +150,23 @@ public:
   }
 
   // --------------------------------------------------------
+  // Borrow the validated deterministic encoder script.
   [[nodiscard]] const FakeEncoderScript& encoder_script() const noexcept { return encoder_script_; }
 
   // --------------------------------------------------------
+  // Borrow the validated deterministic transport-initiation script.
   [[nodiscard]] const FakeInitiatorScript& initiator_script() const noexcept {
     return initiator_script_;
   }
 
   // --------------------------------------------------------
+  // Borrow the exact canonical bytes whose digest is exposed by fingerprint().
   [[nodiscard]] const std::vector<std::byte>& canonical_bytes() const noexcept {
     return canonical_bytes_;
   }
 
   // --------------------------------------------------------
+  // Borrow the digest derived from the retained canonical bytes.
   [[nodiscard]] const SubmissionPolicyFingerprint& fingerprint() const noexcept {
     return fingerprint_;
   }

@@ -173,7 +173,7 @@ derive_private_event_registry_key(const oms::NormalizedPrivateOrderInput& input)
 TEST_CASE("private venue registry key retains only complete source identity",
           "[m4][oms][private-resolution]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
   const auto exchange_order_id =
       test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x61U);
   const auto other_exchange_order_id =
@@ -185,19 +185,19 @@ TEST_CASE("private venue registry key retains only complete source identity",
   const auto baseline =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(1U, 100U, 200U), exchange_order_id,
-          fixture.record().order_id()));
+          fixture.outbound_order_record().order_id()));
   const auto changed_receive_time =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(1U, 100U, 900U), exchange_order_id,
-          fixture.record().order_id()));
+          fixture.outbound_order_record().order_id()));
   const auto changed_source_time =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(1U, 700U, 200U), exchange_order_id,
-          fixture.record().order_id()));
+          fixture.outbound_order_record().order_id()));
   const auto changed_payload =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(1U, 100U, 200U),
-          other_exchange_order_id, fixture.record().order_id()));
+          other_exchange_order_id, fixture.outbound_order_record().order_id()));
   const auto baseline_semantic =
       oms::PrivateEventIngressSemanticValue::from_normalized_input(baseline);
   const auto receive_semantic =
@@ -229,13 +229,13 @@ TEST_CASE("private venue registry key retains only complete source identity",
   const auto changed_event_identity =
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(2U, 100U, 200U), exchange_order_id,
-          fixture.record().order_id()));
+          fixture.outbound_order_record().order_id()));
   auto changed_epoch_origin = fixture.create_venue_private_event_origin_or_throw(1U, 100U, 200U);
   changed_epoch_origin.event_key.source_epoch_id =
       test_support::create_m4_opaque_identity_or_throw<oms::PrivateSourceEpochId>(0x42U);
-  const auto changed_source_epoch =
-      take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
-          std::move(changed_epoch_origin), exchange_order_id, fixture.record().order_id()));
+  const auto changed_source_epoch = take_normalized_private_order_input_or_throw(
+      factory.normalize_venue_acknowledgement(std::move(changed_epoch_origin), exchange_order_id,
+                                              fixture.outbound_order_record().order_id()));
   const auto changed_event_key = derive_private_event_registry_key(changed_event_identity);
   CHECK_FALSE(baseline_key == changed_event_key);
   CHECK(baseline_key < changed_event_key);
@@ -252,7 +252,7 @@ TEST_CASE("private venue registry key retains only complete source identity",
 TEST_CASE("private registry keys keep local and reconciliation domains distinct",
           "[m4][oms][private-resolution]") {
   test_support::M4PrivateEventFixture fixture;
-  const auto& factory = fixture.factory();
+  const auto& factory = fixture.private_event_factory();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Local keys retain the complete locally minted identity but neither authored timestamp.
@@ -287,7 +287,7 @@ TEST_CASE("private registry keys keep local and reconciliation domains distinct"
         return take_normalized_private_order_input_or_throw(
             factory.normalize_reconciliation_acknowledgement(
                 std::move(origin), fixture.account_id(), fixture.venue_id(), exchange_order_id,
-                fixture.record().order_id(), fixture.instrument_id()));
+                fixture.outbound_order_record().order_id(), fixture.instrument_id()));
       };
   const auto reconciliation_baseline = create_reconciliation_input_or_throw(
       fixture.create_reconciliation_private_event_origin_or_throw(1U, 100U, 200U));
@@ -333,7 +333,7 @@ TEST_CASE("private registry keys keep local and reconciliation domains distinct"
   const auto venue_key = derive_private_event_registry_key(
       take_normalized_private_order_input_or_throw(factory.normalize_venue_acknowledgement(
           fixture.create_venue_private_event_origin_or_throw(1U), exchange_order_id,
-          fixture.record().order_id())));
+          fixture.outbound_order_record().order_id())));
   CHECK(venue_key != local_key);
   CHECK(venue_key != reconciliation_key);
   CHECK(local_key < venue_key);

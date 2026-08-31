@@ -17,7 +17,8 @@
 namespace aegis::model {
 
 // ########################################################################
-// Contract style and unit enums make economic meaning explicit; create() validates their permitted
+// Contract style and unit enums make economic meaning explicit; create_instrument_metadata()
+// validates their permitted
 // combinations rather than relying on conventions at conversion call sites.
 enum class ContractStyle : std::uint8_t {
   Linear = 1,
@@ -68,7 +69,8 @@ public:
 
   // --------------------------------------------------------
   // Validate one complete authored snapshot before publishing immutable metadata.
-  [[nodiscard]] static Result<InstrumentMetadata> create(InstrumentMetadataParams params);
+  [[nodiscard]] static Result<InstrumentMetadata>
+  create_instrument_metadata(InstrumentMetadataParams params);
 
   // --------------------------------------------------------
   // Borrow the validated venue identity.
@@ -172,25 +174,27 @@ public:
   // The deduced scale retains its sign through in_range, so negative values become InvalidScale
   // instead of wrapping into a large unsigned target.
   template <detail::CheckedIntegerInput Scale>
-  [[nodiscard]] Result<Notional> contract_value(Quantity contracts, Scale target_scale,
-                                                RoundingMode rounding) const {
+  [[nodiscard]] Result<Notional> calculate_contract_value(Quantity contracts, Scale target_scale,
+                                                          RoundingMode rounding) const {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject signed-negative or unrepresentable scales before any narrowing conversion.
     if (!std::in_range<std::uint64_t>(target_scale)) {
-      return Result<Notional>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidScale, "contract_value"));
+      return Result<Notional>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidScale, "contract_value"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Delegate only a validated fixed-width scale to the stable conversion implementation.
-    return contract_value_validated(contracts, static_cast<std::uint64_t>(target_scale), rounding);
+    return calculate_contract_value_from_validated_scale(
+        contracts, static_cast<std::uint64_t>(target_scale), rounding);
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
   template <typename Scale>
     requires std::floating_point<std::remove_cvref_t<Scale>>
-  [[nodiscard]] Result<Notional> contract_value(Quantity, Scale, RoundingMode) const = delete;
+  [[nodiscard]] Result<Notional> calculate_contract_value(Quantity, Scale,
+                                                          RoundingMode) const = delete;
 
   // --------------------------------------------------------
   // Return the currency dimension promised by contract_value.
@@ -201,13 +205,13 @@ private:
 
   // --------------------------------------------------------
   // The constrained public gate normalizes scale width before this stable implementation boundary.
-  [[nodiscard]] Result<Notional> contract_value_validated(Quantity contracts,
-                                                          std::uint64_t target_scale,
-                                                          RoundingMode rounding) const;
+  [[nodiscard]] Result<Notional>
+  calculate_contract_value_from_validated_scale(Quantity contracts, std::uint64_t target_scale,
+                                                RoundingMode rounding) const;
 
   // --------------------------------------------------------
   // Construction is private so callers cannot bypass the aggregate validation performed by
-  // create().
+  // create_instrument_metadata().
   explicit InstrumentMetadata(InstrumentMetadataParams params) : params_{std::move(params)} {}
 
   // --------------------------------------------------------
