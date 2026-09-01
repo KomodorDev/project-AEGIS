@@ -1387,7 +1387,7 @@ SerializedExecutor::record_account_loss_locked(AccountFenceState& fence,
   // Install or extend the sole pending interval only after every bounded precondition is known.
   const bool created_interval = !fence.pending.has_value();
   if (created_interval) {
-    fence.pending.emplace();
+    fence.pending.emplace(PrivateFenceInterval{});
   }
   auto& interval = fence.pending.value();
   if (!record_earliest_account_reason_occurrence(
