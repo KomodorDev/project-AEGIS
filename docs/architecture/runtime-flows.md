@@ -1,14 +1,16 @@
 # Runtime Flows
 
-> **Purpose:** Show how accepted serialized ownership, M2 market validity, and M3 submission
+> **Purpose:** Show how accepted serialized ownership, integrated M2/M3 flows, and M4 private-order
 > boundaries sequence complete work without implying hidden thread hops or partial state.
 
-**Status: Implemented and integrated M2 market flow and M3 local-submission flow.** M2
+**Status: Integrated M2 market flow, M3 local-submission flow, and bounded M4 foundations.** M2
 implements the recorded ingress, serialized owner, validity, exact preflight, callback, diagnostic,
 and replay branches. ADR-0008 and ADR-0009 accept the M3 route, fixed-risk, outbound OMS, and
 deterministic fake boundaries. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
-integrated Flow 2 into `dev` as merge commit `962eb8602c13c1930a74c59232f96920482edb2b`. Private sessions,
-exchange events, dynamic risk, and recovery remain later work.
+integrated Flow 2 into `dev` as merge commit `962eb8602c13c1930a74c59232f96920482edb2b`.
+The current baseline also integrates bounded M4 private identities/events, first-seen resolution,
+owner binding, fake recovery authority, provenance, and semantic evidence. Private venue sessions,
+the full reservation/inventory commit, dynamic risk, and durable recovery remain later work.
 
 Return to the [architecture overview](../architecture.md) or read
 [ADR-0001](../decisions/0001-serialized-data-plane-execution.md),
@@ -179,6 +181,11 @@ service queue.
 
 ## 3. Private-Order Reconciliation — Accepted M4 Contract
 
+The diagram fixes the full accepted owner-turn ordering. The integrated M4 foundation supplies its
+bounded private identities, normalized event vocabulary, first-seen resolution, owner binding,
+recovery authority, and semantic evidence; reservation conversion, confirmed inventory commit, and
+bot notification remain incomplete.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -214,8 +221,11 @@ sequenceDiagram
     Note over R,C: Control-plane reporting is asynchronous and cannot delay the callback path
 ```
 
-This flow is not implemented by M3. ADR-0010 accepts the exact M4 normalized event, correlation,
-deduplication, out-of-order fill, OMS, cancellation, and callback rules. ADR-0011 accepts the joint
+M3 does not implement this flow. The integrated M4 foundation now supplies the normalized event,
+immutable first-admission resolution, owner-bound first-seen correlation, and recovery/provenance
+prerequisites, but not the complete reservation/inventory commit or bot callback shown above.
+ADR-0010 accepts the exact M4 correlation, deduplication, out-of-order fill, OMS, cancellation, and
+callback rules. ADR-0011 accepts the joint
 OMS/reservation/inventory plan and all seven scope aggregates. ADR-0012 requires live, replayed and
 authoritative order/execution facts to use this same path and dispatches non-order recovery records
 through closed typed restore planners. ADR-0013 fixes admission headroom and canonical evidence. No
@@ -223,6 +233,9 @@ timeout, disconnect, cancel request, cancel-write result, incomplete snapshot, o
 releases exposure.
 
 ## 4. Risk Snapshot Publication and Enforcement — M5 and Later
+
+This proposed sequence shows how a future control-plane revision reaches the serialized owner
+without interrupting a callback or becoming a synchronous dependency of submission.
 
 ```mermaid
 sequenceDiagram
@@ -280,6 +293,9 @@ a callback never observes a partial or older authority.
 
 ## Cross-Flow Invariants
 
+Every current or proposed flow above must preserve these shared ownership, ordering, boundedness,
+and isolation guarantees.
+
 - One dedicated thread and serialized executor owns all mutable v1 data-plane state shown here.
 - Data-plane handlers run to completion, remain non-blocking and are non-reentrant.
 - Bounded ingress exposes admission outcome, capacity and queue age; rejected attributable market
@@ -295,6 +311,9 @@ a callback never observes a partial or older authority.
 - Exchange acknowledgements, rejections, fills and socket completions occur on later executor turns.
 
 ## Later-Milestone Open Items
+
+The following mechanics are intentionally unresolved here and must be fixed by their named later
+milestone before implementation can depend on them.
 
 - Exact hierarchical semantics of `ReduceOnly` and `Halted`, including existing-order cancellation and budget reductions below current exposure.
 - Session write sequencing, outbound overload policy and cross-plane reporting backpressure.

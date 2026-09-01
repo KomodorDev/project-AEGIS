@@ -115,6 +115,8 @@ remains quarantined and unable to transmit.
 
 ## Consequences
 
+The dedicated-account decision imposes the following operating restrictions and safety benefits.
+
 - Shared or manually operated accounts are not supported by the first-venue path.
 - Test activity must use a separate account or subaccount if a human needs to trade manually.
 - A clean account boundary makes unknown activity exceptional and permits conservative failure
@@ -123,6 +125,9 @@ remains quarantined and unable to transmit.
   not an incremental configuration change.
 
 ## Venue references
+
+These official Deribit references define the permission, account-mode, and test-environment facts on
+which this decision relies.
 
 - [Access scopes and effective token permissions](https://docs.deribit.com/articles/access-scope)
 - [Creating API keys and maximum scopes](https://docs.deribit.com/articles/creating-api-key)

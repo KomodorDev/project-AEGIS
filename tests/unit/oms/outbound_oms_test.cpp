@@ -44,7 +44,7 @@ static_assert(static_cast<std::uint8_t>(oms::CancellationState::Confirmed) == 7U
 // Parse one identifier literal or throw when the test fixture itself is malformed.
 template <typename Identifier>
 [[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
-  auto result = Identifier::parse(text);
+  auto result = Identifier::parse_identifier(text);
   if (!result) {
     throw std::logic_error{"invalid identifier in outbound OMS fixture"};
   }
@@ -79,12 +79,12 @@ template <typename Identity> [[nodiscard]] Identity create_ordinal_or_throw(std:
   for (std::size_t index = 0U; index < bytes.size(); ++index) {
     bytes[index] = static_cast<std::uint8_t>(index);
   }
-  auto provider =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{bytes}, counter);
+  auto provider = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{bytes}, counter);
   if (!provider) {
     throw std::logic_error{"invalid order ID provider in outbound OMS fixture"};
   }
-  auto generated = provider.value().next();
+  auto generated = provider.value().generate_next_order_id();
   if (!generated) {
     throw std::logic_error{"order ID generation failed in outbound OMS fixture"};
   }
@@ -169,11 +169,11 @@ create_pre_execution_private_order_projection_or_throw(oms::OutboundOrderState s
 // --------------------------------------------------------
 // Startup rejects an unusable zero capacity before an owner-local table can be published.
 TEST_CASE("outbound OMS requires positive fixed capacity", "[oms][outbound]") {
-  const auto result = oms::OutboundOms::create(0U);
+  const auto result = oms::OutboundOms::create_outbound_oms(0U);
   REQUIRE_FALSE(result);
   CHECK(result.error() ==
-        model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                     "submission_policy.oms_capacity"));
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                            "submission_policy.oms_capacity"));
 }
 
 // --------------------------------------------------------
@@ -182,16 +182,16 @@ TEST_CASE("outbound OMS retains one provenance-rich risk-approved order", "[oms]
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Admit one internally consistent order into preallocated owner-local storage.
-  auto oms_result = oms::OutboundOms::create(2U);
+  auto oms_result = oms::OutboundOms::create_outbound_oms(2U);
   REQUIRE(oms_result);
   auto& outbound = oms_result.value();
   const auto expected = create_outbound_order_admission_or_throw(1U, 1U);
-  const auto admitted = outbound.admit(expected);
+  const auto admitted = outbound.admit_outbound_order(expected);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Verify the stable row, initial state, complete retained value, and exact table accounting.
   REQUIRE(admitted);
-  REQUIRE(admitted.value().admitted());
+  REQUIRE(admitted.value().is_admitted());
   REQUIRE(admitted.value().record() != nullptr);
   CHECK_FALSE(admitted.value().reason().has_value());
   CHECK(admitted.value().record()->state() == oms::OutboundOrderState::PendingEncoding);
@@ -199,8 +199,8 @@ TEST_CASE("outbound OMS retains one provenance-rich risk-approved order", "[oms]
   CHECK(admitted.value().record()->private_projection() ==
         create_pre_execution_private_order_projection_or_throw(
             oms::OutboundOrderState::PendingEncoding));
-  CHECK(outbound.find(expected.order_id) == admitted.value().record());
-  CHECK(outbound.size() == 1U);
+  CHECK(outbound.find_order(expected.order_id) == admitted.value().record());
+  CHECK(outbound.order_count() == 1U);
   CHECK(outbound.capacity() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -227,16 +227,16 @@ TEST_CASE("outbound OMS is collision-safe and duplicate identity precedes capaci
   // ++++++++++++++++++++++++++++++++++++++++
   // Counters one and three share the same modulo-two FNV probe start but remain distinct
   // identities.
-  auto oms_result = oms::OutboundOms::create(2U);
+  auto oms_result = oms::OutboundOms::create_outbound_oms(2U);
   REQUIRE(oms_result);
   auto& outbound = oms_result.value();
   const auto first = create_outbound_order_admission_or_throw(1U, 1U);
   const auto colliding = create_outbound_order_admission_or_throw(2U, 3U);
-  REQUIRE(outbound.admit(first));
-  REQUIRE(outbound.admit(colliding));
-  CHECK(outbound.find(first.order_id) != nullptr);
-  CHECK(outbound.find(colliding.order_id) != nullptr);
-  CHECK(outbound.size() == 2U);
+  REQUIRE(outbound.admit_outbound_order(first));
+  REQUIRE(outbound.admit_outbound_order(colliding));
+  CHECK(outbound.find_order(first.order_id) != nullptr);
+  CHECK(outbound.find_order(colliding.order_id) != nullptr);
+  CHECK(outbound.order_count() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonical inspection follows admission order rather than collision-dependent table position.
@@ -248,21 +248,21 @@ TEST_CASE("outbound OMS is collision-safe and duplicate identity precedes capaci
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A repeated complete identity reports duplicate even though the table is already full.
-  const auto duplicate = outbound.admit(first);
+  const auto duplicate = outbound.admit_outbound_order(first);
   REQUIRE(duplicate);
-  CHECK_FALSE(duplicate.value().admitted());
+  CHECK_FALSE(duplicate.value().is_admitted());
   REQUIRE(duplicate.value().reason().has_value());
   CHECK(*duplicate.value().reason() == execution::SubmissionReason::DuplicateOrderIdentity);
-  CHECK(outbound.size() == 2U);
+  CHECK(outbound.order_count() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Only a distinct identity receives fixed-capacity non-admission, and neither result adds a row.
-  const auto full = outbound.admit(create_outbound_order_admission_or_throw(3U, 2U));
+  const auto full = outbound.admit_outbound_order(create_outbound_order_admission_or_throw(3U, 2U));
   REQUIRE(full);
-  CHECK_FALSE(full.value().admitted());
+  CHECK_FALSE(full.value().is_admitted());
   REQUIRE(full.value().reason().has_value());
   CHECK(*full.value().reason() == execution::SubmissionReason::OmsCapacityExceeded);
-  CHECK(outbound.size() == 2U);
+  CHECK(outbound.order_count() == 2U);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -275,26 +275,26 @@ TEST_CASE("outbound OMS rejects internally inconsistent admission without a row"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Break the attempt-derived reservation identity before the first admission.
-  auto oms_result = oms::OutboundOms::create(2U);
+  auto oms_result = oms::OutboundOms::create_outbound_oms(2U);
   REQUIRE(oms_result);
   auto& outbound = oms_result.value();
   auto inconsistent = create_outbound_order_admission_or_throw(1U, 1U);
   inconsistent.reservation_id = create_ordinal_or_throw<model::ReservationId>(2U);
-  const auto reservation_result = outbound.admit(inconsistent);
+  const auto reservation_result = outbound.admit_outbound_order(inconsistent);
   REQUIRE_FALSE(reservation_result);
   CHECK(reservation_result.error() ==
-        model::DomainError::at_field(model::DomainErrorCode::InvalidOmsState,
-                                     "outbound_oms.admission"));
-  CHECK(outbound.size() == 0U);
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidOmsState,
+                                            "outbound_oms.admission"));
+  CHECK(outbound.order_count() == 0U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Break the once-approved quantity relationship and prove the same no-mutation invariant.
   inconsistent = create_outbound_order_admission_or_throw(1U, 1U);
   inconsistent.exposure.quantity = create_decimal_or_throw<model::Quantity>(4, 0U);
-  const auto quantity_result = outbound.admit(inconsistent);
+  const auto quantity_result = outbound.admit_outbound_order(inconsistent);
   REQUIRE_FALSE(quantity_result);
   CHECK(quantity_result.error().code == model::DomainErrorCode::InvalidOmsState);
-  CHECK(outbound.size() == 0U);
+  CHECK(outbound.order_count() == 0U);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -306,22 +306,22 @@ TEST_CASE("outbound OMS implements the complete M3 transition table", "[oms][out
   // ++++++++++++++++++++++++++++++++++++++++
   // Create independent records for encoding failure, definite initiation failure, success, and
   // uncertainty so each M3 handoff can be inspected without requiring an outgoing transition.
-  auto oms_result = oms::OutboundOms::create(4U);
+  auto oms_result = oms::OutboundOms::create_outbound_oms(4U);
   REQUIRE(oms_result);
   auto& outbound = oms_result.value();
   const auto encoding_failure = create_outbound_order_admission_or_throw(1U, 1U);
   const auto initiation_failure = create_outbound_order_admission_or_throw(2U, 2U);
   const auto initiated = create_outbound_order_admission_or_throw(3U, 3U);
   const auto uncertain = create_outbound_order_admission_or_throw(4U, 4U);
-  REQUIRE(outbound.admit(encoding_failure));
-  REQUIRE(outbound.admit(initiation_failure));
-  REQUIRE(outbound.admit(initiated));
-  REQUIRE(outbound.admit(uncertain));
+  REQUIRE(outbound.admit_outbound_order(encoding_failure));
+  REQUIRE(outbound.admit_outbound_order(initiation_failure));
+  REQUIRE(outbound.admit_outbound_order(initiated));
+  REQUIRE(outbound.admit_outbound_order(uncertain));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // PendingEncoding may fail terminally or advance exactly once into PendingInitiation.
   REQUIRE(outbound.mark_encoding_failed(encoding_failure.order_id));
-  CHECK(outbound.find(encoding_failure.order_id)->state() ==
+  CHECK(outbound.find_order(encoding_failure.order_id)->state() ==
         oms::OutboundOrderState::LocallyFailed);
   REQUIRE(outbound.mark_encoding_succeeded(initiation_failure.order_id));
   REQUIRE(outbound.mark_encoding_succeeded(initiated.order_id));
@@ -333,20 +333,22 @@ TEST_CASE("outbound OMS implements the complete M3 transition table", "[oms][out
   REQUIRE(outbound.mark_initiation_definitely_failed(initiation_failure.order_id));
   REQUIRE(outbound.mark_write_initiated(initiated.order_id));
   REQUIRE(outbound.mark_submission_unknown(uncertain.order_id));
-  CHECK(outbound.find(initiation_failure.order_id)->state() ==
+  CHECK(outbound.find_order(initiation_failure.order_id)->state() ==
         oms::OutboundOrderState::LocallyFailed);
-  CHECK(outbound.find(initiated.order_id)->state() == oms::OutboundOrderState::WriteInitiated);
-  CHECK(outbound.find(uncertain.order_id)->state() == oms::OutboundOrderState::SubmissionUnknown);
-  CHECK(outbound.find(encoding_failure.order_id)->private_projection() ==
+  CHECK(outbound.find_order(initiated.order_id)->state() ==
+        oms::OutboundOrderState::WriteInitiated);
+  CHECK(outbound.find_order(uncertain.order_id)->state() ==
+        oms::OutboundOrderState::SubmissionUnknown);
+  CHECK(outbound.find_order(encoding_failure.order_id)->private_projection() ==
         create_pre_execution_private_order_projection_or_throw(
             oms::OutboundOrderState::LocallyFailed));
-  CHECK(outbound.find(initiation_failure.order_id)->private_projection() ==
+  CHECK(outbound.find_order(initiation_failure.order_id)->private_projection() ==
         create_pre_execution_private_order_projection_or_throw(
             oms::OutboundOrderState::LocallyFailed));
-  CHECK(outbound.find(initiated.order_id)->private_projection() ==
+  CHECK(outbound.find_order(initiated.order_id)->private_projection() ==
         create_pre_execution_private_order_projection_or_throw(
             oms::OutboundOrderState::WriteInitiated));
-  CHECK(outbound.find(uncertain.order_id)->private_projection() ==
+  CHECK(outbound.find_order(uncertain.order_id)->private_projection() ==
         create_pre_execution_private_order_projection_or_throw(
             oms::OutboundOrderState::SubmissionUnknown, true));
 
@@ -361,37 +363,38 @@ TEST_CASE("outbound OMS contains post-acceptance internal fault as submission un
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Establish one WriteInitiated row and preserve its complete immutable admission for comparison.
-  auto oms_result = oms::OutboundOms::create(6U);
+  auto oms_result = oms::OutboundOms::create_outbound_oms(6U);
   REQUIRE(oms_result);
   auto& outbound = oms_result.value();
   const auto initiated = create_outbound_order_admission_or_throw(1U, 1U);
-  REQUIRE(outbound.admit(initiated));
+  REQUIRE(outbound.admit_outbound_order(initiated));
   REQUIRE(outbound.mark_encoding_succeeded(initiated.order_id));
   REQUIRE(outbound.mark_write_initiated(initiated.order_id));
   REQUIRE(outbound.mark_submission_unknown_after_internal_fault(initiated.order_id));
-  REQUIRE(outbound.find(initiated.order_id) != nullptr);
-  CHECK(outbound.find(initiated.order_id)->state() == oms::OutboundOrderState::SubmissionUnknown);
-  CHECK(outbound.find(initiated.order_id)->admission() == initiated);
-  CHECK(outbound.find(initiated.order_id)->private_projection() ==
+  REQUIRE(outbound.find_order(initiated.order_id) != nullptr);
+  CHECK(outbound.find_order(initiated.order_id)->state() ==
+        oms::OutboundOrderState::SubmissionUnknown);
+  CHECK(outbound.find_order(initiated.order_id)->admission() == initiated);
+  CHECK(outbound.find_order(initiated.order_id)->private_projection() ==
         create_pre_execution_private_order_projection_or_throw(
             oms::OutboundOrderState::SubmissionUnknown, true));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The containment transition is single-use and cannot be applied to any other source state.
-  const auto unknown_projection = outbound.find(initiated.order_id)->private_projection();
+  const auto unknown_projection = outbound.find_order(initiated.order_id)->private_projection();
   const auto repeated = outbound.mark_submission_unknown_after_internal_fault(initiated.order_id);
   REQUIRE_FALSE(repeated);
   CHECK(repeated.error().code == model::DomainErrorCode::InvalidOmsState);
-  CHECK(outbound.find(initiated.order_id)->private_projection() == unknown_projection);
+  CHECK(outbound.find_order(initiated.order_id)->private_projection() == unknown_projection);
 
   const auto pending_encoding = create_outbound_order_admission_or_throw(2U, 2U);
   const auto pending_initiation = create_outbound_order_admission_or_throw(3U, 3U);
   const auto locally_failed = create_outbound_order_admission_or_throw(4U, 4U);
   const auto ordinary_unknown = create_outbound_order_admission_or_throw(5U, 5U);
-  REQUIRE(outbound.admit(pending_encoding));
-  REQUIRE(outbound.admit(pending_initiation));
-  REQUIRE(outbound.admit(locally_failed));
-  REQUIRE(outbound.admit(ordinary_unknown));
+  REQUIRE(outbound.admit_outbound_order(pending_encoding));
+  REQUIRE(outbound.admit_outbound_order(pending_initiation));
+  REQUIRE(outbound.admit_outbound_order(locally_failed));
+  REQUIRE(outbound.admit_outbound_order(ordinary_unknown));
   REQUIRE(outbound.mark_encoding_succeeded(pending_initiation.order_id));
   REQUIRE(outbound.mark_encoding_failed(locally_failed.order_id));
   REQUIRE(outbound.mark_encoding_succeeded(ordinary_unknown.order_id));
@@ -399,11 +402,11 @@ TEST_CASE("outbound OMS contains post-acceptance internal fault as submission un
 
   for (const auto* const rejected :
        {&pending_encoding, &pending_initiation, &locally_failed, &ordinary_unknown}) {
-    const auto before = outbound.find(rejected->order_id)->private_projection();
+    const auto before = outbound.find_order(rejected->order_id)->private_projection();
     const auto result = outbound.mark_submission_unknown_after_internal_fault(rejected->order_id);
     REQUIRE_FALSE(result);
     CHECK(result.error().code == model::DomainErrorCode::InvalidOmsState);
-    CHECK(outbound.find(rejected->order_id)->private_projection() == before);
+    CHECK(outbound.find_order(rejected->order_id)->private_projection() == before);
   }
   const auto missing =
       outbound.mark_submission_unknown_after_internal_fault(create_order_id_or_throw(6U));
@@ -420,29 +423,29 @@ TEST_CASE("outbound OMS rejects every transition outside the closed table", "[om
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A PendingEncoding row cannot skip encoding or transition under an unknown identity.
-  auto oms_result = oms::OutboundOms::create(1U);
+  auto oms_result = oms::OutboundOms::create_outbound_oms(1U);
   REQUIRE(oms_result);
   auto& outbound = oms_result.value();
   const auto retained = create_outbound_order_admission_or_throw(1U, 1U);
-  REQUIRE(outbound.admit(retained));
-  const auto initial_projection = outbound.find(retained.order_id)->private_projection();
+  REQUIRE(outbound.admit_outbound_order(retained));
+  const auto initial_projection = outbound.find_order(retained.order_id)->private_projection();
   const auto wrong_source = outbound.mark_write_initiated(retained.order_id);
   REQUIRE_FALSE(wrong_source);
   CHECK(wrong_source.error().code == model::DomainErrorCode::InvalidOmsState);
-  CHECK(outbound.find(retained.order_id)->private_projection() == initial_projection);
+  CHECK(outbound.find_order(retained.order_id)->private_projection() == initial_projection);
   const auto missing = outbound.mark_encoding_failed(create_order_id_or_throw(2U));
   REQUIRE_FALSE(missing);
-  CHECK(outbound.find(retained.order_id)->private_projection() == initial_projection);
+  CHECK(outbound.find_order(retained.order_id)->private_projection() == initial_projection);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // LocallyFailed is terminal but retained, so repetition fails and later admission stays
   // duplicate.
   REQUIRE(outbound.mark_encoding_failed(retained.order_id));
-  const auto terminal_projection = outbound.find(retained.order_id)->private_projection();
+  const auto terminal_projection = outbound.find_order(retained.order_id)->private_projection();
   const auto repeated = outbound.mark_encoding_failed(retained.order_id);
   REQUIRE_FALSE(repeated);
-  CHECK(outbound.find(retained.order_id)->private_projection() == terminal_projection);
-  const auto duplicate = outbound.admit(retained);
+  CHECK(outbound.find_order(retained.order_id)->private_projection() == terminal_projection);
+  const auto duplicate = outbound.admit_outbound_order(retained);
   REQUIRE(duplicate);
   CHECK(*duplicate.value().reason() == execution::SubmissionReason::DuplicateOrderIdentity);
 

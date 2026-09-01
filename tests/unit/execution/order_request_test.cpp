@@ -15,7 +15,7 @@ using namespace aegis;
 
 // --------------------------------------------------------
 // Invalid decimal fixture text is a test bug rather than a production branch under examination.
-template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text) {
+template <typename Decimal> [[nodiscard]] Decimal parse_decimal_or_throw(std::string_view text) {
   auto parsed = Decimal::parse_ascii(text);
   if (!parsed) {
     throw std::logic_error{"invalid decimal test fixture"};
@@ -25,8 +25,9 @@ template <typename Decimal> [[nodiscard]] Decimal decimal(std::string_view text)
 
 // --------------------------------------------------------
 // Invalid identifier fixture text is likewise a test construction defect.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier test fixture"};
   }
@@ -35,14 +36,19 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Build accepted inverse metadata whose scale, tick, minimum, and step expose every M3 filter.
-[[nodiscard]] model::InstrumentMetadata metadata() {
-  auto created = model::InstrumentMetadata::create(model::InstrumentMetadataParams{
-      id<model::VenueId>("deribit"), id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-      id<model::VenueInstrumentId>("BTC-PERPETUAL"), model::InstrumentMetadataRevision::initial(),
-      "BTC", "USD", "BTC", model::ContractStyle::Inverse, model::QuantityUnit::Contracts,
-      model::ContractMultiplierUnit::QuoteCurrencyPerContract, 1U, 0U, decimal<model::Price>("0.5"),
-      decimal<model::Quantity>("10"), decimal<model::Quantity>("10"),
-      decimal<model::Notional>("10")});
+[[nodiscard]] model::InstrumentMetadata create_reference_metadata_or_throw() {
+  auto created =
+      model::InstrumentMetadata::create_instrument_metadata(model::InstrumentMetadataParams{
+          parse_identifier_or_throw<model::VenueId>("deribit"),
+          parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+          parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+          model::InstrumentMetadataRevision::create_initial(), "BTC", "USD", "BTC",
+          model::ContractStyle::Inverse, model::QuantityUnit::Contracts,
+          model::ContractMultiplierUnit::QuoteCurrencyPerContract, 1U, 0U,
+          parse_decimal_or_throw<model::Price>("0.5"),
+          parse_decimal_or_throw<model::Quantity>("10"),
+          parse_decimal_or_throw<model::Quantity>("10"),
+          parse_decimal_or_throw<model::Notional>("10")});
   if (!created) {
     throw std::logic_error{"invalid metadata test fixture"};
   }
@@ -51,14 +57,15 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 
 // --------------------------------------------------------
 // Build one canonical request that later cases mutate one field at a time.
-[[nodiscard]] execution::OrderRequest request() {
-  return execution::OrderRequest{id<model::RouteId>("route.deribit-testnet-primary"),
-                                 id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-                                 execution::OrderSide::Buy,
-                                 execution::OrderType::Limit,
-                                 execution::TimeInForce::GoodTilCancelled,
-                                 decimal<model::Price>("60000"),
-                                 decimal<model::Quantity>("20")};
+[[nodiscard]] execution::OrderRequest create_reference_request_or_throw() {
+  return execution::OrderRequest{
+      parse_identifier_or_throw<model::RouteId>("route.deribit-testnet-primary"),
+      parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+      execution::OrderSide::Buy,
+      execution::OrderType::Limit,
+      execution::TimeInForce::GoodTilCancelled,
+      parse_decimal_or_throw<model::Price>("60000"),
+      parse_decimal_or_throw<model::Quantity>("20")};
 }
 
 // --------------------------------------------------------
@@ -76,7 +83,7 @@ TEST_CASE("M3 order and result vocabularies retain their assigned local-only val
   static_assert(std::is_aggregate_v<execution::OrderRequest>);
   static_assert(!std::is_default_constructible_v<execution::SubmitResult>);
 
-  const auto rejected = execution::SubmitResult::locally_rejected(
+  const auto rejected = execution::SubmitResult::create_locally_rejected_result(
       execution::SubmissionStage::Route, execution::SubmissionReason::RouteNotFound);
   CHECK(rejected.disposition() == execution::SubmitDisposition::LocallyRejected);
   CHECK_FALSE(rejected.attempt_id());
@@ -87,37 +94,37 @@ TEST_CASE("M3 order and result vocabularies retain their assigned local-only val
 // The first invalid field in the accepted ADR order must win without rounding later fields.
 TEST_CASE("canonical limit validation has stable first-failure precedence",
           "[execution][submission]") {
-  const auto instrument = metadata();
-  auto candidate = request();
+  const auto instrument = create_reference_metadata_or_throw();
+  auto candidate = create_reference_request_or_throw();
 
   candidate.side = static_cast<execution::OrderSide>(0U);
-  candidate.price = decimal<model::Price>("-1");
+  candidate.price = parse_decimal_or_throw<model::Price>("-1");
   CHECK(execution::validate_canonical_order(candidate, instrument).reason ==
         execution::SubmissionReason::UnsupportedSide);
 
-  candidate = request();
-  candidate.price = decimal<model::Price>("-1");
-  candidate.quantity = decimal<model::Quantity>("1");
+  candidate = create_reference_request_or_throw();
+  candidate.price = parse_decimal_or_throw<model::Price>("-1");
+  candidate.quantity = parse_decimal_or_throw<model::Quantity>("1");
   CHECK(execution::validate_canonical_order(candidate, instrument).reason ==
         execution::SubmissionReason::PriceNotPositive);
 
-  candidate = request();
-  candidate.price = decimal<model::Price>("60000.25");
+  candidate = create_reference_request_or_throw();
+  candidate.price = parse_decimal_or_throw<model::Price>("60000.25");
   CHECK(execution::validate_canonical_order(candidate, instrument).reason ==
         execution::SubmissionReason::PriceScaleExceeded);
 
-  candidate = request();
-  candidate.price = decimal<model::Price>("60000.1");
+  candidate = create_reference_request_or_throw();
+  candidate.price = parse_decimal_or_throw<model::Price>("60000.1");
   CHECK(execution::validate_canonical_order(candidate, instrument).reason ==
         execution::SubmissionReason::PriceTickMismatch);
 
-  candidate = request();
-  candidate.quantity = decimal<model::Quantity>("1");
+  candidate = create_reference_request_or_throw();
+  candidate.quantity = parse_decimal_or_throw<model::Quantity>("1");
   CHECK(execution::validate_canonical_order(candidate, instrument).reason ==
         execution::SubmissionReason::QuantityBelowMinimum);
 
-  candidate = request();
-  candidate.quantity = decimal<model::Quantity>("15");
+  candidate = create_reference_request_or_throw();
+  candidate.quantity = parse_decimal_or_throw<model::Quantity>("15");
   CHECK(execution::validate_canonical_order(candidate, instrument).reason ==
         execution::SubmissionReason::QuantityStepMismatch);
 }
@@ -125,10 +132,11 @@ TEST_CASE("canonical limit validation has stable first-failure precedence",
 // --------------------------------------------------------
 // Accepted validation returns the exact caller-authored economics, including canonicalized scale.
 TEST_CASE("canonical validation preserves exact approved economics", "[execution][submission]") {
-  const auto candidate = request();
-  const auto decision = execution::validate_canonical_order(candidate, metadata());
+  const auto candidate = create_reference_request_or_throw();
+  const auto decision =
+      execution::validate_canonical_order(candidate, create_reference_metadata_or_throw());
 
-  REQUIRE(decision.accepted());
+  REQUIRE(decision.is_accepted());
   REQUIRE(decision.economics);
   CHECK(decision.reason == execution::SubmissionReason::None);
   CHECK(decision.economics->price == candidate.price);

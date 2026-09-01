@@ -26,7 +26,7 @@ namespace aegis::test_support {
 // Parse one nominal identifier and fail immediately for an invalid test literal.
 template <typename Identifier>
 [[nodiscard]] Identifier parse_m4_identifier_or_throw(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M4 private-event fixture"};
   }
@@ -75,12 +75,12 @@ template <typename Identity>
   for (std::size_t index = 0U; index < bytes.size(); ++index) {
     bytes[index] = static_cast<std::uint8_t>(0x20U + index);
   }
-  auto provider =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{bytes}, counter);
+  auto provider = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{bytes}, counter);
   if (!provider) {
     throw std::logic_error{"invalid order provider in M4 private-event fixture"};
   }
-  auto identity = provider.value().next();
+  auto identity = provider.value().generate_next_order_id();
   if (!identity) {
     throw std::logic_error{"exhausted order provider in M4 private-event fixture"};
   }
@@ -101,7 +101,8 @@ template <typename Identity>
 // Construct one local-order-event ID at an exact nonzero counter.
 [[nodiscard]] inline oms::LocalOrderEventId
 create_m4_local_event_id_or_throw(std::uint64_t counter) {
-  auto created = oms::LocalOrderEventId::from_parts(create_m4_restart_namespace(), counter);
+  auto created = oms::LocalOrderEventId::identity_from_namespace_and_counter(
+      create_m4_restart_namespace(), counter);
   if (!created) {
     throw std::logic_error{"invalid local event ID in M4 private-event fixture"};
   }
@@ -112,7 +113,8 @@ create_m4_local_event_id_or_throw(std::uint64_t counter) {
 // Construct one runtime epoch under the same deterministic restart namespace.
 [[nodiscard]] inline recovery::RuntimeEpochId
 create_m4_runtime_epoch_or_throw(std::uint64_t counter = 1U) {
-  auto created = recovery::RuntimeEpochId::from_parts(create_m4_restart_namespace(), counter);
+  auto created = recovery::RuntimeEpochId::identity_from_namespace_and_counter(
+      create_m4_restart_namespace(), counter);
   if (!created) {
     throw std::logic_error{"invalid runtime epoch in M4 private-event fixture"};
   }
@@ -123,8 +125,8 @@ create_m4_runtime_epoch_or_throw(std::uint64_t counter = 1U) {
 // Construct one reconciliation epoch under the deterministic runtime epoch.
 [[nodiscard]] inline recovery::ReconciliationEpochId
 create_m4_reconciliation_epoch_or_throw(std::uint64_t counter = 1U) {
-  auto created =
-      recovery::ReconciliationEpochId::from_parts(create_m4_runtime_epoch_or_throw(), counter);
+  auto created = recovery::ReconciliationEpochId::reconciliation_epoch_id_from_runtime_and_counter(
+      create_m4_runtime_epoch_or_throw(), counter);
   if (!created) {
     throw std::logic_error{"invalid reconciliation epoch in M4 private-event fixture"};
   }
@@ -147,8 +149,8 @@ public:
         resolver_{
             create_m4_provenance_resolver_or_throw(authority_.configuration, authority_.m4_policy)},
         factory_{resolver_}, outbound_{create_outbound_oms_or_throw()} {
-    auto admitted = outbound_.admit(create_outbound_order_admission_or_throw());
-    if (!admitted || !admitted.value().admitted() || admitted.value().record() == nullptr) {
+    auto admitted = outbound_.admit_outbound_order(create_outbound_order_admission_or_throw());
+    if (!admitted || !admitted.value().is_admitted() || admitted.value().record() == nullptr) {
       throw std::logic_error{"failed to admit M4 private-event fixture order"};
     }
     record_ = admitted.value().record();
@@ -164,36 +166,42 @@ public:
 
   // --------------------------------------------------------
   // Borrow the sealed configuration and M4 policy that authorize every fixture value.
-  [[nodiscard]] const M4TestAuthority& authority() const noexcept { return authority_; }
+  [[nodiscard]] const M4TestAuthority& test_authority() const noexcept { return authority_; }
 
   // --------------------------------------------------------
   // Borrow the resolver copied into the factory when the fixture was constructed.
-  [[nodiscard]] const runtime::M4ProvenanceResolver& resolver() const noexcept { return resolver_; }
+  [[nodiscard]] const runtime::M4ProvenanceResolver& provenance_resolver() const noexcept {
+    return resolver_;
+  }
 
   // --------------------------------------------------------
   // Borrow the source-normalization factory that owns its own resolver copy.
-  [[nodiscard]] const runtime::PrivateOrderEventFactory& factory() const noexcept {
+  [[nodiscard]] const runtime::PrivateOrderEventFactory& private_event_factory() const noexcept {
     return factory_;
   }
 
   // --------------------------------------------------------
   // Borrow the baseline OMS row whose existence is established by construction.
-  [[nodiscard]] const oms::OutboundOrderRecord& record() const noexcept { return *record_; }
+  [[nodiscard]] const oms::OutboundOrderRecord& outbound_order_record() const noexcept {
+    return *record_;
+  }
 
   // --------------------------------------------------------
   // Return the logical account named by the retained baseline row.
   [[nodiscard]] model::LogicalAccountId account_id() const {
-    return record().provenance().logical_account_id;
+    return outbound_order_record().provenance().logical_account_id;
   }
 
   // --------------------------------------------------------
   // Return the venue named by the retained baseline row.
-  [[nodiscard]] model::VenueId venue_id() const { return record().provenance().venue_id; }
+  [[nodiscard]] model::VenueId venue_id() const {
+    return outbound_order_record().provenance().venue_id;
+  }
 
   // --------------------------------------------------------
   // Return the instrument named by the retained baseline row.
   [[nodiscard]] model::InstrumentId instrument_id() const {
-    return record().provenance().instrument_id;
+    return outbound_order_record().provenance().instrument_id;
   }
 
   // --------------------------------------------------------
@@ -238,8 +246,8 @@ public:
   // Create an attempt for the retained order, or throw when the requested ordinal is invalid.
   [[nodiscard]] oms::CancelAttemptId
   create_cancel_attempt_id_or_throw(std::uint64_t ordinal = 1U) const {
-    auto created = oms::CancelAttemptId::from_parts(create_m4_runtime_epoch_or_throw(),
-                                                    record().order_id(), ordinal);
+    auto created = oms::CancelAttemptId::cancel_attempt_id_from_components(
+        create_m4_runtime_epoch_or_throw(), outbound_order_record().order_id(), ordinal);
     if (!created) {
       throw std::logic_error{"invalid cancel attempt in M4 private-event fixture"};
     }
@@ -254,7 +262,8 @@ private:
   [[nodiscard]] static runtime::M4ProvenanceResolver
   create_m4_provenance_resolver_or_throw(const configuration::StartupConfiguration& configuration,
                                          const runtime::M4Policy& policy) {
-    auto created = runtime::M4ProvenanceResolver::create(configuration, policy);
+    auto created =
+        runtime::M4ProvenanceResolver::create_m4_provenance_resolver(configuration, policy);
     if (!created) {
       throw std::logic_error{"invalid M4 resolver in private-event fixture"};
     }
@@ -264,7 +273,7 @@ private:
   // --------------------------------------------------------
   // Build one small fixed OMS table for the baseline retained row.
   [[nodiscard]] static oms::OutboundOms create_outbound_oms_or_throw() {
-    auto created = oms::OutboundOms::create(4U);
+    auto created = oms::OutboundOms::create_outbound_oms(4U);
     if (!created) {
       throw std::logic_error{"invalid OMS in M4 private-event fixture"};
     }
@@ -276,7 +285,7 @@ private:
   [[nodiscard]] oms::OutboundOrderAdmission create_outbound_order_admission_or_throw() const {
     const auto route_id =
         parse_m4_identifier_or_throw<model::RouteId>("route.deribit-testnet-btc-perpetual");
-    const auto* const route = authority_.configuration.routes().find(route_id);
+    const auto* const route = authority_.configuration.routes().find_route(route_id);
     if (route == nullptr) {
       throw std::logic_error{"missing route in M4 private-event fixture"};
     }

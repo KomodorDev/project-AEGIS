@@ -96,9 +96,9 @@ using model::DomainErrorCode;
 
 // --------------------------------------------------------
 // Return the shared stable failure for a malformed internal diagnostic profile.
-[[nodiscard]] model::Result<void> invalid(std::string_view field) {
-  return model::Result<void>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidValue, std::string{field}));
+[[nodiscard]] model::Result<void> create_invalid_runtime_diagnostic_result(std::string_view field) {
+  return model::Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidValue, std::string{field}));
 }
 
 // --------------------------------------------------------
@@ -116,41 +116,42 @@ RuntimeDiagnosticSink::RuntimeDiagnosticSink(const RuntimePolicy& policy)
 
 // --------------------------------------------------------
 // Validate profile and policy attribution without consuming diagnostic storage or ordinals.
-model::Result<void> RuntimeDiagnosticSink::validate(RuntimeDiagnosticKind kind,
-                                                    const RuntimeDiagnosticFields& fields) const {
+model::Result<void>
+RuntimeDiagnosticSink::validate_diagnostic(RuntimeDiagnosticKind kind,
+                                           const RuntimeDiagnosticFields& fields) const {
   if (!is_valid_profile(kind, fields)) {
-    return invalid("runtime_diagnostic.fields");
+    return create_invalid_runtime_diagnostic_result("runtime_diagnostic.fields");
   }
   if (fields.source_ordinal && fields.source_ordinal->value() > source_capacity_) {
-    return model::Result<void>::failure(DomainError::at_field(
+    return model::Result<void>::create_failure(DomainError::create_at_field(
         DomainErrorCode::RuntimeSourceNotConfigured, "runtime_diagnostic.source_ordinal"));
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Validate one detail, retain the accepted prefix, and count later valid arrivals as dropped.
-model::Result<void> RuntimeDiagnosticSink::append(RuntimeDiagnosticKind kind,
-                                                  RuntimeDiagnosticFields fields) {
+model::Result<void> RuntimeDiagnosticSink::append_diagnostic(RuntimeDiagnosticKind kind,
+                                                             RuntimeDiagnosticFields fields) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Invalid or misattributed observations remain programmer-contract failures even after the
   // retained prefix has filled.
-  auto valid = validate(kind, fields);
+  auto valid = validate_diagnostic(kind, fields);
   if (!valid) {
     return valid;
   }
   if (records_.size() == capacity_) {
     if (dropped_count_ == std::numeric_limits<std::uint64_t>::max()) {
-      return model::Result<void>::failure(DomainError::at_field(
+      return model::Result<void>::create_failure(DomainError::create_at_field(
           DomainErrorCode::CounterExhausted, "runtime_diagnostic.dropped_count"));
     }
     ++dropped_count_;
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
   if (last_ordinal_ == std::numeric_limits<std::uint64_t>::max()) {
-    return model::Result<void>::failure(
-        DomainError::at_field(DomainErrorCode::CounterExhausted, "runtime_diagnostic.ordinal"));
+    return model::Result<void>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::CounterExhausted, "runtime_diagnostic.ordinal"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -158,7 +159,7 @@ model::Result<void> RuntimeDiagnosticSink::append(RuntimeDiagnosticKind kind,
   const auto record = RuntimeDiagnosticRecord{last_ordinal_ + 1U, kind, std::move(fields)};
   records_.push_back(record);
   ++last_ordinal_;
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -166,7 +167,7 @@ model::Result<void> RuntimeDiagnosticSink::append(RuntimeDiagnosticKind kind,
 // --------------------------------------------------------
 // Borrow one retained prefix position without exposing mutable storage.
 const RuntimeDiagnosticRecord*
-RuntimeDiagnosticSink::at(std::size_t chronological_index) const noexcept {
+RuntimeDiagnosticSink::diagnostic_at(std::size_t chronological_index) const noexcept {
   if (chronological_index >= records_.size()) {
     return nullptr;
   }

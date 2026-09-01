@@ -25,7 +25,7 @@ inline constexpr std::string_view record_magic = "AEGISTRC";
 
 // ########################################################################
 // Assign every record field its stable schema-1 numeric tag.
-enum class RecordTag : std::uint16_t {
+enum class TraceRecordTag : std::uint16_t {
   Ordinal = 0x0001,
   EventKind = 0x0002,
   FirmId = 0x0010,
@@ -51,7 +51,7 @@ enum class RecordTag : std::uint16_t {
 
 // --------------------------------------------------------
 // Convert a record tag to its fixed-width encoded representation without implicit enum conversion.
-[[nodiscard]] constexpr std::uint16_t tag(RecordTag value) noexcept {
+[[nodiscard]] constexpr std::uint16_t trace_record_tag_code(TraceRecordTag value) noexcept {
   return static_cast<std::uint16_t>(value);
 }
 
@@ -265,9 +265,9 @@ private:
 
 // --------------------------------------------------------
 // Construct the stable trace-schema error used by exact-shape validation failures.
-[[nodiscard]] model::Result<void> invalid_record(std::string_view field) {
-  return model::Result<void>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidValue, std::string{field}));
+[[nodiscard]] model::Result<void> create_invalid_trace_record_result(std::string_view field) {
+  return model::Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidValue, std::string{field}));
 }
 
 // --------------------------------------------------------
@@ -283,32 +283,32 @@ private:
   case TraceEventKind::ConfigurationSealed:
     if (!has_no_subjects(subjects) || !payload.bytes().empty() ||
         provenance.instrument_metadata_revision.has_value()) {
-      return invalid_record("trace.configuration_sealed");
+      return create_invalid_trace_record_result("trace.configuration_sealed");
     }
     break;
   case TraceEventKind::BotAttributed:
     if (!is_exact_bot_attribution(subjects) || !payload.bytes().empty() ||
         provenance.instrument_metadata_revision.has_value()) {
-      return invalid_record("trace.bot_attributed");
+      return create_invalid_trace_record_result("trace.bot_attributed");
     }
     break;
   case TraceEventKind::SubscriptionConfigured:
     if (!is_exact_subscription(subjects) || !provenance.instrument_metadata_revision.has_value() ||
         payload.bytes().size() != 1U || payload.bytes().front() != std::byte{1U}) {
-      return invalid_record("trace.subscription_configured");
+      return create_invalid_trace_record_result("trace.subscription_configured");
     }
     break;
   case TraceEventKind::RouteConfigured:
     if (!is_exact_route(subjects) || !provenance.instrument_metadata_revision.has_value() ||
         payload.bytes().size() != 1U ||
         (payload.bytes().front() != std::byte{0U} && payload.bytes().front() != std::byte{1U})) {
-      return invalid_record("trace.route_configured");
+      return create_invalid_trace_record_result("trace.route_configured");
     }
     break;
   default:
-    return invalid_record("trace.kind");
+    return create_invalid_trace_record_result("trace.kind");
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -333,42 +333,51 @@ private:
   // Emit magic, version, identity, provenance, and payload fields in their assigned tag order.
   const bool success =
       writer.append_ascii(record_magic) && writer.append_u16(record.schema_version()) &&
-      writer.append_u64_field(tag(RecordTag::Ordinal), record.ordinal().value()) &&
-      writer.append_u16_field(tag(RecordTag::EventKind),
+      writer.append_u64_field(trace_record_tag_code(TraceRecordTag::Ordinal),
+                              record.ordinal().value()) &&
+      writer.append_u16_field(trace_record_tag_code(TraceRecordTag::EventKind),
                               static_cast<std::uint16_t>(record.kind())) &&
-      writer.append_optional_identifier_field(tag(RecordTag::FirmId), subjects.firm_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::DeskId), subjects.desk_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::BotId), subjects.bot_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::StrategyId), subjects.strategy_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::VenueId), subjects.venue_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::LogicalAccountId),
-                                              subjects.logical_account_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::InstrumentId),
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::FirmId),
+                                              subjects.firm_id) &&
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::DeskId),
+                                              subjects.desk_id) &&
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::BotId),
+                                              subjects.bot_id) &&
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::StrategyId),
+                                              subjects.strategy_id) &&
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::VenueId),
+                                              subjects.venue_id) &&
+      writer.append_optional_identifier_field(
+          trace_record_tag_code(TraceRecordTag::LogicalAccountId), subjects.logical_account_id) &&
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::InstrumentId),
                                               subjects.instrument_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::SubscriptionId),
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::SubscriptionId),
                                               subjects.subscription_id) &&
-      writer.append_optional_identifier_field(tag(RecordTag::RouteId), subjects.route_id) &&
-      writer.append_field(tag(RecordTag::ConfigurationFingerprint), fingerprint) &&
-      writer.append_u64_field(tag(RecordTag::ConfigurationRevision),
+      writer.append_optional_identifier_field(trace_record_tag_code(TraceRecordTag::RouteId),
+                                              subjects.route_id) &&
+      writer.append_field(trace_record_tag_code(TraceRecordTag::ConfigurationFingerprint),
+                          fingerprint) &&
+      writer.append_u64_field(trace_record_tag_code(TraceRecordTag::ConfigurationRevision),
                               provenance.configuration_revision.value()) &&
-      writer.append_u64_field(tag(RecordTag::OrganizationRevision),
+      writer.append_u64_field(trace_record_tag_code(TraceRecordTag::OrganizationRevision),
                               provenance.organization_revision.value()) &&
-      writer.append_u64_field(tag(RecordTag::StrategyConfigurationRevision),
+      writer.append_u64_field(trace_record_tag_code(TraceRecordTag::StrategyConfigurationRevision),
                               provenance.strategy_configuration_revision.value()) &&
-      writer.append_u64_field(tag(RecordTag::SubscriptionRevision),
+      writer.append_u64_field(trace_record_tag_code(TraceRecordTag::SubscriptionRevision),
                               provenance.subscription_revision.value()) &&
-      writer.append_u64_field(tag(RecordTag::RouteRevision), provenance.route_revision.value()) &&
-      writer.append_optional_u64_field(tag(RecordTag::InstrumentMetadataRevision),
-                                       metadata_revision) &&
-      writer.append_field(tag(RecordTag::Payload), record.payload().bytes());
+      writer.append_u64_field(trace_record_tag_code(TraceRecordTag::RouteRevision),
+                              provenance.route_revision.value()) &&
+      writer.append_optional_u64_field(
+          trace_record_tag_code(TraceRecordTag::InstrumentMetadataRevision), metadata_revision) &&
+      writer.append_field(trace_record_tag_code(TraceRecordTag::Payload), record.payload().bytes());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish a record only when the complete canonical encoding fits its bounded writer.
   if (!success) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "trace.record_encoding"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "trace.record_encoding"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -381,20 +390,20 @@ private:
 // Reject excessive input before copying so failure cannot expose a partially initialized payload.
 model::Result<TracePayload> TracePayload::copy_from(std::span<const std::byte> bytes) {
   if (bytes.size() > max_trace_payload_bytes) {
-    return model::Result<TracePayload>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "trace.payload"));
+    return model::Result<TracePayload>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "trace.payload"));
   }
   TracePayload payload;
   std::copy(bytes.begin(), bytes.end(), payload.bytes_.begin());
   payload.size_ = bytes.size();
-  return model::Result<TracePayload>::success(std::move(payload));
+  return model::Result<TracePayload>::create_success(std::move(payload));
 }
 
 // --------------------------------------------------------
 // The caller supplies any already-resolved instrument revision; this projection performs no lookup.
-TraceProvenance
-TraceProvenance::from(const configuration::ConfigurationProvenance& provenance,
-                      std::optional<model::InstrumentMetadataRevision> metadata_revision) {
+TraceProvenance TraceProvenance::trace_provenance_from_configuration(
+    const configuration::ConfigurationProvenance& provenance,
+    std::optional<model::InstrumentMetadataRevision> metadata_revision) {
   return TraceProvenance{provenance.fingerprint(),
                          provenance.configuration_revision(),
                          provenance.organization_revision(),
@@ -410,13 +419,14 @@ TraceSink::TraceSink(std::uint32_t capacity) : capacity_{capacity} { records_.re
 
 // --------------------------------------------------------
 // Validate and append one record atomically while preserving the accepted prefix on failure.
-model::Result<void> TraceSink::append(TraceEventKind kind, TraceSubjects subjects,
-                                      TraceProvenance provenance, TracePayload payload) {
+model::Result<void> TraceSink::append_trace_record(TraceEventKind kind, TraceSubjects subjects,
+                                                   TraceProvenance provenance,
+                                                   TracePayload payload) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Capacity has deterministic precedence and leaves the existing prefix byte-for-byte unchanged.
   if (records_.size() >= capacity_) {
-    return model::Result<void>::failure(DomainError::at_index(
+    return model::Result<void>::create_failure(DomainError::create_at_index(
         DomainErrorCode::TraceCapacityExceeded, "trace.records", records_.size()));
   }
 
@@ -432,7 +442,7 @@ model::Result<void> TraceSink::append(TraceEventKind kind, TraceSubjects subject
   const auto ordinal = TraceOrdinal{static_cast<std::uint64_t>(records_.size()) + 1U};
   records_.push_back(
       TraceRecord{ordinal, kind, std::move(subjects), std::move(provenance), std::move(payload)});
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -440,13 +450,13 @@ model::Result<void> TraceSink::append(TraceEventKind kind, TraceSubjects subject
 // --------------------------------------------------------
 // A stream is magic + version + count followed by length-prefixed canonical records in append
 // order.
-model::Result<std::vector<std::byte>> TraceSink::canonical_bytes() const {
+model::Result<std::vector<std::byte>> TraceSink::encode_canonical_bytes() const {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit the stream envelope before appending each accepted record in ordinal order.
   CanonicalTraceWriter writer;
   bool success = writer.append_ascii(stream_magic) && writer.append_u16(trace_schema_version) &&
-                 writer.append_u32(size());
+                 writer.append_u32(record_count());
   for (const auto& record : records_) {
     auto encoded = encode_record(record);
     if (!encoded || !writer.append_length_prefixed(encoded.value())) {
@@ -458,23 +468,24 @@ model::Result<std::vector<std::byte>> TraceSink::canonical_bytes() const {
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish bytes only when both the envelope and every nested record encoded completely.
   if (!success) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "trace.stream_encoding"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "trace.stream_encoding"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
-// The trace identity is exactly SHA-256 over canonical_bytes(); encoding failures propagate
+// The trace identity is exactly SHA-256 over encode_canonical_bytes(); encoding failures propagate
 // unchanged.
-model::Result<model::Sha256Digest> TraceSink::digest() const {
-  auto encoded = canonical_bytes();
+model::Result<model::Sha256Digest> TraceSink::derive_digest() const {
+  auto encoded = encode_canonical_bytes();
   if (!encoded) {
-    return model::Result<model::Sha256Digest>::failure(std::move(encoded).error());
+    return model::Result<model::Sha256Digest>::create_failure(std::move(encoded).error());
   }
-  return model::Result<model::Sha256Digest>::success(model::sha256(encoded.value()));
+  return model::Result<model::Sha256Digest>::create_success(
+      model::calculate_sha256_digest(encoded.value()));
 }
 
 // --------------------------------------------------------

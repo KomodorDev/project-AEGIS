@@ -25,7 +25,7 @@ using model::DomainErrorCode;
 
 // ########################################################################
 // Validation metadata names all 26 fields without defining their canonical encoding order.
-struct CapacityField {
+struct M4PolicyCapacityField {
   std::uint64_t M4PolicyCapacities::*member;
   std::string_view name;
 };
@@ -34,7 +34,7 @@ struct CapacityField {
 
 // ########################################################################
 // This internal projection exists only after the public factory cross-validates sealed authorities.
-struct CanonicalInputs {
+struct M4PolicyCanonicalInputs {
   model::Sha256Digest configuration_fingerprint;
   model::OrganizationRevision organization_revision;
   model::Sha256Digest runtime_policy_fingerprint;
@@ -47,7 +47,7 @@ struct CanonicalInputs {
 
 // ########################################################################
 // Counts derived from sealed M1-M3 objects define generic lower bounds without fixture authorship.
-struct PolicyRequirements {
+struct M4PolicyCapacityRequirements {
   std::uint64_t logical_account_count;
   std::uint64_t outbound_oms_capacity;
   std::uint64_t reservation_capacity;
@@ -58,7 +58,7 @@ struct PolicyRequirements {
 
 // --------------------------------------------------------
 // Fix scalar validation precedence independently of the manually written canonical encoder order.
-constexpr std::array<CapacityField, 26U> capacity_fields{{
+constexpr std::array<M4PolicyCapacityField, 26U> capacity_fields{{
     {&M4PolicyCapacities::max_private_admissions, "max_private_admissions"},
     {&M4PolicyCapacities::max_reconciliation_admissions, "max_reconciliation_admissions"},
     {&M4PolicyCapacities::max_account_safety_fences, "max_account_safety_fences"},
@@ -90,8 +90,9 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
 
 // --------------------------------------------------------
 // Return one stable combined-policy failure without exposing authored numeric values as text.
-[[nodiscard]] model::Result<void> m4_policy_validation_failure_from_field(std::string_view field) {
-  return model::Result<void>::failure(DomainError::at_field(
+[[nodiscard]] model::Result<void>
+create_m4_policy_validation_failure_from_field(std::string_view field) {
+  return model::Result<void>::create_failure(DomainError::create_at_field(
       DomainErrorCode::InvalidM4Policy, std::string{"m4_policy."} + std::string{field}));
 }
 
@@ -104,8 +105,9 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
 
 // --------------------------------------------------------
 // Validate every individual bound followed by the accepted deterministic cross-capacity order.
-[[nodiscard]] model::Result<void> validate_capacities(const M4PolicyCapacities& capacities,
-                                                      const PolicyRequirements& requirements) {
+[[nodiscard]] model::Result<void>
+validate_capacities(const M4PolicyCapacities& capacities,
+                    const M4PolicyCapacityRequirements& requirements) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject absent or non-u32 values in the exact authored field order.
@@ -113,48 +115,51 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
   for (const auto& field : capacity_fields) {
     const auto value = capacities.*(field.member);
     if (value == 0U || value > maximum) {
-      return m4_policy_validation_failure_from_field(std::string{"capacities."} +
-                                                     std::string{field.name});
+      return create_m4_policy_validation_failure_from_field(std::string{"capacities."} +
+                                                            std::string{field.name});
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Prove fixed owners can represent the complete already-sealed M1-M3 authority surface.
   if (capacities.max_account_safety_fences < requirements.logical_account_count) {
-    return m4_policy_validation_failure_from_field("capacities.max_account_safety_fences");
+    return create_m4_policy_validation_failure_from_field("capacities.max_account_safety_fences");
   }
   if (capacities.max_exchange_order_mappings < requirements.outbound_oms_capacity) {
-    return m4_policy_validation_failure_from_field("capacities.max_exchange_order_mappings");
+    return create_m4_policy_validation_failure_from_field("capacities.max_exchange_order_mappings");
   }
   if (capacities.max_inventory_source_rows < requirements.reservation_capacity) {
-    return m4_policy_validation_failure_from_field("capacities.max_inventory_source_rows");
+    return create_m4_policy_validation_failure_from_field("capacities.max_inventory_source_rows");
   }
   if (capacities.max_inventory_aggregate_cells < requirements.inventory_aggregate_cell_count) {
-    return m4_policy_validation_failure_from_field("capacities.max_inventory_aggregate_cells");
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_inventory_aggregate_cells");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A fresh registered namespace is required in addition to every recoverable epoch.
   if (capacities.max_recovery_epochs == maximum ||
       capacities.max_namespace_registrations < capacities.max_recovery_epochs + 1U) {
-    return m4_policy_validation_failure_from_field("capacities.max_namespace_registrations");
+    return create_m4_policy_validation_failure_from_field("capacities.max_namespace_registrations");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One new fill plus every retained gap must fit one atomic transition/callback/audit plan.
   if (capacities.max_pending_fill_intervals_per_order == maximum) {
-    return m4_policy_validation_failure_from_field(
+    return create_m4_policy_validation_failure_from_field(
         "capacities.max_pending_fill_intervals_per_order");
   }
   const auto drain_width = capacities.max_pending_fill_intervals_per_order + 1U;
   if (capacities.max_transition_effects_per_turn < drain_width) {
-    return m4_policy_validation_failure_from_field("capacities.max_transition_effects_per_turn");
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_transition_effects_per_turn");
   }
   if (capacities.max_order_callbacks_per_turn < drain_width) {
-    return m4_policy_validation_failure_from_field("capacities.max_order_callbacks_per_turn");
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_order_callbacks_per_turn");
   }
   if (drain_width > maximum - 2U || capacities.max_private_audit_records < drain_width + 2U) {
-    return m4_policy_validation_failure_from_field("capacities.max_private_audit_records");
+    return create_m4_policy_validation_failure_from_field("capacities.max_private_audit_records");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -163,25 +168,28 @@ constexpr std::array<CapacityField, 26U> capacity_fields{{
   // reference buffers.
   if (!is_product_u32_representable(capacities.max_private_audit_records,
                                     capacities.max_transition_effects_per_turn)) {
-    return m4_policy_validation_failure_from_field("capacities.max_transition_effects_per_turn");
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_transition_effects_per_turn");
   }
   const auto maximum_planned_callback_rows = capacities.max_private_audit_records / 3U;
   if (!is_product_u32_representable(maximum_planned_callback_rows,
                                     capacities.max_order_callbacks_per_turn)) {
-    return m4_policy_validation_failure_from_field("capacities.max_order_callbacks_per_turn");
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_order_callbacks_per_turn");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The two reconciliation/recovery worst-case vectors also use u32 aggregate element counts.
   if (!is_product_u32_representable(capacities.max_reconciliation_batches,
                                     capacities.max_reconciliation_rows_per_batch)) {
-    return m4_policy_validation_failure_from_field("capacities.max_reconciliation_rows_per_batch");
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_reconciliation_rows_per_batch");
   }
   if (!is_product_u32_representable(capacities.max_recovery_epochs,
                                     capacities.max_recovery_notifications)) {
-    return m4_policy_validation_failure_from_field("capacities.max_recovery_notifications");
+    return create_m4_policy_validation_failure_from_field("capacities.max_recovery_notifications");
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -247,7 +255,7 @@ private:
 // --------------------------------------------------------
 // Encode the exact positional policy after validation has fixed every field and relationship.
 [[nodiscard]] model::Result<std::vector<std::byte>>
-encode_policy(const CanonicalInputs& inputs, const M4PolicyCapacities& capacities) {
+encode_policy(const M4PolicyCanonicalInputs& inputs, const M4PolicyCapacities& capacities) {
   CanonicalM4PolicyWriter writer;
   writer.append_ascii("AEGISM4P");
   writer.append_u16(canonical_m4_policy_schema_version);
@@ -285,10 +293,10 @@ encode_policy(const CanonicalInputs& inputs, const M4PolicyCapacities& capacitie
   writer.append_u64(capacities.max_reference_intents);
   auto bytes = std::move(writer).take_canonical_bytes();
   if (bytes.size() != canonical_m4_policy_byte_size) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "m4_policy"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "m4_policy"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(bytes));
+  return model::Result<std::vector<std::byte>>::create_success(std::move(bytes));
 }
 
 // --------------------------------------------------------
@@ -298,41 +306,40 @@ encode_policy(const CanonicalInputs& inputs, const M4PolicyCapacities& capacitie
 // --------------------------------------------------------
 // Render the already-computed digest without changing its identity or hashing it again.
 std::string M4PolicyFingerprint::to_hex() const {
-  const auto hex = model::sha256_hex(bytes_);
+  const auto hex = model::sha256_hex_from_digest(bytes_);
   return std::string{hex.begin(), hex.end()};
 }
 
 // --------------------------------------------------------
 // Derive the complete authority projection and fixed-owner requirements from validated policies.
-model::Result<M4Policy> M4Policy::create(const configuration::StartupConfiguration& configuration,
-                                         const RuntimePolicy& runtime_policy,
-                                         const risk::RiskPolicySnapshot& risk_policy,
-                                         const execution::SubmissionPolicy& submission_policy,
-                                         M4PolicyCapacities capacities) {
+model::Result<M4Policy> M4Policy::create_m4_policy(
+    const configuration::StartupConfiguration& configuration, const RuntimePolicy& runtime_policy,
+    const risk::RiskPolicySnapshot& risk_policy,
+    const execution::SubmissionPolicy& submission_policy, M4PolicyCapacities capacities) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject a disconnected M1-M3 policy chain before any M4 capacity or byte derivation.
   const auto& configuration_fingerprint = configuration.fingerprint().bytes();
   if (runtime_policy.configuration_fingerprint().bytes() != configuration_fingerprint) {
-    return model::Result<M4Policy>::failure(DomainError::at_field(
+    return model::Result<M4Policy>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidM4Policy, "m4_policy.runtime_policy_fingerprint"));
   }
   if (risk_policy.configuration_fingerprint().bytes() != configuration_fingerprint ||
       risk_policy.organization_revision() != configuration.organization().revision()) {
-    return model::Result<M4Policy>::failure(DomainError::at_field(
+    return model::Result<M4Policy>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidM4Policy, "m4_policy.risk_policy_fingerprint"));
   }
   if (submission_policy.configuration_fingerprint() != configuration_fingerprint ||
       submission_policy.runtime_policy_fingerprint() != runtime_policy.fingerprint().bytes() ||
       submission_policy.risk_policy_fingerprint() != risk_policy.fingerprint().bytes() ||
       submission_policy.risk_policy_revision() != risk_policy.revision()) {
-    return model::Result<M4Policy>::failure(DomainError::at_field(
+    return model::Result<M4Policy>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidM4Policy, "m4_policy.submission_policy_fingerprint"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive encoded authority and capacity requirements only from the validated object graph.
-  CanonicalInputs inputs{
+  M4PolicyCanonicalInputs inputs{
       configuration_fingerprint,
       configuration.organization().revision(),
       runtime_policy.fingerprint().bytes(),
@@ -340,7 +347,7 @@ model::Result<M4Policy> M4Policy::create(const configuration::StartupConfigurati
       risk_policy.fingerprint().bytes(),
       submission_policy.fingerprint().bytes(),
   };
-  PolicyRequirements requirements{
+  M4PolicyCapacityRequirements requirements{
       static_cast<std::uint64_t>(configuration.logical_accounts().size()),
       static_cast<std::uint64_t>(submission_policy.capacities().oms_order_capacity),
       static_cast<std::uint64_t>(submission_policy.capacities().reservation_capacity),
@@ -348,16 +355,16 @@ model::Result<M4Policy> M4Policy::create(const configuration::StartupConfigurati
   };
   const auto validation = validate_capacities(capacities, requirements);
   if (!validation) {
-    return model::Result<M4Policy>::failure(validation.error());
+    return model::Result<M4Policy>::create_failure(validation.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Derive bytes, digest, and root only after both authority and capacity validation succeed.
   auto canonical_bytes = encode_policy(inputs, capacities);
   if (!canonical_bytes) {
-    return model::Result<M4Policy>::failure(canonical_bytes.error());
+    return model::Result<M4Policy>::create_failure(canonical_bytes.error());
   }
-  M4PolicyFingerprint fingerprint{model::sha256(canonical_bytes.value())};
+  M4PolicyFingerprint fingerprint{model::calculate_sha256_digest(canonical_bytes.value())};
   model::M4RootProvenance root{inputs.configuration_fingerprint,
                                inputs.organization_revision,
                                inputs.runtime_policy_fingerprint,
@@ -365,7 +372,7 @@ model::Result<M4Policy> M4Policy::create(const configuration::StartupConfigurati
                                inputs.risk_policy_fingerprint,
                                inputs.submission_policy_fingerprint,
                                fingerprint.bytes()};
-  return model::Result<M4Policy>::success(M4Policy{
+  return model::Result<M4Policy>::create_success(M4Policy{
       capacities, std::move(root), std::move(canonical_bytes).value(), std::move(fingerprint)});
 
   // ++++++++++++++++++++++++++++++++++++++++

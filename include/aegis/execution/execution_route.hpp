@@ -68,10 +68,11 @@ public:
   // --------------------------------------------------------
   // Validate dependencies and firm ownership before publishing canonical route-ID order.
   [[nodiscard]] static model::Result<ExecutionRouteConfiguration>
-  create(model::RouteRevision revision, std::vector<ExecutionRoute> routes,
-         const organization::Organization& organization,
-         std::vector<VenueInstrumentPair> known_venue_instruments,
-         std::vector<LogicalAccountVenueBinding> known_account_bindings);
+  create_execution_route_configuration(
+      model::RouteRevision revision, std::vector<ExecutionRoute> routes,
+      const organization::Organization& organization,
+      std::vector<VenueInstrumentPair> known_venue_instruments,
+      std::vector<LogicalAccountVenueBinding> known_account_bindings);
 
   // --------------------------------------------------------
   // Return the accepted route-section revision.
@@ -83,7 +84,7 @@ public:
 
   // --------------------------------------------------------
   // Find one configured grant by its nominal route identity.
-  [[nodiscard]] const ExecutionRoute* find(const model::RouteId& id) const noexcept;
+  [[nodiscard]] const ExecutionRoute* find_route(const model::RouteId& id) const noexcept;
 
   // --------------------------------------------------------
   // Structural equality compares the complete published route configuration.

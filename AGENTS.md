@@ -74,6 +74,17 @@ code, tests, build files, scripts and Markdown documentation.
   otherwise make it the first content in the file.
 - Use `// Purpose:` for C and C++, `# Purpose:` for CMake or shell-like files, a module docstring for
   Python, and `> **Purpose:**` directly below the title for Markdown.
+- If a format permits no native comment syntax, keep the file valid and record the purpose in a
+  schema-supported descriptive, extension or vendor metadata field. Put that field as early as the
+  format permits, after any required format or version discriminator, and state the same
+  responsibility and boundary required of a comment. Do not invent an unsupported field.
+- If the format permits neither comments nor schema-supported descriptive metadata, record the
+  exact file path plus its responsibility and boundary in the nearest repository-owned Markdown
+  document that governs that file. This path-specific entry is the only external-purpose fallback.
+- This metadata exception applies only when native comments are illegal. Comment-capable formats
+  must still use their native comment syntax in the first eligible position and cannot substitute
+  metadata. `CMakePresets.json` complies through its top-level
+  `vendor["aegis.dev/documentation/1.0"].purpose` field immediately after `version`.
 - Describe the file's responsibility and boundary in one or two sentences. Do not merely repeat the
   filename.
 
@@ -211,7 +222,7 @@ Result<void> OrderBook::add(Order order) {
   // ++++++++++++++++++++++++++++++++++++++++
   // Commit only after every fallible operation has succeeded.
   orders_.push_back(std::move(order));
-  return Result<void>::success();
+  return Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

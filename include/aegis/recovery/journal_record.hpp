@@ -52,7 +52,7 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject zero, negative, or wider-than-uint32 counts before any narrowing conversion.
     if (!std::in_range<std::uint32_t>(audit_record_count) || audit_record_count == 0) {
-      return model::Result<AuditSpan>::failure(model::DomainError::at_field(
+      return model::Result<AuditSpan>::create_failure(model::DomainError::create_at_field(
           model::DomainErrorCode::InvalidRecoveryPolicy, "audit_span.count"));
     }
 
@@ -63,7 +63,7 @@ public:
         static_cast<std::uint64_t>(validated_audit_record_count - 1U);
     if (first_audit_ordinal.value() >
         std::numeric_limits<std::uint64_t>::max() - additional_audit_records) {
-      return model::Result<AuditSpan>::failure(model::DomainError::at_field(
+      return model::Result<AuditSpan>::create_failure(model::DomainError::create_at_field(
           model::DomainErrorCode::RecoveryCounterExhausted, "audit_span.last"));
     }
 
@@ -72,9 +72,9 @@ public:
     auto last_audit_ordinal =
         AuditOrdinal::from_value(first_audit_ordinal.value() + additional_audit_records);
     if (!last_audit_ordinal) {
-      return model::Result<AuditSpan>::failure(std::move(last_audit_ordinal).error());
+      return model::Result<AuditSpan>::create_failure(std::move(last_audit_ordinal).error());
     }
-    return model::Result<AuditSpan>::success(AuditSpan{
+    return model::Result<AuditSpan>::create_success(AuditSpan{
         first_audit_ordinal, validated_audit_record_count, std::move(last_audit_ordinal).value()});
 
     // ++++++++++++++++++++++++++++++++++++++++

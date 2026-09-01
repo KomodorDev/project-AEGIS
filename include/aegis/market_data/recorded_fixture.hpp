@@ -56,8 +56,8 @@ public:
   // --------------------------------------------------------
   // Own one attempt only when its complete bytes fit the compiled AEGISMD schema-one ceiling.
   [[nodiscard]] static model::Result<IngressFrameAttempt>
-  create(std::optional<model::MarketSourceId> source_id, model::SessionEpoch session_epoch,
-         std::string frame);
+  create_ingress_frame_attempt(std::optional<model::MarketSourceId> source_id,
+                               model::SessionEpoch session_epoch, std::string frame);
 
   // --------------------------------------------------------
   // Borrow optional caller attribution without claiming that the runtime policy contains it.
@@ -119,8 +119,9 @@ public:
   // --------------------------------------------------------
   // Revalidate the attempt against the immutable policy and mint its complete post-admission value.
   [[nodiscard]] static model::Result<RecordedFrame>
-  create(IngressFrameAttempt attempt, const runtime::RuntimePolicy& policy,
-         model::ReceiveSequence receive_sequence, model::ReceiveTimestamp receive_timestamp);
+  create_recorded_frame(IngressFrameAttempt attempt, const runtime::RuntimePolicy& policy,
+                        model::ReceiveSequence receive_sequence,
+                        model::ReceiveTimestamp receive_timestamp);
 
   // --------------------------------------------------------
   // Borrow the opaque configured identity copied from exactly one RuntimeSource.
@@ -384,11 +385,11 @@ public:
 
   // --------------------------------------------------------
   // Publish one completely parsed message.
-  [[nodiscard]] static RecordedFixtureParseResult success(ParsedMarketMessage message);
+  [[nodiscard]] static RecordedFixtureParseResult create_success(ParsedMarketMessage message);
 
   // --------------------------------------------------------
   // Publish one stable syntax or compatibility failure without a partial message.
-  [[nodiscard]] static RecordedFixtureParseResult failure(RecordedFixtureParseError error);
+  [[nodiscard]] static RecordedFixtureParseResult create_failure(RecordedFixtureParseError error);
 
   // --------------------------------------------------------
   // Inspect which result arm is active.

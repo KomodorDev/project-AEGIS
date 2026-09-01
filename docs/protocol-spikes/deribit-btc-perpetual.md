@@ -61,6 +61,9 @@ a recovery mechanism selected by this M0 spike.
 
 ## Official sources
 
+These primary Deribit references support the protocol observations and account assumptions recorded
+in this time-boxed spike.
+
 - [Deribit JSON-RPC overview](https://docs.deribit.com/articles/json-rpc-overview)
 - [`public/get_instruments` API](https://docs.deribit.com/api-reference/market-data/public-get_instruments)
 - [Inverse perpetual contract description](https://support.deribit.com/hc/en-us/articles/31424954847133-Inverse-Perpetual)
@@ -71,6 +74,9 @@ a recovery mechanism selected by this M0 spike.
 - [API key permissions](https://support.deribit.com/hc/en-us/articles/26268257333661-Creating-new-API-key-on-Deribit)
 
 ## Deferred to M6 and later
+
+The spike deliberately leaves the following implementation and live-validation work to its named
+capability gates.
 
 - WebSocket implementation and reconnect lifecycle
 - exact order-book channel, depth, interval, sequence, and checksum rules

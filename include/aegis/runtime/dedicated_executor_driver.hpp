@@ -38,11 +38,11 @@ public:
 
   // --------------------------------------------------------
   // Report whether initial owner binding succeeded; false remains stable after a terminal failure.
-  [[nodiscard]] bool started_successfully() const noexcept;
+  [[nodiscard]] bool has_started_successfully() const noexcept;
 
   // --------------------------------------------------------
   // Report whether the worker is currently waiting or executing after successful startup.
-  [[nodiscard]] bool running() const noexcept;
+  [[nodiscard]] bool is_running() const noexcept;
 
   // --------------------------------------------------------
   // Return the stable binding, processing, or release error that stopped this driver, if any.
@@ -64,7 +64,8 @@ public:
 private:
 
   // --------------------------------------------------------
-  // Bind, process command and fence turns through SerializedExecutor::run_one, then release.
+  // Bind, process command and fence turns through SerializedExecutor::execute_next_turn, then
+  // release.
   void worker_loop() noexcept;
 
   // --------------------------------------------------------

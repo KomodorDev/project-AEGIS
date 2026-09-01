@@ -28,8 +28,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
     """Exercise source, build, scope, ordering, and command-status contracts."""
 
     # --------------------------------------------------------
-    # Create one UTF-8 file beneath a temporary repository, including absent parent directories.
-    def write(self, repository: Path, relative: str, text: str) -> Path:
+    # Write one UTF-8 file beneath a temporary repository, including absent parent directories.
+    def write_repository_file(self, repository: Path, relative: str, text: str) -> Path:
         """Write one scanner fixture and return its absolute path."""
 
         path = repository / relative
@@ -44,14 +44,19 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            clean = self.write(
+            clean = self.write_repository_file(
                 repository,
                 "include/aegis/execution/fake_order_encoder.hpp",
                 "// No socket, credential, endpoint, or coroutine is permitted.\n"
                 "struct EncodedFakeOrder { unsigned size; };\n",
             )
-            self.assertEqual(scanner.scan_paths(repository, [clean]), [])
-            self.assertEqual(scanner.main(["--root", str(repository), str(clean)]), 0)
+            self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [clean]), [])
+            self.assertEqual(
+                scanner.report_forbidden_capability_findings(
+                    ["--root", str(repository), str(clean)]
+                ),
+                0,
+            )
 
     # --------------------------------------------------------
     # Includes and call sites independently prove that merely acquiring a capability is forbidden.
@@ -60,7 +65,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(
+            source = self.write_repository_file(
                 repository,
                 "src/aegis/runtime/submission_coordinator.cpp",
                 "#include <sys/socket.h>\n"
@@ -71,7 +76,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "  SerializedExecutor executor;\n"
                 "}\n",
             )
-            findings = scanner.scan_paths(repository, [source])
+            findings = scanner.scan_repository_paths_or_raise(repository, [source])
             rules = {finding.rule for finding in findings}
             self.assertIn("forbidden include", rules)
             self.assertIn("network API", rules)
@@ -79,7 +84,12 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             self.assertIn("executor handoff", rules)
             errors = io.StringIO()
             with redirect_stderr(errors):
-                self.assertEqual(scanner.main(["--root", str(repository), str(source)]), 1)
+                self.assertEqual(
+                    scanner.report_forbidden_capability_findings(
+                        ["--root", str(repository), str(source)]
+                    ),
+                    1,
+                )
             self.assertIn("forbidden include", errors.getvalue())
 
     # --------------------------------------------------------
@@ -123,11 +133,16 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(repository, "include/aegis/execution/order_request.hpp", "")
+            source = self.write_repository_file(
+                repository, "include/aegis/execution/order_request.hpp", ""
+            )
             for header in headers:
                 with self.subTest(header=header):
                     source.write_text(f"#include <{header}>\n", encoding="utf-8")
-                    rules = {finding.rule for finding in scanner.scan_paths(repository, [source])}
+                    rules = {
+                        finding.rule
+                        for finding in scanner.scan_repository_paths_or_raise(repository, [source])
+                    }
                     self.assertIn("forbidden include", rules)
 
     # --------------------------------------------------------
@@ -208,13 +223,18 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(repository, "include/aegis/execution/order_request.hpp", "")
+            source = self.write_repository_file(
+                repository, "include/aegis/execution/order_request.hpp", ""
+            )
             for expected_rule, names in signatures.items():
                 for name in names:
                     with self.subTest(rule=expected_rule, name=name):
                         source.write_text(f"void violate() {{ {name}(); }}\n", encoding="utf-8")
                         rules = [
-                            finding.rule for finding in scanner.scan_paths(repository, [source])
+                            finding.rule
+                            for finding in scanner.scan_repository_paths_or_raise(
+                                repository, [source]
+                            )
                         ]
                         self.assertEqual(rules, [expected_rule])
 
@@ -225,30 +245,33 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            coordinator = self.write(
+            coordinator = self.write_repository_file(
                 repository,
                 "src/aegis/runtime/submission_coordinator.cpp",
                 "void production() { try_admit(); socket(0, 0, 0); int credential = 0; }\n",
             )
-            benchmark = self.write(
+            benchmark = self.write_repository_file(
                 repository,
                 "benchmarks/m3_submission_benchmark.cpp",
                 "void fixture() { try_admit(); socket(0, 0, 0); }\n",
             )
-            unit_test = self.write(
+            unit_test = self.write_repository_file(
                 repository,
                 "tests/unit/runtime/submission_coordinator_test.cpp",
                 "void fixture() { try_admit(); socket(0, 0, 0); int credential = 0; }\n",
             )
 
             production_rules = [
-                finding.rule for finding in scanner.scan_paths(repository, [coordinator])
+                finding.rule
+                for finding in scanner.scan_repository_paths_or_raise(repository, [coordinator])
             ]
             benchmark_rules = [
-                finding.rule for finding in scanner.scan_paths(repository, [benchmark])
+                finding.rule
+                for finding in scanner.scan_repository_paths_or_raise(repository, [benchmark])
             ]
             unit_test_rules = [
-                finding.rule for finding in scanner.scan_paths(repository, [unit_test])
+                finding.rule
+                for finding in scanner.scan_repository_paths_or_raise(repository, [unit_test])
             ]
             self.assertEqual(
                 production_rules,
@@ -258,7 +281,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             self.assertEqual(unit_test_rules, ["network API", "credential surface"])
 
             benchmark.write_text("void fixture() { try_admit(); }\n", encoding="utf-8")
-            self.assertEqual(scanner.scan_paths(repository, [benchmark]), [])
+            self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [benchmark]), [])
 
     # --------------------------------------------------------
     # Shared arithmetic/model implementations execute inline and therefore receive all direct rules.
@@ -272,20 +295,27 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "std::future<int> value": "coroutine or future",
             "std::mutex value": "blocking synchronization",
             "std::queue<int> value": "general-purpose queue",
+            "InlineCommandWorkItem value": "executor handoff",
             "try_admit()": "executor handoff",
         }
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(repository, "src/aegis/model/fixed_point.cpp", "")
+            source = self.write_repository_file(repository, "src/aegis/model/fixed_point.cpp", "")
             for header in includes:
                 with self.subTest(header=header):
                     source.write_text(f"#include <{header}>\n", encoding="utf-8")
-                    rules = [finding.rule for finding in scanner.scan_paths(repository, [source])]
+                    rules = [
+                        finding.rule
+                        for finding in scanner.scan_repository_paths_or_raise(repository, [source])
+                    ]
                     self.assertEqual(rules, ["forbidden include"])
             for text, expected_rule in identifiers.items():
                 with self.subTest(text=text, expected_rule=expected_rule):
                     source.write_text(f"void violate() {{ {text}; }}\n", encoding="utf-8")
-                    rules = [finding.rule for finding in scanner.scan_paths(repository, [source])]
+                    rules = [
+                        finding.rule
+                        for finding in scanner.scan_repository_paths_or_raise(repository, [source])
+                    ]
                     self.assertEqual(rules, [expected_rule])
 
     # --------------------------------------------------------
@@ -295,21 +325,21 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(
+            source = self.write_repository_file(
                 repository,
                 "tests/unit/execution/fake_transport_initiator_test.cpp",
                 "template <typename Value>\n"
                 "concept HasSocket = requires(Value value) { value.socket; };\n"
                 "static_assert(!HasSocket<int>);\n",
             )
-            self.assertEqual(scanner.scan_paths(repository, [source]), [])
+            self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [source]), [])
 
             source.write_text(
                 "template <typename Value>\n"
                 "concept HasSocket = requires(Value value) { value.socket; };\n",
                 encoding="utf-8",
             )
-            findings = scanner.scan_paths(repository, [source])
+            findings = scanner.scan_repository_paths_or_raise(repository, [source])
             self.assertEqual([finding.rule for finding in findings], ["network API"])
 
             source.write_text(
@@ -325,7 +355,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "void violate() { socket(0, 0, 0); }\n",
                 encoding="utf-8",
             )
-            findings = scanner.scan_paths(repository, [source])
+            findings = scanner.scan_repository_paths_or_raise(repository, [source])
             self.assertEqual([finding.rule for finding in findings], ["network API"])
 
     # --------------------------------------------------------
@@ -335,20 +365,20 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            allowed = self.write(
+            allowed = self.write_repository_file(
                 repository,
                 "CMakeLists.txt",
                 'set(CATCH_URL "https://github.com/catchorg/Catch2/archive/'
                 '644821ce28cb25d7992a4d0375b1d83214392592.tar.gz")\n',
             )
-            self.assertEqual(scanner.scan_paths(repository, [allowed]), [])
+            self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [allowed]), [])
 
-            denied = self.write(
+            denied = self.write_repository_file(
                 repository,
                 "benchmarks/CMakeLists.txt",
                 'set(LIVE_URL "https://exchange.example/orders")\n',
             )
-            findings = scanner.scan_paths(repository, [denied])
+            findings = scanner.scan_repository_paths_or_raise(repository, [denied])
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].rule, "live URL")
 
@@ -413,11 +443,14 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            cmake = self.write(repository, "CMakeLists.txt", "")
+            cmake = self.write_repository_file(repository, "CMakeLists.txt", "")
             for name, text in violations.items():
                 with self.subTest(name=name):
                     cmake.write_text(text, encoding="utf-8")
-                    rules = [finding.rule for finding in scanner.scan_paths(repository, [cmake])]
+                    rules = [
+                        finding.rule
+                        for finding in scanner.scan_repository_paths_or_raise(repository, [cmake])
+                    ]
                     self.assertIn("unapproved CMake dependency", rules)
 
     # --------------------------------------------------------
@@ -440,19 +473,25 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            cmake = self.write(repository, "cmake/RemoteDependency.cmake", "")
-            preset = self.write(repository, "CMakePresets.json", "{}\n")
+            cmake = self.write_repository_file(repository, "cmake/RemoteDependency.cmake", "")
+            preset = self.write_repository_file(repository, "CMakePresets.json", "{}\n")
             for text, expected_rule in violations.items():
                 with self.subTest(text=text.strip(), expected_rule=expected_rule):
                     cmake.write_text(text, encoding="utf-8")
-                    rules = [finding.rule for finding in scanner.scan_paths(repository, [cmake])]
+                    rules = [
+                        finding.rule
+                        for finding in scanner.scan_repository_paths_or_raise(repository, [cmake])
+                    ]
                     self.assertIn(expected_rule, rules)
 
             preset.write_text(
                 '{"configurePresets":[{"cacheVariables":{"CMAKE_CXX_FLAGS":"-lcurl"}}]}\n',
                 encoding="utf-8",
             )
-            rules = [finding.rule for finding in scanner.scan_paths(repository, [preset])]
+            rules = [
+                finding.rule
+                for finding in scanner.scan_repository_paths_or_raise(repository, [preset])
+            ]
             self.assertEqual(rules, ["network build dependency", "unapproved linker flag"])
 
     # --------------------------------------------------------
@@ -462,7 +501,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            cmake = self.write(
+            cmake = self.write_repository_file(
                 repository,
                 "CMakeLists.txt",
                 "find_package(Threads REQUIRED)\n"
@@ -481,7 +520,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "SHA256=f82705a2726d8f6cdcda274b841f6314dbfc6f731cdda06c946f310ec1cc3ad9 "
                 "DOWNLOAD_EXTRACT_TIMESTAMP TRUE SYSTEM)\n",
             )
-            self.assertEqual(scanner.scan_paths(repository, [cmake]), [])
+            self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [cmake]), [])
 
     # --------------------------------------------------------
     # Python import/qualified-call detection is language-aware and ignores inert fixture strings.
@@ -490,16 +529,16 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(
+            source = self.write_repository_file(
                 repository,
                 "tools/probe.py",
                 'TEXT = "import socket; socket.connect()"\nimport requests\n',
             )
-            findings = scanner.scan_paths(repository, [source])
+            findings = scanner.scan_repository_paths_or_raise(repository, [source])
             self.assertEqual([finding.rule for finding in findings], ["network namespace"])
 
             source.write_text("from urllib.request import urlopen\n", encoding="utf-8")
-            findings = scanner.scan_paths(repository, [source])
+            findings = scanner.scan_repository_paths_or_raise(repository, [source])
             self.assertEqual([finding.rule for finding in findings], ["network namespace"])
 
     # --------------------------------------------------------
@@ -509,21 +548,21 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            workflow = self.write(
+            workflow = self.write_repository_file(
                 repository,
                 ".github/workflows/ci.yml",
                 "persist-credentials: false\n",
             )
-            self.assertEqual(scanner.scan_paths(repository, [workflow]), [])
+            self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [workflow]), [])
 
             workflow.write_text("persist-credentials: true\n", encoding="utf-8")
-            findings = scanner.scan_paths(repository, [workflow])
+            findings = scanner.scan_repository_paths_or_raise(repository, [workflow])
             self.assertEqual([finding.rule for finding in findings], ["credential surface"])
 
             workflow.write_text(
                 "persist-credentials: false\ncredentials: enabled\n", encoding="utf-8"
             )
-            findings = scanner.scan_paths(repository, [workflow])
+            findings = scanner.scan_repository_paths_or_raise(repository, [workflow])
             self.assertEqual([finding.rule for finding in findings], ["credential surface"])
 
     # --------------------------------------------------------
@@ -533,12 +572,12 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            source = self.write(
+            source = self.write_repository_file(
                 repository,
                 "src/aegis/runtime/submission_coordinator.cpp",
                 "std::optional<std::uint64_t> endpoint;\n",
             )
-            findings = scanner.scan_paths(repository, [source])
+            findings = scanner.scan_repository_paths_or_raise(repository, [source])
             self.assertEqual([finding.rule for finding in findings], ["live-address surface"])
 
     # --------------------------------------------------------
@@ -548,55 +587,63 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
-            self.write(
+            self.write_repository_file(
                 repository,
                 "src/aegis/risk/z.cpp",
                 "void z() { socket(0, 0, 0); }\n",
             )
-            self.write(
+            self.write_repository_file(
                 repository,
                 "src/aegis/oms/outbound_oms.cpp",
                 'void oms() { sqlite3_open("state", nullptr); }\n',
             )
-            self.write(repository, "src/aegis/model/fixed_point.cpp", "void fixed_point() {}\n")
-            self.write(
+            self.write_repository_file(
+                repository, "src/aegis/model/fixed_point.cpp", "void fixed_point() {}\n"
+            )
+            self.write_repository_file(
                 repository,
                 "include/aegis/risk/a.hpp",
                 "void a() { connect(0, 0, 0); }\n",
             )
-            self.write(
+            self.write_repository_file(
                 repository,
                 "src/aegis/public_connectivity/later.cpp",
                 "void allowed_later() { connect(0, 0, 0); }\n",
             )
-            self.write(
+            self.write_repository_file(
                 repository,
                 "tests/unit/runtime/submission_coordinator_test.cpp",
                 "void unit_contract() {}\n",
             )
-            self.write(
+            self.write_repository_file(
                 repository,
                 "tests/support/reference_configuration.cpp",
                 "void reference_configuration() {}\n",
             )
-            self.write(
+            self.write_repository_file(
                 repository,
                 "tests/deterministic_scenarios/m3_reference_scenario_test.cpp",
                 "void deterministic_scenario() {}\n",
             )
-            self.write(
+            self.write_repository_file(
                 repository,
                 "tests/tooling/m3_benchmark_evidence_test.py",
                 "VALUE = 1\n",
             )
-            self.write(repository, "CMakeLists.txt", "find_package(Threads REQUIRED)\n")
-            self.write(
+            self.write_repository_file(
+                repository, "CMakeLists.txt", "find_package(Threads REQUIRED)\n"
+            )
+            self.write_repository_file(
                 repository,
                 "CMakePresets.json",
                 '{"configurePresets":[{"cacheVariables":{"CMAKE_CXX_FLAGS":"-lcurl"}}]}\n',
             )
-            self.write(repository, "cmake/ProjectOptions.cmake", "include_guard(GLOBAL)\n")
-            self.write(repository, "cmake/nested/Extra.cmake", "include(UnreviewedModule)\n")
+            self.write_repository_file(
+                repository, "cmake/ProjectOptions.cmake", "include_guard(GLOBAL)\n"
+            )
+            self.write_repository_file(
+                repository, "cmake/nested/Extra.cmake", "include(UnreviewedModule)\n"
+            )
 
             manifest = {
                 "M3_GENERAL_DIRECTORY_PREFIXES": (
@@ -627,11 +674,11 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             with mock.patch.multiple(scanner, **manifest):
                 discovered_once = [
                     path.relative_to(repository).as_posix()
-                    for path in scanner.discover_default_paths(repository)
+                    for path in scanner.discover_default_scan_paths_or_raise(repository)
                 ]
                 discovered_twice = [
                     path.relative_to(repository).as_posix()
-                    for path in scanner.discover_default_paths(repository)
+                    for path in scanner.discover_default_scan_paths_or_raise(repository)
                 ]
                 self.assertEqual(
                     discovered_once,
@@ -652,7 +699,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 )
                 self.assertEqual(discovered_twice, discovered_once)
 
-                findings = scanner.scan_paths(repository)
+                findings = scanner.scan_repository_paths_or_raise(repository)
                 self.assertEqual(
                     [finding.path for finding in findings],
                     [
@@ -688,7 +735,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         self.assertTrue(required <= direct)
         discovered = {
             path.relative_to(REPOSITORY).as_posix()
-            for path in scanner.discover_default_paths(REPOSITORY)
+            for path in scanner.discover_default_scan_paths_or_raise(REPOSITORY)
         }
         self.assertTrue(direct <= discovered)
 
@@ -771,7 +818,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         self.assertTrue(owner <= general)
         discovered = {
             path.relative_to(REPOSITORY).as_posix()
-            for path in scanner.discover_default_paths(REPOSITORY)
+            for path in scanner.discover_default_scan_paths_or_raise(REPOSITORY)
         }
         self.assertTrue(general <= discovered)
 
@@ -791,12 +838,12 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "src/aegis/runtime/private_order_reconciler.hpp",
             ):
                 with self.subTest(path=path):
-                    source = self.write(
+                    source = self.write_repository_file(
                         repository,
                         path,
                         "#include <future>\nvoid owner_path() { SerializedExecutor executor; }\n",
                     )
-                    findings = scanner.scan_paths(repository, [source])
+                    findings = scanner.scan_repository_paths_or_raise(repository, [source])
                     self.assertEqual(
                         [finding.rule for finding in findings],
                         ["forbidden include", "executor handoff"],
@@ -818,20 +865,22 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "BUILD_FILES": (),
                 "BUILD_DIRECTORY_PREFIXES": (),
             }
-            present = self.write(repository, "present.cpp", "void clean() {}\n")
+            present = self.write_repository_file(repository, "present.cpp", "void clean() {}\n")
             with mock.patch.multiple(scanner, **manifest):
                 with self.assertRaisesRegex(
                     FileNotFoundError, "required scanner manifest file is missing"
                 ):
-                    scanner.discover_default_paths(repository)
+                    scanner.discover_default_scan_paths_or_raise(repository)
 
                 errors = io.StringIO()
                 with redirect_stderr(errors):
-                    self.assertEqual(scanner.main(["--root", str(repository)]), 2)
+                    self.assertEqual(
+                        scanner.report_forbidden_capability_findings(["--root", str(repository)]), 2
+                    )
                 self.assertIn("missing-direct.cpp", errors.getvalue())
 
                 # A focused explicit scan intentionally bypasses the repository-default manifest.
-                self.assertEqual(scanner.scan_paths(repository, [present]), [])
+                self.assertEqual(scanner.scan_repository_paths_or_raise(repository, [present]), [])
 
     # --------------------------------------------------------
     # Directory-backed discovery also fails closed rather than treating a removed root as empty.
@@ -853,7 +902,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 with self.assertRaisesRegex(
                     FileNotFoundError, "required scanner manifest directory is missing"
                 ):
-                    scanner.discover_default_paths(repository)
+                    scanner.discover_default_scan_paths_or_raise(repository)
 
     # --------------------------------------------------------
 
@@ -861,5 +910,6 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 # ########################################################################
 
 
+# Run the same unittest cases directly when this fixture is invoked outside CTest.
 if __name__ == "__main__":
     unittest.main()

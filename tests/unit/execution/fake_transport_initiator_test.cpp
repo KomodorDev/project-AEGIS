@@ -21,7 +21,8 @@ namespace {
 using namespace aegis;
 
 // ########################################################################
-// Compile-time probes protect the concrete initiator from gaining any generic live capability.
+// Interesting syntax: requires-expression probes protect the concrete initiator from gaining any
+// generic live capability without invoking one.
 template <typename Value>
 concept HasEndpoint = requires(Value value) { value.endpoint; };
 
@@ -54,8 +55,9 @@ static_assert(
 
 // --------------------------------------------------------
 // Invalid identifier literals are fixture defects rather than fake-initiation behavior.
-template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text) {
-  auto result = Identifier::parse(text);
+template <typename Identifier>
+[[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
+  auto result = Identifier::parse_identifier(text);
   if (!result) {
     throw std::logic_error{"invalid identifier in fake initiator fixture"};
   }
@@ -65,7 +67,7 @@ template <typename Identifier> [[nodiscard]] Identifier id(std::string_view text
 // --------------------------------------------------------
 // Build exact nominal decimal inputs without binary floating-point conversion.
 template <typename Decimal>
-[[nodiscard]] Decimal decimal(std::int64_t coefficient, std::uint8_t scale) {
+[[nodiscard]] Decimal create_decimal_or_throw(std::int64_t coefficient, std::uint8_t scale) {
   auto result = Decimal::from_scaled(coefficient, scale);
   if (!result) {
     throw std::logic_error{"invalid decimal in fake initiator fixture"};
@@ -75,7 +77,7 @@ template <typename Decimal>
 
 // --------------------------------------------------------
 // Construct one exact positive ordinal or revision for deterministic fixtures.
-template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value) {
+template <typename Identity> [[nodiscard]] Identity create_identity_or_throw(std::uint64_t value) {
   auto result = Identity::from_value(value);
   if (!result) {
     throw std::logic_error{"invalid identity in fake initiator fixture"};
@@ -85,17 +87,17 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Generate one canonical local identity with a stable namespace and selected counter.
-[[nodiscard]] model::OrderId order_id(std::uint64_t counter) {
+[[nodiscard]] model::OrderId create_order_id_or_throw(std::uint64_t counter) {
   model::OrderNamespace::Bytes bytes{};
   for (std::size_t index = 0U; index < bytes.size(); ++index) {
     bytes[index] = static_cast<std::uint8_t>(0xa0U + index);
   }
-  auto provider =
-      model::DeterministicOrderIdProvider::create(model::OrderNamespace{bytes}, counter);
+  auto provider = model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+      model::OrderNamespace{bytes}, counter);
   if (!provider) {
     throw std::logic_error{"invalid order ID provider in fake initiator fixture"};
   }
-  auto generated = provider.value().next();
+  auto generated = provider.value().generate_next_order_id();
   if (!generated) {
     throw std::logic_error{"order ID generation failed in fake initiator fixture"};
   }
@@ -104,7 +106,7 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Fill one raw fingerprint deterministically while keeping the fake independent from wrappers.
-[[nodiscard]] model::Sha256Digest digest(std::uint8_t value) noexcept {
+[[nodiscard]] model::Sha256Digest create_digest(std::uint8_t value) noexcept {
   model::Sha256Digest result{};
   result.fill(std::byte{value});
   return result;
@@ -112,62 +114,66 @@ template <typename Identity> [[nodiscard]] Identity identity(std::uint64_t value
 
 // --------------------------------------------------------
 // Construct a complete admitted order for the exact fake encoder used by initiator tests.
-[[nodiscard]] oms::OutboundOrderAdmission admission(std::uint64_t attempt_value,
-                                                    std::uint64_t order_counter) {
-  const auto quantity = decimal<model::Quantity>(2, 0U);
+[[nodiscard]] oms::OutboundOrderAdmission create_admission_or_throw(std::uint64_t attempt_value,
+                                                                    std::uint64_t order_counter) {
+  const auto quantity = create_decimal_or_throw<model::Quantity>(2, 0U);
   return oms::OutboundOrderAdmission{
-      identity<model::SubmissionAttemptId>(attempt_value),
-      order_id(order_counter),
-      identity<model::ReservationId>(attempt_value),
+      create_identity_or_throw<model::SubmissionAttemptId>(attempt_value),
+      create_order_id_or_throw(order_counter),
+      create_identity_or_throw<model::ReservationId>(attempt_value),
       execution::CanonicalOrderEconomics{execution::OrderSide::Buy, execution::OrderType::Limit,
                                          execution::TimeInForce::GoodTilCancelled,
-                                         decimal<model::Price>(25'050, 1U), quantity},
-      risk::OrderExposure{quantity, decimal<model::Notional>(20, 0U)},
+                                         create_decimal_or_throw<model::Price>(25'050, 1U),
+                                         quantity},
+      risk::OrderExposure{quantity, create_decimal_or_throw<model::Notional>(20, 0U)},
       oms::OutboundOrderProvenance{
-          id<model::RouteId>("route.fake"),
-          id<model::VenueId>("deribit"),
-          id<model::LogicalAccountId>("account.fake"),
-          id<model::InstrumentId>("BTC-USD-PERPETUAL"),
-          id<model::VenueInstrumentId>("BTC-PERPETUAL"),
-          id<model::FirmId>("firm.fake"),
-          id<model::DeskId>("desk.fake"),
-          id<model::BotId>("bot.fake"),
-          id<model::StrategyId>("strategy.fake"),
-          digest(0x11U),
-          identity<model::ConfigurationRevision>(1U),
-          identity<model::OrganizationRevision>(1U),
-          identity<model::RouteRevision>(1U),
-          identity<model::InstrumentMetadataRevision>(1U),
-          digest(0x22U),
-          digest(0x33U),
-          identity<model::RiskPolicyRevision>(1U),
-          digest(0x44U),
+          parse_identifier_or_throw<model::RouteId>("route.fake"),
+          parse_identifier_or_throw<model::VenueId>("deribit"),
+          parse_identifier_or_throw<model::LogicalAccountId>("account.fake"),
+          parse_identifier_or_throw<model::InstrumentId>("BTC-USD-PERPETUAL"),
+          parse_identifier_or_throw<model::VenueInstrumentId>("BTC-PERPETUAL"),
+          parse_identifier_or_throw<model::FirmId>("firm.fake"),
+          parse_identifier_or_throw<model::DeskId>("desk.fake"),
+          parse_identifier_or_throw<model::BotId>("bot.fake"),
+          parse_identifier_or_throw<model::StrategyId>("strategy.fake"),
+          create_digest(0x11U),
+          create_identity_or_throw<model::ConfigurationRevision>(1U),
+          create_identity_or_throw<model::OrganizationRevision>(1U),
+          create_identity_or_throw<model::RouteRevision>(1U),
+          create_identity_or_throw<model::InstrumentMetadataRevision>(1U),
+          create_digest(0x22U),
+          create_digest(0x33U),
+          create_identity_or_throw<model::RiskPolicyRevision>(1U),
+          create_digest(0x44U),
       },
   };
 }
 
 // --------------------------------------------------------
 // Produce one exact EncodedFakeOrder using only the concrete offline OMS/encoder path.
-[[nodiscard]] execution::EncodedFakeOrder encoded_order(std::uint64_t attempt_value = 1U,
-                                                        std::uint64_t order_counter = 1U) {
-  auto outbound = oms::OutboundOms::create(1U);
+[[nodiscard]] execution::EncodedFakeOrder
+create_encoded_order_or_throw(std::uint64_t attempt_value = 1U, std::uint64_t order_counter = 1U) {
+  auto outbound = oms::OutboundOms::create_outbound_oms(1U);
   if (!outbound) {
     throw std::logic_error{"failed to create OMS in fake initiator fixture"};
   }
-  auto admitted = outbound.value().admit(admission(attempt_value, order_counter));
-  if (!admitted || !admitted.value().admitted()) {
+  auto admitted = outbound.value().admit_outbound_order(
+      create_admission_or_throw(attempt_value, order_counter));
+  if (!admitted || !admitted.value().is_admitted()) {
     throw std::logic_error{"failed to admit OMS row in fake initiator fixture"};
   }
-  auto script = execution::FakeEncoderScript::create(execution::FakeEncodingAction::Encode, 1U, {});
+  auto script = execution::FakeEncoderScript::create_fake_encoder_script(
+      execution::FakeEncodingAction::Encode, 1U, {});
   if (!script) {
     throw std::logic_error{"failed to create encoder script in fake initiator fixture"};
   }
-  auto encoder = execution::DeterministicFakeOrderEncoder::create(std::move(script).value(), 512U);
+  auto encoder = execution::DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      std::move(script).value(), 512U);
   if (!encoder) {
     throw std::logic_error{"failed to create encoder in fake initiator fixture"};
   }
-  auto encoded = encoder.value().encode(*admitted.value().record());
-  if (!encoded || !encoded.value().encoded()) {
+  auto encoded = encoder.value().encode_order(*admitted.value().record());
+  if (!encoded || !encoded.value().is_encoded()) {
     throw std::logic_error{"failed to encode order in fake initiator fixture"};
   }
   return *encoded.value().encoded_order();
@@ -183,31 +189,31 @@ TEST_CASE("fake initiator scripts validate and select canonical overrides", "[ex
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Sort authored overrides and prove an absent ordinal uses the permanent default outcome.
-  const auto script = execution::FakeInitiatorScript::create(
+  const auto script = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, 3U,
       {{3U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost},
        {1U, execution::FakeInitiationOutcome::AcceptedAndInitiated}});
   REQUIRE(script);
   REQUIRE(script.value().overrides().size() == 2U);
   CHECK(script.value().overrides()[0U].invocation_ordinal == 1U);
-  CHECK(script.value().outcome_for(identity<model::InitiatorInvocationOrdinal>(1U)) ==
-        execution::FakeInitiationOutcome::AcceptedAndInitiated);
-  CHECK(script.value().outcome_for(identity<model::InitiatorInvocationOrdinal>(2U)) ==
-        execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance);
+  CHECK(script.value().outcome_for(create_identity_or_throw<model::InitiatorInvocationOrdinal>(
+            1U)) == execution::FakeInitiationOutcome::AcceptedAndInitiated);
+  CHECK(script.value().outcome_for(create_identity_or_throw<model::InitiatorInvocationOrdinal>(
+            2U)) == execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Zero maximum, unassigned values, zero/out-of-range ordinals, and duplicates all fail closed.
-  CHECK_FALSE(execution::FakeInitiatorScript::create(
+  CHECK_FALSE(execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, 0U, {}));
-  CHECK_FALSE(execution::FakeInitiatorScript::create(
+  CHECK_FALSE(execution::FakeInitiatorScript::create_fake_initiator_script(
       static_cast<execution::FakeInitiationOutcome>(0U), 1U, {}));
-  CHECK_FALSE(execution::FakeInitiatorScript::create(
+  CHECK_FALSE(execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, 2U,
       {{0U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}}));
-  CHECK_FALSE(execution::FakeInitiatorScript::create(
+  CHECK_FALSE(execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, 2U,
       {{3U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}}));
-  CHECK_FALSE(execution::FakeInitiatorScript::create(
+  CHECK_FALSE(execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, 2U,
       {{1U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost},
        {1U, execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance}}));
@@ -223,15 +229,16 @@ TEST_CASE("fake initiator distinguishes definite, initiated, and uncertain outco
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Script accepted success, accepted uncertainty, then a definite pre-copy failure.
-  auto script = execution::FakeInitiatorScript::create(
+  auto script = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, 3U,
       {{1U, execution::FakeInitiationOutcome::AcceptedAndInitiated},
        {2U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}});
   REQUIRE(script);
   auto initiator =
-      execution::DeterministicFakeWriteInitiator::create(std::move(script).value(), 2U);
+      execution::DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
+          std::move(script).value(), 2U);
   REQUIRE(initiator);
-  const auto encoded = encoded_order();
+  const auto encoded = create_encoded_order_or_throw();
   execution::DeterministicSubmissionMeasurementClock measurement_clock{
       std::vector<std::optional<std::uint64_t>>{101U, 202U, 303U}};
 
@@ -277,17 +284,18 @@ TEST_CASE("fake accepted-write slots retain exact immutable provenance and bytes
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Cross the accepted-copy boundary once under the successful default action.
-  auto script = execution::FakeInitiatorScript::create(
+  auto script = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, 1U, {});
   REQUIRE(script);
   auto initiator =
-      execution::DeterministicFakeWriteInitiator::create(std::move(script).value(), 1U);
+      execution::DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
+          std::move(script).value(), 1U);
   REQUIRE(initiator);
-  const auto encoded = encoded_order(7U, 9U);
+  const auto encoded = create_encoded_order_or_throw(7U, 9U);
   execution::SteadySubmissionMeasurementClock measurement_clock;
   const auto result = initiator.value().initiate(encoded, measurement_clock);
   REQUIRE(result);
-  REQUIRE(result.value().accepted());
+  REQUIRE(result.value().is_accepted());
   REQUIRE(result.value().accepted_slot_endpoint_nanoseconds().has_value());
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -313,14 +321,15 @@ TEST_CASE("fake initiator capacity failure is definitive and consumes its action
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Both invocations select accepted outcomes, but the fixed slot array can retain only the first.
-  auto script = execution::FakeInitiatorScript::create(
+  auto script = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::AcceptedAndInitiated, 2U,
       {{2U, execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}});
   REQUIRE(script);
   auto initiator =
-      execution::DeterministicFakeWriteInitiator::create(std::move(script).value(), 1U);
+      execution::DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
+          std::move(script).value(), 1U);
   REQUIRE(initiator);
-  const auto encoded = encoded_order();
+  const auto encoded = create_encoded_order_or_throw();
   execution::SteadySubmissionMeasurementClock measurement_clock;
   REQUIRE(initiator.value().initiate(encoded, measurement_clock));
 
@@ -331,7 +340,7 @@ TEST_CASE("fake initiator capacity failure is definitive and consumes its action
   CHECK(full.value().invocation_ordinal().value() == 2U);
   CHECK(full.value().outcome() ==
         execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance);
-  CHECK_FALSE(full.value().accepted());
+  CHECK_FALSE(full.value().is_accepted());
   CHECK(initiator.value().invocations_consumed() == 2U);
   CHECK(initiator.value().accepted_writes().size() == 1U);
 
@@ -346,21 +355,23 @@ TEST_CASE("fake initiator fails closed outside validated capacity and invocation
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Zero accepted-write capacity is invalid AEGISSUP construction.
-  auto script = execution::FakeInitiatorScript::create(
+  auto script = execution::FakeInitiatorScript::create_fake_initiator_script(
       execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance, 1U, {});
   REQUIRE(script);
-  CHECK_FALSE(execution::DeterministicFakeWriteInitiator::create(script.value(), 0U));
+  CHECK_FALSE(execution::DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
+      script.value(), 0U));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // After one definite scripted invocation, a second call is impossible and adds no accepted slot.
   auto initiator =
-      execution::DeterministicFakeWriteInitiator::create(std::move(script).value(), 1U);
+      execution::DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
+          std::move(script).value(), 1U);
   REQUIRE(initiator);
-  const auto encoded = encoded_order();
+  const auto encoded = create_encoded_order_or_throw();
   execution::SteadySubmissionMeasurementClock measurement_clock;
   const auto first = initiator.value().initiate(encoded, measurement_clock);
   REQUIRE(first);
-  CHECK_FALSE(first.value().accepted());
+  CHECK_FALSE(first.value().is_accepted());
   const auto beyond = initiator.value().initiate(encoded, measurement_clock);
   REQUIRE_FALSE(beyond);
   CHECK(beyond.error().code == model::DomainErrorCode::InvalidFakeState);

@@ -30,6 +30,9 @@ authenticated account mapping, venue-native order ID encoding, or live cancellat
 
 ## Decision
 
+The following subsections define the accepted private-event vocabulary, correlation, lifecycle,
+reconciliation, and callback ordering while preserving M3 compatibility.
+
 ### M3 compatibility boundary
 
 M4 preserves `PendingEncoding = 1`, `PendingInitiation = 2`, `WriteInitiated = 3`,
@@ -689,6 +692,9 @@ prefix, prevents unsafe economic mutation, and latches the affected account `Qua
 declaration, and fake path belongs to the fail-closed forbidden-capability manifest.
 
 ## Consequences
+
+The private-event contract yields the following lifecycle and idempotency guarantees while adding
+bounded correlation state.
 
 - Acknowledgement affects correlation and lifecycle but not economic reservation.
 - Fill-before-ack is safe when exact identity proves ownership.

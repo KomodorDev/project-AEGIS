@@ -18,7 +18,8 @@ struct CanonicalValidationDecision {
   SubmissionReason reason;
 
   // --------------------------------------------------------
-  [[nodiscard]] bool accepted() const noexcept { return economics.has_value(); }
+  // Report whether validation produced complete order economics rather than a rejection reason.
+  [[nodiscard]] bool is_accepted() const noexcept { return economics.has_value(); }
 
   // --------------------------------------------------------
 };

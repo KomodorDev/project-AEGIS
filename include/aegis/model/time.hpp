@@ -156,18 +156,18 @@ public:
 
   // --------------------------------------------------------
   // Advance exactly once, failing before unsigned wrap with the tag-specific field.
-  [[nodiscard]] Result<CheckedUnsigned> next() const {
+  [[nodiscard]] Result<CheckedUnsigned> derive_next_value() const {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject the terminal value before arithmetic can wrap.
     if (value_ == std::numeric_limits<std::uint64_t>::max()) {
-      return Result<CheckedUnsigned>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, std::string{Tag::field}));
+      return Result<CheckedUnsigned>::create_failure(DomainError::create_at_field(
+          DomainErrorCode::ArithmeticOverflow, std::string{Tag::field}));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the representable successor in the same nominal counter domain.
-    return Result<CheckedUnsigned>::success(CheckedUnsigned{value_ + 1U});
+    return Result<CheckedUnsigned>::create_success(CheckedUnsigned{value_ + 1U});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -197,20 +197,23 @@ public:
     // Zero is reserved for absence in primitive trace encodings; negative and wide values also
     // fail.
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
-      return Result<OneBasedOrdinal>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidValue, std::string{Tag::field}));
+      return Result<OneBasedOrdinal>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidValue, std::string{Tag::field}));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish only a positive exactly represented ordinal.
-    return Result<OneBasedOrdinal>::success(OneBasedOrdinal{static_cast<std::uint64_t>(value)});
+    return Result<OneBasedOrdinal>::create_success(
+        OneBasedOrdinal{static_cast<std::uint64_t>(value)});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
 
   // --------------------------------------------------------
   // Return the first assigned position without a fallible construction path.
-  [[nodiscard]] static constexpr OneBasedOrdinal initial() noexcept { return OneBasedOrdinal{1U}; }
+  [[nodiscard]] static constexpr OneBasedOrdinal create_initial() noexcept {
+    return OneBasedOrdinal{1U};
+  }
 
   // --------------------------------------------------------
   // Return the exact one-based position.
@@ -218,18 +221,18 @@ public:
 
   // --------------------------------------------------------
   // Advance exactly once or report the tag's stable subsystem-specific exhaustion code.
-  [[nodiscard]] Result<OneBasedOrdinal> next() const {
+  [[nodiscard]] Result<OneBasedOrdinal> derive_next_ordinal() const {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject the terminal value before unsigned arithmetic can wrap to the absence sentinel.
     if (value_ == std::numeric_limits<std::uint64_t>::max()) {
-      return Result<OneBasedOrdinal>::failure(
-          DomainError::at_field(Tag::exhaustion_code, std::string{Tag::field}));
+      return Result<OneBasedOrdinal>::create_failure(
+          DomainError::create_at_field(Tag::exhaustion_code, std::string{Tag::field}));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the representable successor in the same nominal domain.
-    return Result<OneBasedOrdinal>::success(OneBasedOrdinal{value_ + 1U});
+    return Result<OneBasedOrdinal>::create_success(OneBasedOrdinal{value_ + 1U});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -304,20 +307,20 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject absence, negative input, and values outside the stored unsigned width.
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
-      return Result<Revision>::failure(
-          DomainError::at_field(DomainErrorCode::InvalidRevision, std::string{Tag::field}));
+      return Result<Revision>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::InvalidRevision, std::string{Tag::field}));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish only a positive representable revision.
-    return Result<Revision>::success(Revision{static_cast<std::uint64_t>(value)});
+    return Result<Revision>::create_success(Revision{static_cast<std::uint64_t>(value)});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
 
   // --------------------------------------------------------
   // Return the first installed revision without a fallible construction path.
-  [[nodiscard]] static constexpr Revision initial() noexcept { return Revision{1U}; }
+  [[nodiscard]] static constexpr Revision create_initial() noexcept { return Revision{1U}; }
 
   // --------------------------------------------------------
   // Return the exact positive stored revision number.
@@ -325,18 +328,18 @@ public:
 
   // --------------------------------------------------------
   // Advance exactly once, failing before unsigned wrap with the tag-specific field.
-  [[nodiscard]] Result<Revision> next() const {
+  [[nodiscard]] Result<Revision> derive_next_revision() const {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject the terminal value before arithmetic can wrap.
     if (value_ == std::numeric_limits<std::uint64_t>::max()) {
-      return Result<Revision>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, std::string{Tag::field}));
+      return Result<Revision>::create_failure(DomainError::create_at_field(
+          DomainErrorCode::ArithmeticOverflow, std::string{Tag::field}));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Publish the representable successor in the same nominal revision domain.
-    return Result<Revision>::success(Revision{value_ + 1U});
+    return Result<Revision>::create_success(Revision{value_ + 1U});
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -398,8 +401,8 @@ private:
 
 // --------------------------------------------------------
 // Subtract receive time from later processing time without mixing timestamp domains implicitly.
-[[nodiscard]] Result<ElapsedNanoseconds> processing_delay(ProcessingTimestamp processing,
-                                                          ReceiveTimestamp receive);
+[[nodiscard]] Result<ElapsedNanoseconds> calculate_processing_delay(ProcessingTimestamp processing,
+                                                                    ReceiveTimestamp receive);
 
 // --------------------------------------------------------
 
@@ -452,13 +455,13 @@ public:
 
   // --------------------------------------------------------
   // Wrap the provider's monotonic count in the receive-time nominal domain.
-  [[nodiscard]] ReceiveTimestamp receive_now() noexcept {
+  [[nodiscard]] ReceiveTimestamp receive_timestamp_now() noexcept {
     return ReceiveTimestamp{monotonic_nanoseconds()};
   }
 
   // --------------------------------------------------------
   // Wrap the provider's monotonic count in the processing-time nominal domain.
-  [[nodiscard]] ProcessingTimestamp processing_now() noexcept {
+  [[nodiscard]] ProcessingTimestamp processing_timestamp_now() noexcept {
     return ProcessingTimestamp{monotonic_nanoseconds()};
   }
 
@@ -493,18 +496,18 @@ public:
   // Advance is fallible, so CheckedIntegerInput admits signed/unsigned char and wider integer
   // sources, then rejects negative values at clock_nanoseconds before checked addition.
   template <detail::CheckedIntegerInput Value>
-  [[nodiscard]] Result<void> advance(Value nanoseconds) {
+  [[nodiscard]] Result<void> advance_nanoseconds(Value nanoseconds) {
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject negative or unrepresentable deltas before conversion.
     if (!std::in_range<std::uint64_t>(nanoseconds)) {
-      return Result<void>::failure(
-          DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
+      return Result<void>::create_failure(
+          DomainError::create_at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Delegate only a validated fixed-width delta to the checked state transition.
-    return advance_validated(static_cast<std::uint64_t>(nanoseconds));
+    return advance_validated_nanoseconds(static_cast<std::uint64_t>(nanoseconds));
 
     // ++++++++++++++++++++++++++++++++++++++++
   }
@@ -514,7 +517,7 @@ private:
 
   // --------------------------------------------------------
   // Add one validated delta atomically, preserving state on overflow.
-  [[nodiscard]] Result<void> advance_validated(std::uint64_t nanoseconds);
+  [[nodiscard]] Result<void> advance_validated_nanoseconds(std::uint64_t nanoseconds);
 
   // --------------------------------------------------------
   // Expose the current deterministic count through the base provider hook.

@@ -135,20 +135,25 @@ public:
   from_runtime_source(const runtime::RuntimeSource& source);
 
   // --------------------------------------------------------
+  // Borrow the immutable configured source identifier.
   [[nodiscard]] const model::MarketSourceId& source_id() const noexcept { return source_id_; }
 
   // --------------------------------------------------------
+  // Return the stable one-based ordinal assigned by runtime-policy ordering.
   [[nodiscard]] model::MarketSourceOrdinal source_ordinal() const noexcept {
     return source_ordinal_;
   }
 
   // --------------------------------------------------------
+  // Borrow the configured venue associated with the source.
   [[nodiscard]] const model::VenueId& venue_id() const noexcept { return venue_id_; }
 
   // --------------------------------------------------------
+  // Borrow the repository-wide instrument associated with the source.
   [[nodiscard]] const model::InstrumentId& instrument_id() const noexcept { return instrument_id_; }
 
   // --------------------------------------------------------
+  // Borrow the venue-native instrument token associated with the source.
   [[nodiscard]] const model::VenueInstrumentId& venue_instrument_id() const noexcept {
     return venue_instrument_id_;
   }
@@ -232,7 +237,7 @@ public:
   // --------------------------------------------------------
   // Validate enums, level shape, duplicates, and the sealed per-update change bound before hashing.
   [[nodiscard]] static model::Result<NormalizedMarketUpdate>
-  create(NormalizedMarketUpdateFields fields, std::size_t maximum_changes);
+  create_normalized_market_update(NormalizedMarketUpdateFields fields, std::size_t maximum_changes);
 
   // --------------------------------------------------------
   // Borrow the complete immutable source attribution.

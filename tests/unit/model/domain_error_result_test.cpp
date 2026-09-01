@@ -45,7 +45,7 @@ static_assert(static_cast<std::uint16_t>(DomainErrorCode::CallbackCounterExhaust
 // Successful results expose their value through both the explicit predicate and contextual boolean
 // conversion used by production validation chains.
 TEST_CASE("a successful result exposes only its value", "[model][result]") {
-  auto result = Result<std::string>::success("accepted");
+  auto result = Result<std::string>::create_success("accepted");
 
   REQUIRE(result.has_value());
   CHECK(static_cast<bool>(result));
@@ -55,8 +55,8 @@ TEST_CASE("a successful result exposes only its value", "[model][result]") {
 // --------------------------------------------------------
 // Collection failures must retain stable machine-readable location rather than depending on prose.
 TEST_CASE("a failed result preserves field and collection position", "[model][result]") {
-  auto result = Result<int>::failure(
-      DomainError::at_index(DomainErrorCode::DuplicateIdentifier, "firms", 3U));
+  auto result = Result<int>::create_failure(
+      DomainError::create_at_index(DomainErrorCode::DuplicateIdentifier, "firms", 3U));
 
   REQUIRE_FALSE(result.has_value());
   CHECK_FALSE(static_cast<bool>(result));
@@ -69,12 +69,12 @@ TEST_CASE("a failed result preserves field and collection position", "[model][re
 // --------------------------------------------------------
 // Command-style operations use the void specialization without weakening field-only error context.
 TEST_CASE("void results distinguish completion from failure", "[model][result]") {
-  const auto completed = Result<void>::success();
-  const auto failed =
-      Result<void>::failure(DomainError::at_field(DomainErrorCode::InvalidValue, "route.enabled"));
+  const auto completed = Result<void>::create_success();
+  const auto failed = Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidValue, "route.enabled"));
 
   CHECK(completed.has_value());
-  completed.value();
+  completed.require_success();
   REQUIRE_FALSE(failed.has_value());
   CHECK(failed.error().context.field == "route.enabled");
   CHECK_FALSE(failed.error().context.collection_index.has_value());

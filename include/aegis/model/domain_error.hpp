@@ -126,14 +126,14 @@ struct DomainError {
 
   // --------------------------------------------------------
   // Create a failure attached to one named field without a collection position.
-  [[nodiscard]] static DomainError at_field(DomainErrorCode code, std::string field) {
+  [[nodiscard]] static DomainError create_at_field(DomainErrorCode code, std::string field) {
     return DomainError{code, DomainErrorContext{std::move(field), std::nullopt}};
   }
 
   // --------------------------------------------------------
   // Create a failure attached to one indexed element of a named collection.
-  [[nodiscard]] static DomainError at_index(DomainErrorCode code, std::string field,
-                                            std::size_t index) {
+  [[nodiscard]] static DomainError create_at_index(DomainErrorCode code, std::string field,
+                                                   std::size_t index) {
     return DomainError{code, DomainErrorContext{std::move(field), index}};
   }
 

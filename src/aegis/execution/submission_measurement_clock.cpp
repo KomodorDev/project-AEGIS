@@ -18,7 +18,8 @@ SteadySubmissionMeasurementClock::SteadySubmissionMeasurementClock() noexcept
 // --------------------------------------------------------
 // Return elapsed nanoseconds only when steady-clock ordering and the signed conversion remain
 // valid.
-std::optional<std::uint64_t> SteadySubmissionMeasurementClock::read_now_nanoseconds() noexcept {
+std::optional<std::uint64_t>
+SteadySubmissionMeasurementClock::claim_next_nanosecond_reading() noexcept {
   const auto observed = std::chrono::steady_clock::now();
   if (observed < origin_) {
     return std::nullopt;
@@ -34,7 +35,7 @@ std::optional<std::uint64_t> SteadySubmissionMeasurementClock::read_now_nanoseco
 // --------------------------------------------------------
 // Atomically assign scripted positions while leaving every exhausted reader on the fixed fallback.
 std::optional<std::uint64_t>
-DeterministicSubmissionMeasurementClock::read_now_nanoseconds() noexcept {
+DeterministicSubmissionMeasurementClock::claim_next_nanosecond_reading() noexcept {
   auto index = next_reading_.load(std::memory_order_relaxed);
   while (index < readings_.size()) {
     if (next_reading_.compare_exchange_weak(index, index + 1U, std::memory_order_relaxed,

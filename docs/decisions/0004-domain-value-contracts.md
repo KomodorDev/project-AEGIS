@@ -114,6 +114,9 @@ is deferred to M8.
 
 ## Consequences
 
+The value-contract decision changes both compile-time safety and the amount of explicit conversion
+work required from callers.
+
 - Incorrect identity and unit mixing becomes a compile-time error instead of a convention.
 - Replay tests control every clock value and generated identifier without changing production policy.
 - Exact arithmetic is more verbose because every lossy boundary requires an explicit policy.

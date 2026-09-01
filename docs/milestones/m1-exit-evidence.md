@@ -26,6 +26,9 @@ explicitly separate from local proof.
 
 ## Scope evidence
 
+The table connects every promised M1 capability to its delivered behavior and concrete
+implementation/test proof.
+
 | Gate | Delivered behavior | Implementation and tests |
 |---|---|---|
 | `M1-S01` Strong identities and deterministic results | Firm, desk, bot, strategy, venue, logical/venue account, normalized/venue instrument, subscription, route, and order identities are nominal and validated. Stable result/error values carry deterministic field/index context. | [`identifier.hpp`](../../include/aegis/model/identifier.hpp), [`domain_error.hpp`](../../include/aegis/model/domain_error.hpp), [`result.hpp`](../../include/aegis/model/result.hpp), [`identifier_test.cpp`](../../tests/unit/model/identifier_test.cpp), and [`domain_error_result_test.cpp`](../../tests/unit/model/domain_error_result_test.cpp) |
@@ -39,6 +42,9 @@ explicitly separate from local proof.
 
 ## Exit-gate evidence
 
+The table summarizes the strongest reproducible evidence and current state for every M1 exit
+condition.
+
 | Gate | Reproducible evidence | Current state |
 |---|---|---|
 | `M1-E01` Invalid identifiers, metadata, conversions, and hierarchy references fail deterministically | Identifier grammar tests; metadata validation and unit tests; exact conversion failures; organization, subscription, route, and atomic startup negative cases assert stable error codes, fields, and positions. | Local pass in all normal and sanitizer suites |
@@ -48,6 +54,9 @@ explicitly separate from local proof.
 | `M1-E05` Arithmetic boundaries, rounding direction, and overflow are covered | Tests cover strict parsing, all signed rounding directions, ties-to-even, exact/misaligned increments, quantization, min/max coefficients, rejected unsigned narrowing, scale overflow, multiply/divide overflow, division by zero, and invalid rounding values. | Local pass |
 
 ## Deterministic reference vectors
+
+These fixed encodings, fingerprints, and replay counts detect any accidental change to M1's
+canonical contracts.
 
 - The accepted reference startup snapshot encodes with `AEGISCFG` schema 1 and has fingerprint
   `e869459e338687fe372c4ee1c490a147e3c88261d3c2b89af4520cf990e35310`.
@@ -96,6 +105,9 @@ belong to M2. The benchmark commands above only regress `BENCH-M0-HARNESS-001` a
 plumbing; their timing is not M1 or production latency evidence.
 
 ## Remote and integration evidence
+
+These records distinguish the reviewed feature revision, remote checks, and later merge identity
+from the local producer evidence above.
 
 - PR #7 used `codex/m1-domain-kernel` at
   `796321825d701f3add83af104b7924eb2826fd07` with `dev` as its base.

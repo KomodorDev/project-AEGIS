@@ -17,12 +17,12 @@
 namespace {
 
 // ########################################################################
-// Requires-expressions prove authored counter APIs preserve source type instead of converting
-// Boolean, character, or floating values through an accidental uint64 overload.
+// Interesting syntax: requires-expressions prove authored counter APIs preserve source type instead
+// of converting Boolean, character, or floating values through an accidental uint64 overload.
 template <typename Value>
 concept RuntimeEpochCounterInput =
     requires(aegis::model::OrderNamespace order_namespace, Value value) {
-      aegis::recovery::RuntimeEpochId::from_parts(order_namespace, value);
+      aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(order_namespace, value);
     };
 
 // ########################################################################
@@ -104,7 +104,8 @@ TEST_CASE("M4 opaque private identity comparison is deterministic") {
 // Namespace-counter identities expose their accepted 16-byte prefix and big-endian counter bytes.
 TEST_CASE("M4 namespace counter identities use one canonical 24 byte profile") {
   const auto order_namespace = create_order_namespace_from_seed(0x10U);
-  const auto runtime_epoch = aegis::recovery::RuntimeEpochId::from_parts(order_namespace, 0x0102U);
+  const auto runtime_epoch = aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(
+      order_namespace, 0x0102U);
   REQUIRE(runtime_epoch);
   STATIC_REQUIRE(aegis::recovery::RuntimeEpochId::byte_size == 24U);
 
@@ -119,28 +120,34 @@ TEST_CASE("M4 namespace counter identities use one canonical 24 byte profile") {
   REQUIRE(runtime_epoch.value().order_namespace() == order_namespace);
   REQUIRE(runtime_epoch.value().counter() == 0x0102U);
 
-  const auto zero = aegis::recovery::RuntimeEpochId::from_parts(order_namespace, 0U);
+  const auto zero =
+      aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(order_namespace, 0U);
   REQUIRE_FALSE(zero);
   REQUIRE(zero.error().code == aegis::model::DomainErrorCode::InvalidRecoveryPolicy);
   REQUIRE(zero.error().context.field == "runtime_epoch_id");
 
-  const auto negative = aegis::recovery::RuntimeEpochId::from_parts(order_namespace, -1);
+  const auto negative =
+      aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(order_namespace, -1);
   REQUIRE_FALSE(negative);
   REQUIRE(negative.error().code == aegis::model::DomainErrorCode::InvalidRecoveryPolicy);
 
-  const auto local_zero = aegis::oms::LocalOrderEventId::from_parts(order_namespace, 0U);
-  const auto local_negative = aegis::oms::LocalOrderEventId::from_parts(order_namespace, -1);
+  const auto local_zero =
+      aegis::oms::LocalOrderEventId::identity_from_namespace_and_counter(order_namespace, 0U);
+  const auto local_negative =
+      aegis::oms::LocalOrderEventId::identity_from_namespace_and_counter(order_namespace, -1);
   REQUIRE_FALSE(local_zero);
   REQUIRE_FALSE(local_negative);
   REQUIRE(local_zero.error().code == aegis::model::DomainErrorCode::InvalidPrivateIdentity);
 
-  const auto terminal = aegis::oms::LocalOrderEventId::from_parts(
+  const auto terminal = aegis::oms::LocalOrderEventId::identity_from_namespace_and_counter(
       order_namespace, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(terminal);
   REQUIRE(terminal.value().bytes().back() == 0xffU);
 
-  const auto snapshot = aegis::recovery::RecoverySnapshotId::from_parts(order_namespace, 3U);
-  const auto reference = aegis::recovery::ReferenceIntentId::from_parts(order_namespace, 4U);
+  const auto snapshot =
+      aegis::recovery::RecoverySnapshotId::identity_from_namespace_and_counter(order_namespace, 3U);
+  const auto reference =
+      aegis::recovery::ReferenceIntentId::identity_from_namespace_and_counter(order_namespace, 4U);
   REQUIRE(snapshot);
   REQUIRE(reference);
   REQUIRE(snapshot.value().order_namespace() == order_namespace);
@@ -164,11 +171,16 @@ TEST_CASE("M4 namespace counter identities use one canonical 24 byte profile") {
 TEST_CASE("M4 composite identities preserve complete parent identities") {
   const auto first_namespace = create_order_namespace_from_seed(0x20U);
   const auto second_namespace = create_order_namespace_from_seed(0x40U);
-  const auto first_epoch = aegis::recovery::RuntimeEpochId::from_parts(first_namespace, 1U).value();
+  const auto first_epoch =
+      aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(first_namespace, 1U)
+          .value();
   const auto second_epoch =
-      aegis::recovery::RuntimeEpochId::from_parts(second_namespace, 1U).value();
+      aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(second_namespace, 1U)
+          .value();
   const auto reconciliation =
-      aegis::recovery::ReconciliationEpochId::from_parts(first_epoch, 2U).value();
+      aegis::recovery::ReconciliationEpochId::reconciliation_epoch_id_from_runtime_and_counter(
+          first_epoch, 2U)
+          .value();
 
   STATIC_REQUIRE(aegis::recovery::ReconciliationEpochId::byte_size == 32U);
   REQUIRE(std::equal(first_epoch.bytes().begin(), first_epoch.bytes().end(),
@@ -179,19 +191,26 @@ TEST_CASE("M4 composite identities preserve complete parent identities") {
   REQUIRE(reconciliation.counter() == 2U);
 
   const auto zero_reconciliation =
-      aegis::recovery::ReconciliationEpochId::from_parts(first_epoch, 0U);
+      aegis::recovery::ReconciliationEpochId::reconciliation_epoch_id_from_runtime_and_counter(
+          first_epoch, 0U);
   const auto negative_reconciliation =
-      aegis::recovery::ReconciliationEpochId::from_parts(first_epoch, -1);
+      aegis::recovery::ReconciliationEpochId::reconciliation_epoch_id_from_runtime_and_counter(
+          first_epoch, -1);
   REQUIRE_FALSE(zero_reconciliation);
   REQUIRE_FALSE(negative_reconciliation);
   REQUIRE(zero_reconciliation.error().code == aegis::model::DomainErrorCode::InvalidRecoveryPolicy);
 
-  auto order_provider = aegis::model::DeterministicOrderIdProvider::create(first_namespace).value();
-  const auto order_id = order_provider.next().value();
+  auto order_provider =
+      aegis::model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+          first_namespace)
+          .value();
+  const auto order_id = order_provider.generate_next_order_id().value();
   const auto first_cancel =
-      aegis::oms::CancelAttemptId::from_parts(first_epoch, order_id, 1U).value();
+      aegis::oms::CancelAttemptId::cancel_attempt_id_from_components(first_epoch, order_id, 1U)
+          .value();
   const auto restarted_cancel =
-      aegis::oms::CancelAttemptId::from_parts(second_epoch, order_id, 1U).value();
+      aegis::oms::CancelAttemptId::cancel_attempt_id_from_components(second_epoch, order_id, 1U)
+          .value();
 
   STATIC_REQUIRE(aegis::oms::CancelAttemptId::byte_size == 56U);
   REQUIRE(first_cancel != restarted_cancel);
@@ -205,11 +224,13 @@ TEST_CASE("M4 composite identities preserve complete parent identities") {
   REQUIRE(first_cancel.order_id() == order_id);
   REQUIRE(first_cancel.ordinal() == 1U);
 
-  const auto zero_cancel = aegis::oms::CancelAttemptId::from_parts(first_epoch, order_id, 0U);
+  const auto zero_cancel =
+      aegis::oms::CancelAttemptId::cancel_attempt_id_from_components(first_epoch, order_id, 0U);
   REQUIRE_FALSE(zero_cancel);
   REQUIRE(zero_cancel.error().code == aegis::model::DomainErrorCode::InvalidPrivateIdentity);
 
-  const auto negative_cancel = aegis::oms::CancelAttemptId::from_parts(first_epoch, order_id, -1);
+  const auto negative_cancel =
+      aegis::oms::CancelAttemptId::cancel_attempt_id_from_components(first_epoch, order_id, -1);
   REQUIRE_FALSE(negative_cancel);
   REQUIRE(negative_cancel.error().code == aegis::model::DomainErrorCode::InvalidPrivateIdentity);
 }
@@ -218,40 +239,44 @@ TEST_CASE("M4 composite identities preserve complete parent identities") {
 // Move-only providers emit UINT64_MAX once, then preserve subsystem-specific sticky exhaustion.
 TEST_CASE("M4 identity providers never wrap or duplicate terminal counters") {
   const auto order_namespace = create_order_namespace_from_seed(0x50U);
-  auto runtime_result = aegis::recovery::RuntimeEpochIdProvider::create(
-      order_namespace, std::numeric_limits<std::uint64_t>::max());
+  auto runtime_result =
+      aegis::recovery::RuntimeEpochIdProvider::create_namespace_counter_identity_provider(
+          order_namespace, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(runtime_result);
   auto runtime_provider = std::move(runtime_result).value();
-  const auto terminal_epoch = runtime_provider.next();
+  const auto terminal_epoch = runtime_provider.generate_next_identity();
   REQUIRE(terminal_epoch);
   REQUIRE(terminal_epoch.value().counter() == std::numeric_limits<std::uint64_t>::max());
-  const auto runtime_exhausted = runtime_provider.next();
+  const auto runtime_exhausted = runtime_provider.generate_next_identity();
   REQUIRE_FALSE(runtime_exhausted);
   REQUIRE(runtime_exhausted.error().code ==
           aegis::model::DomainErrorCode::RecoveryCounterExhausted);
-  REQUIRE_FALSE(runtime_provider.next());
+  REQUIRE_FALSE(runtime_provider.generate_next_identity());
 
-  auto local_result = aegis::oms::LocalOrderEventIdProvider::create(
-      order_namespace, std::numeric_limits<std::uint64_t>::max());
+  auto local_result =
+      aegis::oms::LocalOrderEventIdProvider::create_namespace_counter_identity_provider(
+          order_namespace, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(local_result);
   auto local_provider = std::move(local_result).value();
-  REQUIRE(local_provider.next());
-  const auto local_exhausted = local_provider.next();
+  REQUIRE(local_provider.generate_next_identity());
+  const auto local_exhausted = local_provider.generate_next_identity();
   REQUIRE_FALSE(local_exhausted);
   REQUIRE(local_exhausted.error().code == aegis::model::DomainErrorCode::PrivateCounterExhausted);
 
-  auto snapshot_result = aegis::recovery::RecoverySnapshotIdProvider::create(
-      order_namespace, std::numeric_limits<std::uint64_t>::max());
-  auto reference_result = aegis::recovery::ReferenceIntentIdProvider::create(
-      order_namespace, std::numeric_limits<std::uint64_t>::max());
+  auto snapshot_result =
+      aegis::recovery::RecoverySnapshotIdProvider::create_namespace_counter_identity_provider(
+          order_namespace, std::numeric_limits<std::uint64_t>::max());
+  auto reference_result =
+      aegis::recovery::ReferenceIntentIdProvider::create_namespace_counter_identity_provider(
+          order_namespace, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(snapshot_result);
   REQUIRE(reference_result);
   auto snapshot_provider = std::move(snapshot_result).value();
   auto reference_provider = std::move(reference_result).value();
-  REQUIRE(snapshot_provider.next());
-  REQUIRE(reference_provider.next());
-  REQUIRE_FALSE(snapshot_provider.next());
-  REQUIRE_FALSE(reference_provider.next());
+  REQUIRE(snapshot_provider.generate_next_identity());
+  REQUIRE(reference_provider.generate_next_identity());
+  REQUIRE_FALSE(snapshot_provider.generate_next_identity());
+  REQUIRE_FALSE(reference_provider.generate_next_identity());
 
   STATIC_REQUIRE_FALSE(std::is_copy_constructible_v<aegis::recovery::RuntimeEpochIdProvider>);
   STATIC_REQUIRE(std::is_move_constructible_v<aegis::recovery::RuntimeEpochIdProvider>);
@@ -263,15 +288,20 @@ TEST_CASE("M4 identity providers never wrap or duplicate terminal counters") {
 TEST_CASE("M4 composite identity providers retain parent scope and sticky exhaustion") {
   const auto order_namespace = create_order_namespace_from_seed(0x60U);
   const auto runtime_epoch =
-      aegis::recovery::RuntimeEpochId::from_parts(order_namespace, 1U).value();
-  auto order_provider = aegis::model::DeterministicOrderIdProvider::create(order_namespace).value();
-  const auto order_id = order_provider.next().value();
+      aegis::recovery::RuntimeEpochId::identity_from_namespace_and_counter(order_namespace, 1U)
+          .value();
+  auto order_provider =
+      aegis::model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+          order_namespace)
+          .value();
+  const auto order_id = order_provider.generate_next_order_id().value();
 
-  auto cancel_result = aegis::oms::CancelAttemptIdProvider::create(runtime_epoch, order_id);
+  auto cancel_result = aegis::oms::CancelAttemptIdProvider::create_cancel_attempt_id_provider(
+      runtime_epoch, order_id);
   REQUIRE(cancel_result);
   auto cancel_provider = std::move(cancel_result).value();
-  const auto first = cancel_provider.next();
-  const auto second = cancel_provider.next();
+  const auto first = cancel_provider.generate_next_cancel_attempt_id();
+  const auto second = cancel_provider.generate_next_cancel_attempt_id();
   REQUIRE(first);
   REQUIRE(second);
   REQUIRE(first.value().ordinal() == 1U);
@@ -279,22 +309,24 @@ TEST_CASE("M4 composite identity providers retain parent scope and sticky exhaus
   REQUIRE(first.value().runtime_epoch_id() == runtime_epoch);
   REQUIRE(first.value().order_id() == order_id);
 
-  auto terminal_cancel_result = aegis::oms::CancelAttemptIdProvider::create(
-      runtime_epoch, order_id, std::numeric_limits<std::uint64_t>::max());
+  auto terminal_cancel_result =
+      aegis::oms::CancelAttemptIdProvider::create_cancel_attempt_id_provider(
+          runtime_epoch, order_id, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(terminal_cancel_result);
   auto terminal_cancel_provider = std::move(terminal_cancel_result).value();
-  REQUIRE(terminal_cancel_provider.next());
-  const auto cancel_exhausted = terminal_cancel_provider.next();
+  REQUIRE(terminal_cancel_provider.generate_next_cancel_attempt_id());
+  const auto cancel_exhausted = terminal_cancel_provider.generate_next_cancel_attempt_id();
   REQUIRE_FALSE(cancel_exhausted);
   REQUIRE(cancel_exhausted.error().code == aegis::model::DomainErrorCode::PrivateCounterExhausted);
-  REQUIRE_FALSE(terminal_cancel_provider.next());
+  REQUIRE_FALSE(terminal_cancel_provider.generate_next_cancel_attempt_id());
 
-  auto reconciliation_result = aegis::recovery::ReconciliationEpochIdProvider::create(
-      runtime_epoch, std::numeric_limits<std::uint64_t>::max());
+  auto reconciliation_result =
+      aegis::recovery::ReconciliationEpochIdProvider::create_reconciliation_epoch_id_provider(
+          runtime_epoch, std::numeric_limits<std::uint64_t>::max());
   REQUIRE(reconciliation_result);
   auto reconciliation_provider = std::move(reconciliation_result).value();
-  REQUIRE(reconciliation_provider.next());
-  const auto exhausted = reconciliation_provider.next();
+  REQUIRE(reconciliation_provider.generate_next_reconciliation_epoch_id());
+  const auto exhausted = reconciliation_provider.generate_next_reconciliation_epoch_id();
   REQUIRE_FALSE(exhausted);
   REQUIRE(exhausted.error().code == aegis::model::DomainErrorCode::RecoveryCounterExhausted);
 
@@ -309,7 +341,7 @@ TEST_CASE("M4 recovery ordinals are nominal one based and non wrapping") {
   const auto first = aegis::recovery::JournalSequence::from_value(1U);
   REQUIRE(first);
   REQUIRE(first.value().value() == 1U);
-  REQUIRE(first.value().next().value().value() == 2U);
+  REQUIRE(first.value().derive_next_ordinal().value().value() == 2U);
 
   const auto zero = aegis::recovery::JournalSequence::from_value(0U);
   REQUIRE_FALSE(zero);
@@ -318,7 +350,7 @@ TEST_CASE("M4 recovery ordinals are nominal one based and non wrapping") {
   const auto terminal =
       aegis::recovery::AuditOrdinal::from_value(std::numeric_limits<std::uint64_t>::max());
   REQUIRE(terminal);
-  const auto exhausted = terminal.value().next();
+  const auto exhausted = terminal.value().derive_next_ordinal();
   REQUIRE_FALSE(exhausted);
   REQUIRE(exhausted.error().code == aegis::model::DomainErrorCode::RecoveryCounterExhausted);
   REQUIRE(exhausted.error().context.field == "audit_ordinal");

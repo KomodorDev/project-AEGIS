@@ -27,6 +27,9 @@ turn that rule into bounded owner-local state without importing M5's later dynam
 
 ## Decision
 
+The following subsections define the accepted reservation conversion, signed inventory, unattributed
+exposure, and account-safety rules.
+
 ### Stable inventory and account errors
 
 M4 appends these stable `DomainErrorCode` values:
@@ -400,6 +403,9 @@ record. ADR-0014 must fix canonical evidence bytes before an emitter exists. The
 permissive capacity and no overwriting ring for safety-critical evidence.
 
 ## Consequences
+
+The inventory decision provides the following exposure guarantees and requires conservative
+treatment of incomplete attribution.
 
 - A fill cannot disappear between reservation and confirmed inventory.
 - Cumulative fill partitioning cannot change final approved face notional.

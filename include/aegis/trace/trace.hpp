@@ -103,9 +103,9 @@ struct TraceProvenance {
 
   // --------------------------------------------------------
   // Copy common provenance plus the optional instrument-specific revision into one trace value.
-  [[nodiscard]] static TraceProvenance
-  from(const configuration::ConfigurationProvenance& provenance,
-       std::optional<model::InstrumentMetadataRevision> metadata_revision = std::nullopt);
+  [[nodiscard]] static TraceProvenance trace_provenance_from_configuration(
+      const configuration::ConfigurationProvenance& provenance,
+      std::optional<model::InstrumentMetadataRevision> metadata_revision = std::nullopt);
 
   // --------------------------------------------------------
   // Structural equality compares the complete copied provenance contract.
@@ -233,8 +233,9 @@ public:
 
   // --------------------------------------------------------
   // Validate and append one complete observation without damaging the accepted prefix on failure.
-  [[nodiscard]] model::Result<void> append(TraceEventKind kind, TraceSubjects subjects,
-                                           TraceProvenance provenance, TracePayload payload = {});
+  [[nodiscard]] model::Result<void> append_trace_record(TraceEventKind kind, TraceSubjects subjects,
+                                                        TraceProvenance provenance,
+                                                        TracePayload payload = {});
 
   // --------------------------------------------------------
   // Borrow the complete accepted record prefix.
@@ -242,7 +243,7 @@ public:
 
   // --------------------------------------------------------
   // Return the number of accepted records.
-  [[nodiscard]] std::uint32_t size() const noexcept {
+  [[nodiscard]] std::uint32_t record_count() const noexcept {
     return static_cast<std::uint32_t>(records_.size());
   }
 
@@ -252,11 +253,11 @@ public:
 
   // --------------------------------------------------------
   // Project accepted records into schema-versioned canonical bytes.
-  [[nodiscard]] model::Result<std::vector<std::byte>> canonical_bytes() const;
+  [[nodiscard]] model::Result<std::vector<std::byte>> encode_canonical_bytes() const;
 
   // --------------------------------------------------------
   // Hash the same canonical byte stream with SHA-256.
-  [[nodiscard]] model::Result<model::Sha256Digest> digest() const;
+  [[nodiscard]] model::Result<model::Sha256Digest> derive_digest() const;
 
   // --------------------------------------------------------
 private:

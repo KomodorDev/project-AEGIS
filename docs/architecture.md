@@ -48,9 +48,11 @@ Supporting documents provide more detail without turning conceptual diagrams int
 The diagram groups components by latency responsibility. Solid arrows show the immediate data and
 order path; dotted arrows show asynchronous observations or complete snapshot publication.
 It shows the accepted end-state relationships, not only the capability enabled by the integrated
-M3 build. The implemented slice stops after OMS admission, exact fake encoding, and an
-in-memory fake accepted-slot copy; venue sessions, native encoding, exchange events, and real
-transmission remain later milestones.
+M1-M4 baseline. The implemented submission slice stops after OMS admission, exact fake encoding,
+and an in-memory fake accepted-slot copy. Integrated M4 foundations add bounded private identities
+and normalized events, first-seen resolution/correlation, owner binding, fake recovery authority,
+provenance, and typed semantic evidence; venue sessions, native encoding, complete inventory
+reconciliation, durable recovery, and real transmission remain later work.
 
 ```mermaid
 flowchart TD
@@ -369,7 +371,7 @@ It must not require:
 - A network call to a separate risk service
 - A thread hop merely to approve the order
 
-The implemented M3 slice stops at a fixed-capacity in-memory fake initiator. A real asynchronous
+The implemented submission slice stops at a fixed-capacity in-memory fake initiator. A real asynchronous
 stream may eventually require a bounded, session-local write sequencer when another write is
 already in progress. That M8
 mechanism would sit after OMS admission, would not be a general-purpose event bus, and would not move
@@ -396,8 +398,8 @@ illustrative, while the
 and ADR-0009:
 
 ```cpp
-SubmitResult BotContext::submit(const OrderRequest& request) noexcept {
-    return submission_->submit(callback_token_, request);
+SubmitResult BotContext::submit_order(const OrderRequest& request) noexcept {
+    return submission_->submit_order(callback_token_, request);
 }
 ```
 
@@ -421,14 +423,15 @@ reservation-to-inventory conversion and account safety; ADR-0012 fixes fake-back
 ADR-0013 fixes every M4 capacity and semantic evidence record. A required ADR-0014 will fix the
 exact new evidence bytes before an encoder is implemented.
 
-**Integrated M3 status (2026-08-23):** The complete route → canonical validation → identity →
+**Integrated M3 and M4-foundation status:** The complete route → canonical validation → identity →
 fixed risk/reservation → OMS → exact fake encoding → fake initiation path above is implemented.
 [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) merged final feature head
 `2d5ea9e5b7fc28234789dc7c97ec4fc7bb71ef01` unchanged into `dev` as
 `962eb8602c13c1930a74c59232f96920482edb2b`. The [M3 exit-evidence
 record](milestones/m3-exit-evidence.md) continues to bind deterministic replay and smoke timing to
-clean producer `27087d4da423546041295de43e7fa2fb31425b63`. The diagram's live venue/session
-portion remains unimplemented.
+clean producer `27087d4da423546041295de43e7fa2fb31425b63`. Subsequent integrated M4 work establishes
+the bounded private/recovery/evidence foundations described above without claiming the full M4
+exit gate. The diagram's live venue/session portion remains unimplemented.
 
 ## Hierarchical Risk Budgets
 

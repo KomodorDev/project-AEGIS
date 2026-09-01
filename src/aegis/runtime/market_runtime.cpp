@@ -35,8 +35,9 @@ inline constexpr std::uint32_t domain_detail_namespace = 0x0002'0000U;
 // --------------------------------------------------------
 // Build one stable coordinator failure without leaking untrusted fixture text.
 template <typename Value>
-[[nodiscard]] model::Result<Value> failure(DomainErrorCode code, std::string field) {
-  return model::Result<Value>::failure(DomainError::at_field(code, std::move(field)));
+[[nodiscard]] model::Result<Value> create_market_runtime_failure_result(DomainErrorCode code,
+                                                                        std::string field) {
+  return model::Result<Value>::create_failure(DomainError::create_at_field(code, std::move(field)));
 }
 
 // --------------------------------------------------------
@@ -62,7 +63,7 @@ parser_detail(market_data::RecordedFixtureParseCode code) noexcept {
 // --------------------------------------------------------
 // Project the accepted executor authority into the narrower market-state context.
 [[nodiscard]] constexpr market_data::AcceptedMarketTurnContext
-accepted_market_context(const AcceptedTurnContext& context) noexcept {
+accepted_market_turn_context_from_accepted_turn(const AcceptedTurnContext& context) noexcept {
   return market_data::AcceptedMarketTurnContext{context.receipt.attempt_ordinal,
                                                 context.turn_ordinal, context.processing_timestamp};
 }
@@ -70,14 +71,14 @@ accepted_market_context(const AcceptedTurnContext& context) noexcept {
 // --------------------------------------------------------
 // Project owner-control authority without fabricating an admission or receive identity.
 [[nodiscard]] constexpr market_data::OwnerMarketTurnContext
-owner_market_context(const ControlTurnContext& context) noexcept {
+owner_market_turn_context_from_control_turn(const ControlTurnContext& context) noexcept {
   return market_data::OwnerMarketTurnContext{context.turn_ordinal, context.processing_timestamp};
 }
 
 // --------------------------------------------------------
 // Bootstrap and resynchronization commands use accepted scheduling but owner-control semantics.
 [[nodiscard]] constexpr market_data::OwnerMarketTurnContext
-owner_market_context(const AcceptedTurnContext& context) noexcept {
+owner_market_turn_context_from_accepted_turn(const AcceptedTurnContext& context) noexcept {
   return market_data::OwnerMarketTurnContext{context.turn_ordinal, context.processing_timestamp};
 }
 
@@ -110,26 +111,26 @@ command_source_ordinal(const market_data::NormalizedRecordedMarketCommand& comma
 // Map BotRuntime's published fail-closed precedence without reading its mutable owner state.
 [[nodiscard]] std::optional<DomainError> published_bot_fault(const BotRuntimeStatus& status) {
   if (status.canonical_trace_failure_latched) {
-    return DomainError::at_field(DomainErrorCode::RuntimeEvidenceExhausted,
-                                 "market_runtime.canonical_trace_evidence");
+    return DomainError::create_at_field(DomainErrorCode::RuntimeEvidenceExhausted,
+                                        "market_runtime.canonical_trace_evidence");
   }
   if (status.callback_clock_regression_latched) {
-    return DomainError::at_field(DomainErrorCode::InvalidTimestampOrder,
-                                 "market_runtime.callback_clock_regression");
+    return DomainError::create_at_field(DomainErrorCode::InvalidTimestampOrder,
+                                        "market_runtime.callback_clock_regression");
   }
   if (status.diagnostic_evidence_failure_latched) {
-    return DomainError::at_field(DomainErrorCode::RuntimeEvidenceExhausted,
-                                 "market_runtime.diagnostic_evidence");
+    return DomainError::create_at_field(DomainErrorCode::RuntimeEvidenceExhausted,
+                                        "market_runtime.diagnostic_evidence");
   }
   return std::nullopt;
 }
 
 // --------------------------------------------------------
 // Canonical sink exhaustion becomes the single runtime-level fail-closed error promised by M2.
-[[nodiscard]] DomainError runtime_turn_error(const DomainError& error) {
+[[nodiscard]] DomainError runtime_error_from_turn_error(const DomainError& error) {
   if (error.code == DomainErrorCode::TraceCapacityExceeded) {
-    return DomainError::at_field(DomainErrorCode::RuntimeEvidenceExhausted,
-                                 "market_runtime.canonical_trace_evidence");
+    return DomainError::create_at_field(DomainErrorCode::RuntimeEvidenceExhausted,
+                                        "market_runtime.canonical_trace_evidence");
   }
   return error;
 }
@@ -150,15 +151,15 @@ public:
   // --------------------------------------------------------
   // Mint exactly one plan and cross-check every shared fan-out count before authorizing commit.
   [[nodiscard]] model::Result<void>
-  authorize(const market_data::MarketTurnPreflight& request) override {
+  authorize_market_turn(const market_data::MarketTurnPreflight& request) override {
     if (plan_) {
-      return failure<void>(DomainErrorCode::InvalidRelationship,
-                           "market_runtime.preflight_repeated");
+      return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidRelationship,
+                                                        "market_runtime.preflight_repeated");
     }
-    auto planned =
-        bot_runtime_->preflight(request.source_ordinal, request.turn_ordinal, request.event_count);
+    auto planned = bot_runtime_->preflight_dispatch_callbacks(
+        request.source_ordinal, request.turn_ordinal, request.event_count);
     if (!planned) {
-      return model::Result<void>::failure(planned.error());
+      return model::Result<void>::create_failure(planned.error());
     }
     const auto& value = planned.value();
     const auto recomputed_trace_records =
@@ -171,10 +172,11 @@ public:
         value.callback_count() != request.callback_count ||
         value.callback_trace_record_count() != request.callback_trace_record_count ||
         recomputed_trace_records != request.total_trace_record_count) {
-      return failure<void>(DomainErrorCode::InvalidRelationship, "market_runtime.preflight_shape");
+      return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidRelationship,
+                                                        "market_runtime.preflight_shape");
     }
     plan_.emplace(std::move(planned).value());
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
 
   // --------------------------------------------------------
@@ -183,9 +185,9 @@ public:
 
   // --------------------------------------------------------
   // Preserve an explicit rollback seam when later trace validation rejects before domain commit.
-  void cancel() noexcept {
+  void cancel_dispatch_plan() noexcept {
     if (plan_) {
-      bot_runtime_->cancel(*plan_);
+      bot_runtime_->cancel_dispatch_callbacks(*plan_);
     }
   }
 
@@ -218,12 +220,13 @@ MarketRuntime::MarketRuntime(configuration::StartupConfiguration configuration,
 // --------------------------------------------------------
 // Preserve the observation-only M2 composition by installing no submission coordinator.
 model::Result<std::unique_ptr<MarketRuntime>>
-MarketRuntime::create(configuration::StartupConfiguration configuration, RuntimePolicy policy,
-                      model::ClockProvider& executor_clock,
-                      model::ClockProvider& callback_measurement_clock,
-                      std::vector<BotStrategyRegistration> strategies) {
-  return create_impl(std::move(configuration), std::move(policy), executor_clock,
-                     callback_measurement_clock, std::move(strategies), std::nullopt);
+MarketRuntime::create_market_runtime(configuration::StartupConfiguration configuration,
+                                     RuntimePolicy policy, model::ClockProvider& executor_clock,
+                                     model::ClockProvider& callback_measurement_clock,
+                                     std::vector<BotStrategyRegistration> strategies) {
+  return create_market_runtime_composition(std::move(configuration), std::move(policy),
+                                           executor_clock, callback_measurement_clock,
+                                           std::move(strategies), std::nullopt);
 }
 
 // --------------------------------------------------------
@@ -233,30 +236,30 @@ model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_with_fake_su
     model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
     std::vector<BotStrategyRegistration> strategies,
     FakeSubmissionRuntimeParams submission_params) {
-  return create_impl(std::move(configuration), std::move(policy), executor_clock,
-                     callback_measurement_clock, std::move(strategies),
-                     std::optional<FakeSubmissionRuntimeParams>{std::move(submission_params)});
+  return create_market_runtime_composition(
+      std::move(configuration), std::move(policy), executor_clock, callback_measurement_clock,
+      std::move(strategies),
+      std::optional<FakeSubmissionRuntimeParams>{std::move(submission_params)});
 }
 
 // --------------------------------------------------------
 // Validate the complete composition, preallocate owner state, and enqueue only the first bootstrap.
-model::Result<std::unique_ptr<MarketRuntime>>
-MarketRuntime::create_impl(configuration::StartupConfiguration configuration, RuntimePolicy policy,
-                           model::ClockProvider& executor_clock,
-                           model::ClockProvider& callback_measurement_clock,
-                           std::vector<BotStrategyRegistration> strategies,
-                           std::optional<FakeSubmissionRuntimeParams> submission_params) {
+model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_market_runtime_composition(
+    configuration::StartupConfiguration configuration, RuntimePolicy policy,
+    model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
+    std::vector<BotStrategyRegistration> strategies,
+    std::optional<FakeSubmissionRuntimeParams> submission_params) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject mixed startup and runtime provenance before constructing any mutable subsystem.
   if (configuration.fingerprint() != policy.configuration_fingerprint()) {
-    return failure<std::unique_ptr<MarketRuntime>>(DomainErrorCode::InvalidRelationship,
-                                                   "market_runtime.provenance");
+    return create_market_runtime_failure_result<std::unique_ptr<MarketRuntime>>(
+        DomainErrorCode::InvalidRelationship, "market_runtime.provenance");
   }
   if (policy.source_capacity() >
       static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
-    return failure<std::unique_ptr<MarketRuntime>>(DomainErrorCode::InvalidRuntimePolicy,
-                                                   "market_runtime.source_capacity");
+    return create_market_runtime_failure_result<std::unique_ptr<MarketRuntime>>(
+        DomainErrorCode::InvalidRuntimePolicy, "market_runtime.source_capacity");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -267,10 +270,10 @@ MarketRuntime::create_impl(configuration::StartupConfiguration configuration, Ru
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate and allocate the entire fake-only stack before constructing callback capabilities.
   if (submission_params) {
-    auto submission = SubmissionCoordinator::create(runtime->configuration_, runtime->policy_,
-                                                    std::move(*submission_params));
+    auto submission = SubmissionCoordinator::create_submission_coordinator(
+        runtime->configuration_, runtime->policy_, std::move(*submission_params));
     if (!submission) {
-      return model::Result<std::unique_ptr<MarketRuntime>>::failure(submission.error());
+      return model::Result<std::unique_ptr<MarketRuntime>>::create_failure(submission.error());
     }
     runtime->submission_coordinator_ = std::move(submission).value();
   }
@@ -282,23 +285,24 @@ MarketRuntime::create_impl(configuration::StartupConfiguration configuration, Ru
     const auto* const metadata = runtime->configuration_.find_instrument_metadata(
         source.definition().venue_id, source.definition().instrument_id);
     if (metadata == nullptr) {
-      return failure<std::unique_ptr<MarketRuntime>>(DomainErrorCode::DanglingReference,
-                                                     "market_runtime.source_metadata");
+      return create_market_runtime_failure_result<std::unique_ptr<MarketRuntime>>(
+          DomainErrorCode::DanglingReference, "market_runtime.source_metadata");
     }
-    auto state = market_data::MarketStateMachine::create(runtime->policy_, source, *metadata);
+    auto state = market_data::MarketStateMachine::create_market_state_machine(runtime->policy_,
+                                                                              source, *metadata);
     if (!state) {
-      return model::Result<std::unique_ptr<MarketRuntime>>::failure(state.error());
+      return model::Result<std::unique_ptr<MarketRuntime>>::create_failure(state.error());
     }
     runtime->market_states_.push_back(std::move(state).value());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal exact strategy coverage before creating the executor that can make callbacks reachable.
-  auto bots = BotRuntime::create(
+  auto bots = BotRuntime::create_bot_runtime(
       runtime->configuration_, runtime->policy_, callback_measurement_clock, runtime->trace_sink_,
       runtime->diagnostics_, std::move(strategies), {}, runtime->submission_coordinator_.get());
   if (!bots) {
-    return model::Result<std::unique_ptr<MarketRuntime>>::failure(bots.error());
+    return model::Result<std::unique_ptr<MarketRuntime>>::create_failure(bots.error());
   }
   runtime->bot_runtime_ = std::make_unique<BotRuntime>(std::move(bots).value());
 
@@ -316,19 +320,19 @@ MarketRuntime::create_impl(configuration::StartupConfiguration configuration, Ru
 
   // ++++++++++++++++++++++++++++++++++++++++
   // One source-less accepted command begins canonical one-at-a-time source initialization.
-  const auto bootstrap =
-      WorkItem::make<&MarketRuntime::execute_bootstrap>(BootstrapCommand{runtime.get(), 0U});
+  const auto bootstrap = InlineCommandWorkItem::create_inline_command_work_item<
+      &MarketRuntime::execute_bootstrap_command>(BootstrapCommand{runtime.get(), 0U});
   auto admitted = runtime->executor_->try_admit(bootstrap);
   if (!admitted) {
-    return model::Result<std::unique_ptr<MarketRuntime>>::failure(admitted.error());
+    return model::Result<std::unique_ptr<MarketRuntime>>::create_failure(admitted.error());
   }
   if (admitted.value().outcome != AdmissionOutcome::Accepted ||
       !admitted.value().receipt.has_value()) {
-    return failure<std::unique_ptr<MarketRuntime>>(DomainErrorCode::InvalidRuntimePolicy,
-                                                   "market_runtime.bootstrap_admission");
+    return create_market_runtime_failure_result<std::unique_ptr<MarketRuntime>>(
+        DomainErrorCode::InvalidRuntimePolicy, "market_runtime.bootstrap_admission");
   }
   runtime->publish_owner_observations();
-  return model::Result<std::unique_ptr<MarketRuntime>>::success(std::move(runtime));
+  return model::Result<std::unique_ptr<MarketRuntime>>::create_success(std::move(runtime));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -346,8 +350,8 @@ MarketRuntime::try_admit(market_data::IngressFrameAttempt attempt) {
   // ++++++++++++++++++++++++++++++++++++++++
   // Source initialization is an explicit owner prefix; ordinary input cannot overtake it.
   if (lifecycle_ == MarketRuntimeLifecycle::Starting) {
-    return failure<AdmissionDecision>(DomainErrorCode::ExecutionNotPermitted,
-                                      "market_runtime.starting");
+    return create_market_runtime_failure_result<AdmissionDecision>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.starting");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -366,13 +370,14 @@ MarketRuntime::try_admit(market_data::IngressFrameAttempt attempt) {
       std::find_if(frame_slots_.begin(), frame_slots_.end(),
                    [](const FrameSlot& slot) { return !slot.attempt.has_value(); });
   if (available == frame_slots_.end()) {
-    return failure<AdmissionDecision>(DomainErrorCode::InvalidMarketState,
-                                      "market_runtime.frame_slots");
+    return create_market_runtime_failure_result<AdmissionDecision>(
+        DomainErrorCode::InvalidMarketState, "market_runtime.frame_slots");
   }
   const auto slot_index = static_cast<std::size_t>(available - frame_slots_.begin());
   available->attempt.emplace(std::move(attempt));
-  const auto work = WorkItem::make<&MarketRuntime::execute_frame>(
-      FrameCommand{this, static_cast<std::uint32_t>(slot_index)});
+  const auto work =
+      InlineCommandWorkItem::create_inline_command_work_item<&MarketRuntime::execute_frame_command>(
+          FrameCommand{this, static_cast<std::uint32_t>(slot_index)});
   auto decision = executor_->try_admit(work, source_ordinal);
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -383,7 +388,7 @@ MarketRuntime::try_admit(market_data::IngressFrameAttempt attempt) {
       fault_.emplace(decision.error());
     }
     lifecycle_ = MarketRuntimeLifecycle::Faulted;
-    return model::Result<AdmissionDecision>::failure(decision.error());
+    return model::Result<AdmissionDecision>::create_failure(decision.error());
   }
   if (decision.value().outcome != AdmissionOutcome::Accepted) {
     available->attempt.reset();
@@ -399,17 +404,17 @@ model::Result<AdmissionDecision>
 MarketRuntime::try_resynchronize(const model::MarketSourceId& source_id) {
   std::lock_guard lock{ingress_mutex_};
   if (lifecycle_ == MarketRuntimeLifecycle::Starting) {
-    return failure<AdmissionDecision>(DomainErrorCode::ExecutionNotPermitted,
-                                      "market_runtime.starting");
+    return create_market_runtime_failure_result<AdmissionDecision>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.starting");
   }
   const auto* const source = policy_.find_source(source_id);
   if (source == nullptr) {
-    return failure<AdmissionDecision>(DomainErrorCode::RuntimeSourceNotConfigured,
-                                      "market_runtime.resynchronize_source");
+    return create_market_runtime_failure_result<AdmissionDecision>(
+        DomainErrorCode::RuntimeSourceNotConfigured, "market_runtime.resynchronize_source");
   }
   const auto source_index = static_cast<std::uint32_t>(source->ordinal().value() - 1U);
-  const auto work = WorkItem::make<&MarketRuntime::execute_resynchronize>(
-      ResynchronizeCommand{this, source_index});
+  const auto work = InlineCommandWorkItem::create_inline_command_work_item<
+      &MarketRuntime::execute_resynchronize_command>(ResynchronizeCommand{this, source_index});
   auto decision = executor_->try_admit(work);
   if (!decision) {
     if (!fault_) {
@@ -425,64 +430,67 @@ MarketRuntime::try_resynchronize(const model::MarketSourceId& source_id) {
 model::Result<void> MarketRuntime::bind_to_current_thread() {
   std::lock_guard lock{driver_mutex_};
   if (dedicated_driver_) {
-    return failure<void>(DomainErrorCode::ExecutionNotPermitted, "market_runtime.dedicated_driver");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::ExecutionNotPermitted,
+                                                      "market_runtime.dedicated_driver");
   }
   return deterministic_driver_->bind_to_current_thread();
 }
 
 // --------------------------------------------------------
 // Execute one deterministic turn and translate same-thread callback recursion into bot evidence.
-model::Result<std::optional<TurnReport>> MarketRuntime::run_one() {
-  auto turn = deterministic_driver_->run_one();
+model::Result<std::optional<TurnReport>> MarketRuntime::execute_next_turn() {
+  auto turn = deterministic_driver_->execute_next_turn();
   if (!turn) {
     if (turn.error().code == DomainErrorCode::ExecutorReentryDetected) {
       if (auto reentry = record_owner_reentry()) {
-        return model::Result<std::optional<TurnReport>>::failure(std::move(*reentry));
+        return model::Result<std::optional<TurnReport>>::create_failure(std::move(*reentry));
       }
     }
     if (executor_->terminal_error().has_value()) {
-      latch_fault(turn.error());
+      latch_runtime_fault(turn.error());
     }
-    return model::Result<std::optional<TurnReport>>::failure(turn.error());
+    return model::Result<std::optional<TurnReport>>::create_failure(turn.error());
   }
-  remember_turn(turn.value());
+  record_completed_turn_report(turn.value());
   return turn;
 }
 
 // --------------------------------------------------------
 // Progress through the one-turn wrapper so the last complete queue-age report is never skipped.
-model::Result<DriveReport> MarketRuntime::drive(std::size_t maximum_turns) {
+model::Result<PendingTurnExecutionReport>
+MarketRuntime::execute_pending_turns(std::size_t maximum_turns) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate ownership and recursion before a nonzero request can partially advance the queue.
-  auto validation = deterministic_driver_->drive(0U);
+  auto validation = deterministic_driver_->execute_pending_turns(0U);
   if (!validation) {
     if (validation.error().code == DomainErrorCode::ExecutorReentryDetected) {
       if (auto reentry = record_owner_reentry()) {
-        return model::Result<DriveReport>::failure(std::move(*reentry));
+        return model::Result<PendingTurnExecutionReport>::create_failure(std::move(*reentry));
       }
     }
-    return model::Result<DriveReport>::failure(validation.error());
+    return model::Result<PendingTurnExecutionReport>::create_failure(validation.error());
   }
   if (maximum_turns > static_cast<std::size_t>(policy_.limits().maximum_drive_turns)) {
-    return failure<DriveReport>(DomainErrorCode::InvalidRuntimePolicy, "maximum_drive_turns");
+    return create_market_runtime_failure_result<PendingTurnExecutionReport>(
+        DomainErrorCode::InvalidRuntimePolicy, "maximum_drive_turns");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Stop at the caller bound or the first empty merged command/fence observation.
   std::size_t turns_executed = 0U;
   while (turns_executed < maximum_turns) {
-    auto turn = run_one();
+    auto turn = execute_next_turn();
     if (!turn) {
-      return model::Result<DriveReport>::failure(turn.error());
+      return model::Result<PendingTurnExecutionReport>::create_failure(turn.error());
     }
     if (!turn.value()) {
       break;
     }
     ++turns_executed;
   }
-  const auto snapshot = executor_->snapshot();
-  return model::Result<DriveReport>::success(DriveReport{
+  const auto snapshot = executor_->queue_snapshot();
+  return model::Result<PendingTurnExecutionReport>::create_success(PendingTurnExecutionReport{
       turns_executed, snapshot.pending_commands, snapshot.pending_fences, snapshot.command_capacity,
       snapshot.maximum_drive_turns, snapshot.completed_turns});
 
@@ -495,7 +503,7 @@ model::Result<void> MarketRuntime::release_from_current_thread() {
   auto released = deterministic_driver_->release_from_current_thread();
   if (!released && released.error().code == DomainErrorCode::ExecutorReentryDetected) {
     if (auto reentry = record_owner_reentry()) {
-      return model::Result<void>::failure(std::move(*reentry));
+      return model::Result<void>::create_failure(std::move(*reentry));
     }
   }
   return released;
@@ -506,24 +514,26 @@ model::Result<void> MarketRuntime::release_from_current_thread() {
 model::Result<void> MarketRuntime::start_dedicated() {
   std::lock_guard driver_lock{driver_mutex_};
   if (dedicated_driver_) {
-    return failure<void>(DomainErrorCode::ExecutionNotPermitted, "market_runtime.dedicated_driver");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::ExecutionNotPermitted,
+                                                      "market_runtime.dedicated_driver");
   }
   {
     std::lock_guard ingress_lock{ingress_mutex_};
     if (lifecycle_ == MarketRuntimeLifecycle::Closed ||
         lifecycle_ == MarketRuntimeLifecycle::Faulted) {
-      return failure<void>(DomainErrorCode::ExecutionNotPermitted, "market_runtime.lifecycle");
+      return create_market_runtime_failure_result<void>(DomainErrorCode::ExecutionNotPermitted,
+                                                        "market_runtime.lifecycle");
     }
   }
 
   auto driver = std::make_unique<DedicatedExecutorDriver>(*executor_);
-  if (!driver->started_successfully()) {
-    auto error = driver->terminal_error().value_or(DomainError::at_field(
+  if (!driver->has_started_successfully()) {
+    auto error = driver->terminal_error().value_or(DomainError::create_at_field(
         DomainErrorCode::ExecutorNotBound, "market_runtime.dedicated_driver"));
-    return model::Result<void>::failure(std::move(error));
+    return model::Result<void>::create_failure(std::move(error));
   }
   dedicated_driver_ = std::move(driver);
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -549,13 +559,13 @@ void MarketRuntime::close_and_wait() noexcept {
   }
 
   driver->request_stop();
-  if (executor_->current_thread_is_owner()) {
+  if (executor_->is_current_thread_owner()) {
     return;
   }
   driver->wait_until_stopped();
-  remember_turn(driver->last_turn_report());
+  record_completed_turn_report(driver->last_turn_report());
   if (auto terminal = driver->terminal_error()) {
-    latch_fault(std::move(*terminal));
+    latch_runtime_fault(std::move(*terminal));
   }
 }
 
@@ -575,15 +585,15 @@ void MarketRuntime::close() noexcept {
 MarketRuntimeStatus MarketRuntime::status() const {
   std::lock_guard driver_lock{driver_mutex_};
   const bool dedicated_started =
-      dedicated_driver_ != nullptr && dedicated_driver_->started_successfully();
-  const bool dedicated_running = dedicated_driver_ != nullptr && dedicated_driver_->running();
+      dedicated_driver_ != nullptr && dedicated_driver_->has_started_successfully();
+  const bool dedicated_running = dedicated_driver_ != nullptr && dedicated_driver_->is_running();
   const auto dedicated_error =
       dedicated_driver_ ? dedicated_driver_->terminal_error() : std::nullopt;
   const auto dedicated_report =
       dedicated_driver_ ? dedicated_driver_->last_turn_report() : std::nullopt;
 
   std::lock_guard ingress_lock{ingress_mutex_};
-  const auto executor_state = executor_->snapshot();
+  const auto executor_state = executor_->queue_snapshot();
   auto reported_fault = fault_;
   if (!reported_fault) {
     reported_fault = published_bot_fault(published_bot_status_);
@@ -612,20 +622,20 @@ MarketRuntimeStatus MarketRuntime::status() const {
 // Copy all M3 evidence through immutable lower-layer inspection after owner release.
 model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence() const {
   if (!submission_coordinator_) {
-    return failure<SubmissionRuntimeEvidence>(DomainErrorCode::ExecutionNotPermitted,
-                                              "market_runtime.submission_capability");
+    return create_market_runtime_failure_result<SubmissionRuntimeEvidence>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.submission_capability");
   }
   const auto& coordinator = *submission_coordinator_;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Materialize AEGISSTS bytes and digest from the same accepted canonical record prefix.
-  auto canonical_bytes = coordinator.trace_sink().canonical_bytes();
+  auto canonical_bytes = coordinator.trace_sink().encode_canonical_bytes();
   if (!canonical_bytes) {
-    return model::Result<SubmissionRuntimeEvidence>::failure(canonical_bytes.error());
+    return model::Result<SubmissionRuntimeEvidence>::create_failure(canonical_bytes.error());
   }
-  auto canonical_digest = coordinator.trace_sink().digest();
+  auto canonical_digest = coordinator.trace_sink().derive_digest();
   if (!canonical_digest) {
-    return model::Result<SubmissionRuntimeEvidence>::failure(canonical_digest.error());
+    return model::Result<SubmissionRuntimeEvidence>::create_failure(canonical_digest.error());
   }
   const auto trace_span = coordinator.trace_sink().records();
   std::vector<trace::SubmissionTraceRecord> trace_records{trace_span.begin(), trace_span.end()};
@@ -633,9 +643,9 @@ model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy the retained noncanonical prefix and exact saturation accounting.
   std::vector<SubmissionDiagnosticRecord> diagnostics;
-  diagnostics.reserve(coordinator.diagnostics().size());
-  for (std::size_t index = 0U; index < coordinator.diagnostics().size(); ++index) {
-    const auto* const record = coordinator.diagnostics().at(index);
+  diagnostics.reserve(coordinator.diagnostics().diagnostic_count());
+  for (std::size_t index = 0U; index < coordinator.diagnostics().diagnostic_count(); ++index) {
+    const auto* const record = coordinator.diagnostics().diagnostic_at(index);
     if (record != nullptr) {
       diagnostics.push_back(*record);
     }
@@ -645,12 +655,12 @@ model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence
   // Copy every permanent OMS row in admission order, including terminal LocallyFailed records.
   const auto& outbound = coordinator.outbound_oms();
   std::vector<SubmissionOmsOrderEvidence> oms_orders;
-  oms_orders.reserve(outbound.size());
-  for (std::size_t index = 0U; index < outbound.size(); ++index) {
+  oms_orders.reserve(outbound.order_count());
+  for (std::size_t index = 0U; index < outbound.order_count(); ++index) {
     const auto* const record = outbound.record_at(index);
     if (record == nullptr) {
-      return failure<SubmissionRuntimeEvidence>(DomainErrorCode::InvalidOmsState,
-                                                "market_runtime.submission_oms_evidence");
+      return create_market_runtime_failure_result<SubmissionRuntimeEvidence>(
+          DomainErrorCode::InvalidOmsState, "market_runtime.submission_oms_evidence");
     }
     oms_orders.push_back(SubmissionOmsOrderEvidence{record->admission(), record->state()});
   }
@@ -667,16 +677,16 @@ model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence
     }
   }
   if (held_reservations.size() != reservations.held_reservation_count()) {
-    return failure<SubmissionRuntimeEvidence>(DomainErrorCode::InvalidRiskReservationState,
-                                              "market_runtime.submission_reservations");
+    return create_market_runtime_failure_result<SubmissionRuntimeEvidence>(
+        DomainErrorCode::InvalidRiskReservationState, "market_runtime.submission_reservations");
   }
   std::vector<risk::RiskScopeExposureEvidence> scope_exposures;
   scope_exposures.reserve(reservations.scope_evidence_count());
   for (std::size_t index = 0U; index < reservations.scope_evidence_count(); ++index) {
     auto exposure = reservations.scope_evidence_at(index);
     if (!exposure) {
-      return failure<SubmissionRuntimeEvidence>(DomainErrorCode::InvalidRiskReservationState,
-                                                "market_runtime.submission_scope_evidence");
+      return create_market_runtime_failure_result<SubmissionRuntimeEvidence>(
+          DomainErrorCode::InvalidRiskReservationState, "market_runtime.submission_scope_evidence");
     }
     scope_exposures.push_back(std::move(*exposure));
   }
@@ -693,7 +703,7 @@ model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence
                                         std::vector<std::byte>{bytes.begin(), bytes.end()}});
   }
 
-  return model::Result<SubmissionRuntimeEvidence>::success(SubmissionRuntimeEvidence{
+  return model::Result<SubmissionRuntimeEvidence>::create_success(SubmissionRuntimeEvidence{
       reservations.policy().fingerprint(),
       reservations.policy().revision(),
       coordinator.policy().fingerprint(),
@@ -703,14 +713,14 @@ model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence
       std::move(diagnostics),
       coordinator.diagnostics().dropped_count(),
       std::move(oms_orders),
-      outbound.size(),
+      outbound.order_count(),
       std::move(held_reservations),
       reservations.held_reservation_count(),
       std::move(scope_exposures),
       std::move(accepted_writes),
       coordinator.encoder().invocations_consumed(),
       coordinator.initiator().invocations_consumed(),
-      coordinator.runtime_faulted(),
+      coordinator.is_runtime_faulted(),
       coordinator.terminal_error(),
   });
 
@@ -719,11 +729,11 @@ model::Result<SubmissionRuntimeEvidence> MarketRuntime::copy_submission_evidence
 
 // --------------------------------------------------------
 // Copy complete replay evidence only after no owner or future admission can mutate it.
-model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
+model::Result<MarketRuntimeEvidence> MarketRuntime::collect_quiescent_evidence() const {
   std::lock_guard driver_lock{driver_mutex_};
-  if (dedicated_driver_ && dedicated_driver_->running()) {
-    return failure<MarketRuntimeEvidence>(DomainErrorCode::ExecutionNotPermitted,
-                                          "market_runtime.evidence_owner");
+  if (dedicated_driver_ && dedicated_driver_->is_running()) {
+    return create_market_runtime_failure_result<MarketRuntimeEvidence>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.evidence_owner");
   }
   const auto dedicated_report =
       dedicated_driver_ ? dedicated_driver_->last_turn_report() : std::nullopt;
@@ -731,25 +741,25 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
       dedicated_driver_ ? dedicated_driver_->terminal_error() : std::nullopt;
 
   std::lock_guard ingress_lock{ingress_mutex_};
-  const auto executor_state = executor_->snapshot();
+  const auto executor_state = executor_->queue_snapshot();
   const bool suppresses_pending_prefix = executor_state.faulted;
   if ((!executor_state.closed && !suppresses_pending_prefix) || executor_state.owner_bound ||
       executor_state.turn_active || executor_state.in_flight_fences != 0U ||
       (!suppresses_pending_prefix &&
        (executor_state.pending_commands != 0U || executor_state.pending_fences != 0U))) {
-    return failure<MarketRuntimeEvidence>(DomainErrorCode::ExecutionNotPermitted,
-                                          "market_runtime.evidence_quiescence");
+    return create_market_runtime_failure_result<MarketRuntimeEvidence>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.evidence_quiescence");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Materialize the canonical stream and digest from the same immutable accepted trace prefix.
-  auto canonical_bytes = trace_sink_.canonical_bytes();
+  auto canonical_bytes = trace_sink_.encode_canonical_bytes();
   if (!canonical_bytes) {
-    return model::Result<MarketRuntimeEvidence>::failure(canonical_bytes.error());
+    return model::Result<MarketRuntimeEvidence>::create_failure(canonical_bytes.error());
   }
-  auto canonical_digest = trace_sink_.digest();
+  auto canonical_digest = trace_sink_.derive_digest();
   if (!canonical_digest) {
-    return model::Result<MarketRuntimeEvidence>::failure(canonical_digest.error());
+    return model::Result<MarketRuntimeEvidence>::create_failure(canonical_digest.error());
   }
   const auto trace_span = trace_sink_.records();
   std::vector<trace::RuntimeTraceRecord> trace_records{trace_span.begin(), trace_span.end()};
@@ -757,9 +767,9 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy the retained diagnostic prefix and every source's final hidden-state summary.
   std::vector<RuntimeDiagnosticRecord> diagnostic_records;
-  diagnostic_records.reserve(diagnostics_.size());
-  for (std::size_t index = 0U; index < diagnostics_.size(); ++index) {
-    const auto* const record = diagnostics_.at(index);
+  diagnostic_records.reserve(diagnostics_.diagnostic_count());
+  for (std::size_t index = 0U; index < diagnostics_.diagnostic_count(); ++index) {
+    const auto* const record = diagnostics_.diagnostic_at(index);
     if (record != nullptr) {
       diagnostic_records.push_back(*record);
     }
@@ -769,7 +779,7 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
   for (std::size_t index = 0U; index < market_states_.size(); ++index) {
     const auto source_ordinal = model::MarketSourceOrdinal::from_value(index + 1U);
     if (!source_ordinal) {
-      return model::Result<MarketRuntimeEvidence>::failure(source_ordinal.error());
+      return model::Result<MarketRuntimeEvidence>::create_failure(source_ordinal.error());
     }
     const auto& state = market_states_[index];
     sources.push_back(MarketRuntimeSourceEvidence{source_ordinal.value(), state.readiness(),
@@ -792,12 +802,12 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::quiescent_evidence() const {
   if (submission_coordinator_) {
     auto copied = copy_submission_evidence();
     if (!copied) {
-      return model::Result<MarketRuntimeEvidence>::failure(copied.error());
+      return model::Result<MarketRuntimeEvidence>::create_failure(copied.error());
     }
     submission.emplace(std::move(copied).value());
   }
 
-  return model::Result<MarketRuntimeEvidence>::success(MarketRuntimeEvidence{
+  return model::Result<MarketRuntimeEvidence>::create_success(MarketRuntimeEvidence{
       configuration_.fingerprint(), policy_.fingerprint(), std::move(trace_records),
       std::move(canonical_bytes).value(), std::move(canonical_digest).value(),
       std::move(diagnostic_records), diagnostics_.dropped_count(), std::move(sources),
@@ -814,8 +824,8 @@ MarketRuntime::on_source_discontinuity(const SourceDiscontinuity& discontinuity,
                                        const ControlTurnContext& context) noexcept {
   const auto source_index = static_cast<std::size_t>(discontinuity.source_ordinal.value() - 1U);
   if (source_index >= market_states_.size() || discontinuity.lost_attempt_count == 0U) {
-    return failure<void>(DomainErrorCode::RuntimeSourceNotConfigured,
-                         "market_runtime.discontinuity_source");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::RuntimeSourceNotConfigured,
+                                                      "market_runtime.discontinuity_source");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -826,7 +836,7 @@ MarketRuntime::on_source_discontinuity(const SourceDiscontinuity& discontinuity,
   diagnostic.fields.admission_ordinal = discontinuity.earliest_failed_attempt;
   diagnostic.fields.turn_ordinal = context.turn_ordinal;
   diagnostic.fields.occurrence_count = discontinuity.lost_attempt_count;
-  auto diagnostic_valid = diagnostics_.validate(diagnostic.kind, diagnostic.fields);
+  auto diagnostic_valid = diagnostics_.validate_diagnostic(diagnostic.kind, diagnostic.fields);
   if (!diagnostic_valid) {
     return diagnostic_valid;
   }
@@ -835,43 +845,48 @@ MarketRuntime::on_source_discontinuity(const SourceDiscontinuity& discontinuity,
   // ++++++++++++++++++++++++++++++++++++++++
   // Exact authorization and trace reservation precede state mutation; later dispatch faults
   // preserve this applied turn.
-  auto outcome = market_states_[source_index].source_discontinuity(
-      discontinuity.earliest_failed_attempt, owner_market_context(context), trace_sink_, preflight);
+  auto outcome = market_states_[source_index].apply_source_discontinuity(
+      discontinuity.earliest_failed_attempt, owner_market_turn_context_from_control_turn(context),
+      trace_sink_, preflight);
   if (!outcome) {
-    preflight.cancel();
-    return model::Result<void>::failure(runtime_turn_error(outcome.error()));
+    preflight.cancel_dispatch_plan();
+    return model::Result<void>::create_failure(runtime_error_from_turn_error(outcome.error()));
   }
   auto value = std::move(outcome).value();
-  finish_outcome(preflight.plan(), value, std::move(diagnostic));
-  return model::Result<void>::success();
+  finalize_market_turn_outcome(preflight.plan(), value, std::move(diagnostic));
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Bridge the fixed inline frame command into its stable runtime owner.
-model::Result<void> MarketRuntime::execute_frame(const FrameCommand& command,
-                                                 const AcceptedTurnContext& context) noexcept {
+model::Result<void>
+MarketRuntime::execute_frame_command(const FrameCommand& command,
+                                     const AcceptedTurnContext& context) noexcept {
   if (command.runtime == nullptr) {
-    return failure<void>(DomainErrorCode::InvalidRelationship, "market_runtime.frame_command");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidRelationship,
+                                                      "market_runtime.frame_command");
   }
-  auto processed = command.runtime->process_frame(command.slot_index, context);
+  auto processed = command.runtime->execute_frame_turn(command.slot_index, context);
   if (!processed) {
-    return model::Result<void>::failure(runtime_turn_error(processed.error()));
+    return model::Result<void>::create_failure(runtime_error_from_turn_error(processed.error()));
   }
   return processed;
 }
 
 // --------------------------------------------------------
 // Bridge the fixed inline bootstrap command into canonical source initialization.
-model::Result<void> MarketRuntime::execute_bootstrap(const BootstrapCommand& command,
-                                                     const AcceptedTurnContext& context) noexcept {
+model::Result<void>
+MarketRuntime::execute_bootstrap_command(const BootstrapCommand& command,
+                                         const AcceptedTurnContext& context) noexcept {
   if (command.runtime == nullptr) {
-    return failure<void>(DomainErrorCode::InvalidRelationship, "market_runtime.bootstrap_command");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidRelationship,
+                                                      "market_runtime.bootstrap_command");
   }
-  auto processed = command.runtime->process_bootstrap(command.source_index, context);
+  auto processed = command.runtime->execute_bootstrap_turn(command.source_index, context);
   if (!processed) {
-    return model::Result<void>::failure(runtime_turn_error(processed.error()));
+    return model::Result<void>::create_failure(runtime_error_from_turn_error(processed.error()));
   }
   return processed;
 }
@@ -879,28 +894,29 @@ model::Result<void> MarketRuntime::execute_bootstrap(const BootstrapCommand& com
 // --------------------------------------------------------
 // Bridge the fixed inline resynchronization command into one owner-local source reset.
 model::Result<void>
-MarketRuntime::execute_resynchronize(const ResynchronizeCommand& command,
-                                     const AcceptedTurnContext& context) noexcept {
+MarketRuntime::execute_resynchronize_command(const ResynchronizeCommand& command,
+                                             const AcceptedTurnContext& context) noexcept {
   if (command.runtime == nullptr) {
-    return failure<void>(DomainErrorCode::InvalidRelationship,
-                         "market_runtime.resynchronize_command");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidRelationship,
+                                                      "market_runtime.resynchronize_command");
   }
-  auto processed = command.runtime->process_resynchronize(command.source_index, context);
+  auto processed = command.runtime->execute_resynchronization_turn(command.source_index, context);
   if (!processed) {
-    return model::Result<void>::failure(runtime_turn_error(processed.error()));
+    return model::Result<void>::create_failure(runtime_error_from_turn_error(processed.error()));
   }
   return processed;
 }
 
 // --------------------------------------------------------
 // Consume one accepted slot and contain every envelope, parser, and normalizer failure.
-model::Result<void> MarketRuntime::process_frame(std::uint32_t slot_index,
-                                                 const AcceptedTurnContext& context) {
+model::Result<void> MarketRuntime::execute_frame_turn(std::uint32_t slot_index,
+                                                      const AcceptedTurnContext& context) {
   std::optional<market_data::IngressFrameAttempt> attempt;
   {
     std::lock_guard lock{ingress_mutex_};
     if (slot_index >= frame_slots_.size() || !frame_slots_[slot_index].attempt) {
-      return failure<void>(DomainErrorCode::InvalidMarketState, "market_runtime.frame_slot");
+      return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidMarketState,
+                                                        "market_runtime.frame_slot");
     }
     attempt.emplace(std::move(*frame_slots_[slot_index].attempt));
     frame_slots_[slot_index].attempt.reset();
@@ -914,7 +930,7 @@ model::Result<void> MarketRuntime::process_frame(std::uint32_t slot_index,
   }
   const auto frame_size = static_cast<std::uint64_t>(attempt->frame().size());
   const auto session_epoch = attempt->session_epoch();
-  auto frame = market_data::RecordedFrame::create(
+  auto frame = market_data::RecordedFrame::create_recorded_frame(
       std::move(*attempt), policy_, context.receipt.receive_sequence, context.receipt.received_at);
   if (!frame) {
     PendingDiagnostic diagnostic;
@@ -929,15 +945,15 @@ model::Result<void> MarketRuntime::process_frame(std::uint32_t slot_index,
     diagnostic.fields.observed_value = frame_size;
     diagnostic.fields.limit_value = policy_.limits().maximum_frame_bytes;
     if (source != nullptr) {
-      return process_attributable_failure(*source, session_epoch, context.receipt,
-                                          trace::RuntimeInputDisposition::MalformedRejected,
-                                          std::move(diagnostic), context);
+      return execute_attributable_failure_turn(*source, session_epoch, context.receipt,
+                                               trace::RuntimeInputDisposition::MalformedRejected,
+                                               std::move(diagnostic), context);
     }
-    auto valid = diagnostics_.validate(diagnostic.kind, diagnostic.fields);
+    auto valid = diagnostics_.validate_diagnostic(diagnostic.kind, diagnostic.fields);
     if (!valid) {
       return valid;
     }
-    auto appended = diagnostics_.append(diagnostic.kind, std::move(diagnostic.fields));
+    auto appended = diagnostics_.append_diagnostic(diagnostic.kind, std::move(diagnostic.fields));
     publish_owner_observations();
     return appended;
   }
@@ -958,8 +974,8 @@ model::Result<void> MarketRuntime::process_frame(std::uint32_t slot_index,
     diagnostic.fields.turn_ordinal = context.turn_ordinal;
     diagnostic.fields.detail_code = parser_detail(parse_error.code);
     diagnostic.fields.observed_value = parse_error.byte_offset;
-    return process_attributable_failure(*source, session_epoch, context.receipt, disposition,
-                                        std::move(diagnostic), context);
+    return execute_attributable_failure_turn(*source, session_epoch, context.receipt, disposition,
+                                             std::move(diagnostic), context);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -969,7 +985,7 @@ model::Result<void> MarketRuntime::process_frame(std::uint32_t slot_index,
   if (!normalized) {
     if (normalized.error().code != DomainErrorCode::InvalidMarketEvent &&
         normalized.error().code != DomainErrorCode::MarketBookCapacityExceeded) {
-      return model::Result<void>::failure(normalized.error());
+      return model::Result<void>::create_failure(normalized.error());
     }
     PendingDiagnostic diagnostic;
     diagnostic.kind = RuntimeDiagnosticKind::MalformedInput;
@@ -981,41 +997,42 @@ model::Result<void> MarketRuntime::process_frame(std::uint32_t slot_index,
       diagnostic.fields.observed_value =
           static_cast<std::uint64_t>(*normalized.error().context.collection_index) + 1U;
     }
-    return process_attributable_failure(*source, session_epoch, context.receipt,
-                                        trace::RuntimeInputDisposition::MalformedRejected,
-                                        std::move(diagnostic), context);
+    return execute_attributable_failure_turn(*source, session_epoch, context.receipt,
+                                             trace::RuntimeInputDisposition::MalformedRejected,
+                                             std::move(diagnostic), context);
   }
-  return process_normalized(std::move(normalized).value(), context);
+  return execute_normalized_market_turn(std::move(normalized).value(), context);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Initialize one source, dispatch its transition, and enqueue only its canonical successor.
-model::Result<void> MarketRuntime::process_bootstrap(std::uint32_t source_index,
-                                                     const AcceptedTurnContext& context) {
+model::Result<void> MarketRuntime::execute_bootstrap_turn(std::uint32_t source_index,
+                                                          const AcceptedTurnContext& context) {
   if (source_index >= market_states_.size() || source_index >= policy_.sources().size()) {
-    return failure<void>(DomainErrorCode::RuntimeSourceNotConfigured,
-                         "market_runtime.bootstrap_source");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::RuntimeSourceNotConfigured,
+                                                      "market_runtime.bootstrap_source");
   }
   {
     std::lock_guard lock{ingress_mutex_};
     if (source_index != initialized_sources_) {
-      return failure<void>(DomainErrorCode::InvalidMarketState, "market_runtime.bootstrap_order");
+      return create_market_runtime_failure_result<void>(DomainErrorCode::InvalidMarketState,
+                                                        "market_runtime.bootstrap_order");
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Preflight exact state-only fan-out before initialization publishes Synchronizing.
   ExactBotDispatchPreflight preflight{*bot_runtime_};
-  auto outcome = market_states_[source_index].initialize(owner_market_context(context), trace_sink_,
-                                                         preflight);
+  auto outcome = market_states_[source_index].initialize_market_state(
+      owner_market_turn_context_from_accepted_turn(context), trace_sink_, preflight);
   if (!outcome) {
-    preflight.cancel();
-    return model::Result<void>::failure(outcome.error());
+    preflight.cancel_dispatch_plan();
+    return model::Result<void>::create_failure(outcome.error());
   }
   auto value = std::move(outcome).value();
-  finish_outcome(preflight.plan(), value, std::nullopt);
+  finalize_market_turn_outcome(preflight.plan(), value, std::nullopt);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish completed initialization and enqueue at most one later source after this commit.
@@ -1025,68 +1042,69 @@ model::Result<void> MarketRuntime::process_bootstrap(std::uint32_t source_index,
     if (!fault_ && lifecycle_ == MarketRuntimeLifecycle::Starting) {
       lifecycle_ = MarketRuntimeLifecycle::Running;
     }
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
   if (fault_ || lifecycle_ == MarketRuntimeLifecycle::Closed) {
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
 
-  const auto next = WorkItem::make<&MarketRuntime::execute_bootstrap>(
-      BootstrapCommand{this, initialized_sources_});
+  const auto next = InlineCommandWorkItem::create_inline_command_work_item<
+      &MarketRuntime::execute_bootstrap_command>(BootstrapCommand{this, initialized_sources_});
   auto admitted = executor_->try_admit(next);
   if (!admitted) {
     fault_.emplace(admitted.error());
     lifecycle_ = MarketRuntimeLifecycle::Faulted;
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
   if (admitted.value().outcome == AdmissionOutcome::Closed) {
     lifecycle_ = MarketRuntimeLifecycle::Closed;
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
   if (admitted.value().outcome != AdmissionOutcome::Accepted ||
       !admitted.value().receipt.has_value()) {
-    auto error = DomainError::at_field(DomainErrorCode::InvalidMarketState,
-                                       "market_runtime.bootstrap_admission");
+    auto error = DomainError::create_at_field(DomainErrorCode::InvalidMarketState,
+                                              "market_runtime.bootstrap_admission");
     const auto requested = executor_->request_owner_fault(error);
     static_cast<void>(requested);
     fault_.emplace(std::move(error));
     lifecycle_ = MarketRuntimeLifecycle::Faulted;
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Apply one explicit control reset through the same preflight and dispatch ordering.
-model::Result<void> MarketRuntime::process_resynchronize(std::uint32_t source_index,
-                                                         const AcceptedTurnContext& context) {
+model::Result<void>
+MarketRuntime::execute_resynchronization_turn(std::uint32_t source_index,
+                                              const AcceptedTurnContext& context) {
   if (source_index >= market_states_.size()) {
-    return failure<void>(DomainErrorCode::RuntimeSourceNotConfigured,
-                         "market_runtime.resynchronize_source");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::RuntimeSourceNotConfigured,
+                                                      "market_runtime.resynchronize_source");
   }
   ExactBotDispatchPreflight preflight{*bot_runtime_};
-  auto outcome = market_states_[source_index].resynchronize(owner_market_context(context),
-                                                            trace_sink_, preflight);
+  auto outcome = market_states_[source_index].resynchronize_source(
+      owner_market_turn_context_from_accepted_turn(context), trace_sink_, preflight);
   if (!outcome) {
-    preflight.cancel();
-    return model::Result<void>::failure(outcome.error());
+    preflight.cancel_dispatch_plan();
+    return model::Result<void>::create_failure(outcome.error());
   }
   auto value = std::move(outcome).value();
-  finish_outcome(preflight.plan(), value, std::nullopt);
-  return model::Result<void>::success();
+  finalize_market_turn_outcome(preflight.plan(), value, std::nullopt);
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Preflight fan-out, invoke the matching transactional overload, and dispatch the complete outcome.
 model::Result<void>
-MarketRuntime::process_normalized(market_data::NormalizedRecordedMarketCommand command,
-                                  const AcceptedTurnContext& context) {
+MarketRuntime::execute_normalized_market_turn(market_data::NormalizedRecordedMarketCommand command,
+                                              const AcceptedTurnContext& context) {
   const auto source_ordinal = command_source_ordinal(command);
   const auto source_index = static_cast<std::size_t>(source_ordinal.value() - 1U);
   if (source_index >= market_states_.size()) {
-    return failure<void>(DomainErrorCode::RuntimeSourceNotConfigured,
-                         "market_runtime.normalized_source");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::RuntimeSourceNotConfigured,
+                                                      "market_runtime.normalized_source");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -1101,7 +1119,7 @@ MarketRuntime::process_normalized(market_data::NormalizedRecordedMarketCommand c
     diagnostic.fields.detail_code = domain_detail(DomainErrorCode::InvalidMarketEvent);
     diagnostic.fields.observed_value = staleness->processing_timestamp.nanoseconds();
     diagnostic.fields.limit_value = context.processing_timestamp.nanoseconds();
-    return process_attributable_failure(
+    return execute_attributable_failure_turn(
         policy_.sources()[source_index], staleness->session_epoch, context.receipt,
         trace::RuntimeInputDisposition::MalformedRejected, std::move(diagnostic), context);
   }
@@ -1114,7 +1132,7 @@ MarketRuntime::process_normalized(market_data::NormalizedRecordedMarketCommand c
   structural.fields.admission_ordinal = context.receipt.attempt_ordinal;
   structural.fields.turn_ordinal = context.turn_ordinal;
   structural.fields.detail_code = domain_detail(DomainErrorCode::MarketBookInvalid);
-  auto structural_valid = diagnostics_.validate(structural.kind, structural.fields);
+  auto structural_valid = diagnostics_.validate_diagnostic(structural.kind, structural.fields);
   if (!structural_valid) {
     return structural_valid;
   }
@@ -1123,47 +1141,56 @@ MarketRuntime::process_normalized(market_data::NormalizedRecordedMarketCommand c
   // ++++++++++++++++++++++++++++++++++++++++
   // Visit exactly one state overload; every failure promises no state mutation and cancels no-op
   // observational preflight before the executor latches a terminal handler failure.
-  const auto market_context = accepted_market_context(context);
+  const auto market_context = accepted_market_turn_context_from_accepted_turn(context);
   auto outcome = std::visit(
       [&](auto&& value) {
-        return market_states_[source_index].process(std::move(value), market_context, trace_sink_,
-                                                    preflight);
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, market_data::NormalizedMarketUpdate>) {
+          return market_states_[source_index].apply_market_update(std::move(value), market_context,
+                                                                  trace_sink_, preflight);
+        } else if constexpr (std::same_as<Value, market_data::SessionStarted>) {
+          return market_states_[source_index].apply_session_start(value, market_context,
+                                                                  trace_sink_, preflight);
+        } else {
+          return market_states_[source_index].apply_staleness_check(value, market_context,
+                                                                    trace_sink_, preflight);
+        }
       },
       std::move(command));
   if (!outcome) {
-    preflight.cancel();
-    return model::Result<void>::failure(outcome.error());
+    preflight.cancel_dispatch_plan();
+    return model::Result<void>::create_failure(outcome.error());
   }
   auto value = std::move(outcome).value();
   std::optional<PendingDiagnostic> diagnostic;
   if (value.disposition() == trace::RuntimeInputDisposition::StructuralBookRejected) {
     diagnostic.emplace(std::move(structural));
   }
-  finish_outcome(preflight.plan(), value, std::move(diagnostic));
-  return model::Result<void>::success();
+  finalize_market_turn_outcome(preflight.plan(), value, std::move(diagnostic));
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Sanitize one attributable failure, transition only its source, and dispatch no malformed bytes.
-model::Result<void> MarketRuntime::process_attributable_failure(
+model::Result<void> MarketRuntime::execute_attributable_failure_turn(
     const RuntimeSource& source, model::SessionEpoch session_epoch, const AdmissionReceipt& receipt,
     trace::RuntimeInputDisposition disposition, PendingDiagnostic diagnostic,
     const AcceptedTurnContext& context) {
   if (receipt != context.receipt || diagnostic.fields.source_ordinal != source.ordinal()) {
-    return failure<void>(DomainErrorCode::InvalidRelationship,
-                         "market_runtime.attributable_failure_context");
+    return create_market_runtime_failure_result<void>(
+        DomainErrorCode::InvalidRelationship, "market_runtime.attributable_failure_context");
   }
   const auto source_index = static_cast<std::size_t>(source.ordinal().value() - 1U);
   if (source_index >= market_states_.size()) {
-    return failure<void>(DomainErrorCode::RuntimeSourceNotConfigured,
-                         "market_runtime.attributable_failure_source");
+    return create_market_runtime_failure_result<void>(DomainErrorCode::RuntimeSourceNotConfigured,
+                                                      "market_runtime.attributable_failure_source");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Both noncanonical detail and state-only callback headroom are proven before readiness changes.
-  auto diagnostic_valid = diagnostics_.validate(diagnostic.kind, diagnostic.fields);
+  auto diagnostic_valid = diagnostics_.validate_diagnostic(diagnostic.kind, diagnostic.fields);
   if (!diagnostic_valid) {
     return diagnostic_valid;
   }
@@ -1171,46 +1198,47 @@ model::Result<void> MarketRuntime::process_attributable_failure(
   const auto rejected = market_data::AttributableMarketFailure{
       market_data::MarketSourceIdentity::from_runtime_source(source), session_epoch,
       receipt.receive_sequence, receipt.received_at, disposition};
-  auto outcome = market_states_[source_index].reject(rejected, accepted_market_context(context),
-                                                     trace_sink_, preflight);
+  auto outcome = market_states_[source_index].apply_attributable_failure(
+      rejected, accepted_market_turn_context_from_accepted_turn(context), trace_sink_, preflight);
   if (!outcome) {
-    preflight.cancel();
-    return model::Result<void>::failure(outcome.error());
+    preflight.cancel_dispatch_plan();
+    return model::Result<void>::create_failure(outcome.error());
   }
   auto value = std::move(outcome).value();
-  finish_outcome(preflight.plan(), value, std::move(diagnostic));
-  return model::Result<void>::success();
+  finalize_market_turn_outcome(preflight.plan(), value, std::move(diagnostic));
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Complete callback fan-out and turn later failures into an owner-requested terminal boundary.
-void MarketRuntime::finish_outcome(const BotDispatchPlan& plan,
-                                   market_data::MarketTurnOutcome& outcome,
-                                   std::optional<PendingDiagnostic> diagnostic) noexcept {
+void MarketRuntime::finalize_market_turn_outcome(
+    const BotDispatchPlan& plan, market_data::MarketTurnOutcome& outcome,
+    std::optional<PendingDiagnostic> diagnostic) noexcept {
   std::optional<DomainError> post_commit_fault;
   std::optional<BotDispatchReport> completed_dispatch;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Dispatch the full preflighted callback set before noncanonical diagnostic saturation can be
   // observed, preserving state-before-market and run-to-completion guarantees.
-  auto dispatched = bot_runtime_->dispatch(plan, outcome);
+  auto dispatched = bot_runtime_->dispatch_callbacks(plan, outcome);
   if (!dispatched) {
-    post_commit_fault.emplace(runtime_turn_error(dispatched.error()));
+    post_commit_fault.emplace(runtime_error_from_turn_error(dispatched.error()));
   } else {
     completed_dispatch.emplace(dispatched.value());
   }
   if (diagnostic) {
-    auto appended = diagnostics_.append(diagnostic->kind, std::move(diagnostic->fields));
+    auto appended = diagnostics_.append_diagnostic(diagnostic->kind, std::move(diagnostic->fields));
     if (!appended && !post_commit_fault) {
       post_commit_fault.emplace(appended.error());
     }
   }
   if (!post_commit_fault) {
-    if (submission_coordinator_ && submission_coordinator_->runtime_faulted()) {
-      post_commit_fault = submission_coordinator_->terminal_error().value_or(DomainError::at_field(
-          DomainErrorCode::SubmissionEvidenceExhausted, "market_runtime.submission_runtime"));
+    if (submission_coordinator_ && submission_coordinator_->is_runtime_faulted()) {
+      post_commit_fault =
+          submission_coordinator_->terminal_error().value_or(DomainError::create_at_field(
+              DomainErrorCode::SubmissionEvidenceExhausted, "market_runtime.submission_runtime"));
     }
   }
   if (!post_commit_fault) {
@@ -1223,7 +1251,7 @@ void MarketRuntime::finish_outcome(const BotDispatchPlan& plan,
   if (post_commit_fault) {
     const auto requested = executor_->request_owner_fault(*post_commit_fault);
     static_cast<void>(requested);
-    latch_fault(*post_commit_fault);
+    latch_runtime_fault(*post_commit_fault);
   }
   publish_owner_observations(std::move(completed_dispatch));
 
@@ -1232,7 +1260,7 @@ void MarketRuntime::finish_outcome(const BotDispatchPlan& plan,
 
 // --------------------------------------------------------
 // Preserve the first runtime fault and close later admission outside the publication mutex.
-void MarketRuntime::latch_fault(DomainError error) noexcept {
+void MarketRuntime::latch_runtime_fault(DomainError error) noexcept {
   {
     std::lock_guard lock{ingress_mutex_};
     if (!fault_) {
@@ -1246,7 +1274,7 @@ void MarketRuntime::latch_fault(DomainError error) noexcept {
 // --------------------------------------------------------
 // Record recursive deterministic progression only after executor validation proves same ownership.
 std::optional<DomainError> MarketRuntime::record_owner_reentry() noexcept {
-  if (!bot_runtime_->dispatch_active()) {
+  if (!bot_runtime_->is_dispatch_active()) {
     return std::nullopt;
   }
   auto recorded = bot_runtime_->record_owner_reentry();
@@ -1259,7 +1287,7 @@ std::optional<DomainError> MarketRuntime::record_owner_reentry() noexcept {
 
 // --------------------------------------------------------
 // Retain the newest complete deterministic report for status and cold evidence.
-void MarketRuntime::remember_turn(const std::optional<TurnReport>& report) {
+void MarketRuntime::record_completed_turn_report(const std::optional<TurnReport>& report) {
   if (!report) {
     return;
   }
@@ -1278,7 +1306,7 @@ void MarketRuntime::publish_owner_observations(
   if (bot_runtime_) {
     published_bot_status_ = bot_runtime_->status();
   }
-  published_diagnostic_saturated_ = diagnostics_.saturated();
+  published_diagnostic_saturated_ = diagnostics_.is_saturated();
   published_dropped_diagnostics_ = diagnostics_.dropped_count();
 }
 

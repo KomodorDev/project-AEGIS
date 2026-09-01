@@ -50,7 +50,7 @@ enum class MarketRuntimeLifecycle : std::uint8_t {
 struct MarketRuntimeStatus {
   MarketRuntimeLifecycle lifecycle;
   std::uint32_t initialized_sources;
-  QueueSnapshot executor;
+  ExecutorQueueSnapshot executor;
   BotRuntimeStatus bots;
   std::optional<BotDispatchReport> last_dispatch;
   std::optional<model::DomainError> fault;
@@ -96,6 +96,7 @@ struct SubmissionOmsOrderEvidence {
   oms::OutboundOrderState state;
 
   // --------------------------------------------------------
+  // Structural equality compares the immutable admission and final owner-local OMS state.
   friend bool operator==(const SubmissionOmsOrderEvidence&,
                          const SubmissionOmsOrderEvidence&) = default;
 
@@ -114,6 +115,7 @@ struct SubmissionAcceptedWriteEvidence {
   std::vector<std::byte> bytes;
 
   // --------------------------------------------------------
+  // Structural equality compares every causal identity and the complete accepted byte copy.
   friend bool operator==(const SubmissionAcceptedWriteEvidence&,
                          const SubmissionAcceptedWriteEvidence&) = default;
 
@@ -146,6 +148,7 @@ struct SubmissionRuntimeEvidence {
   std::optional<model::DomainError> terminal_error;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete detached M3 submission evidence bundle.
   friend bool operator==(const SubmissionRuntimeEvidence&,
                          const SubmissionRuntimeEvidence&) = default;
 
@@ -166,7 +169,7 @@ struct MarketRuntimeEvidence {
   std::vector<RuntimeDiagnosticRecord> diagnostics;
   std::uint64_t dropped_diagnostics;
   std::vector<MarketRuntimeSourceEvidence> sources;
-  QueueSnapshot executor;
+  ExecutorQueueSnapshot executor;
   std::optional<BotDispatchReport> last_dispatch;
   std::optional<model::DomainError> fault;
   std::optional<TurnReport> last_completed_turn;
@@ -190,9 +193,10 @@ public:
   // --------------------------------------------------------
   // Validate one sealed composition and enqueue the first genuine source-bootstrap owner turn.
   [[nodiscard]] static model::Result<std::unique_ptr<MarketRuntime>>
-  create(configuration::StartupConfiguration configuration, RuntimePolicy policy,
-         model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
-         std::vector<BotStrategyRegistration> strategies);
+  create_market_runtime(configuration::StartupConfiguration configuration, RuntimePolicy policy,
+                        model::ClockProvider& executor_clock,
+                        model::ClockProvider& callback_measurement_clock,
+                        std::vector<BotStrategyRegistration> strategies);
 
   // --------------------------------------------------------
   // Validate and own one concrete credential-free fake stack before any callback can submit.
@@ -232,12 +236,13 @@ public:
 
   // --------------------------------------------------------
   // Run at most one shared executor turn, recording callback-local recursive drive attempts.
-  [[nodiscard]] model::Result<std::optional<TurnReport>> run_one();
+  [[nodiscard]] model::Result<std::optional<TurnReport>> execute_next_turn();
 
   // --------------------------------------------------------
   // Run no more than the policy bound through the same one-turn wrapper and preserve its last
   // complete queue-age report.
-  [[nodiscard]] model::Result<DriveReport> drive(std::size_t maximum_turns);
+  [[nodiscard]] model::Result<PendingTurnExecutionReport>
+  execute_pending_turns(std::size_t maximum_turns);
 
   // --------------------------------------------------------
   // Release deterministic ownership only outside a callback and active owner turn.
@@ -263,7 +268,7 @@ public:
   // --------------------------------------------------------
   // Copy exact replay evidence after owner release and either complete drainage or terminal
   // suppression of the preserved pending prefix.
-  [[nodiscard]] model::Result<MarketRuntimeEvidence> quiescent_evidence() const;
+  [[nodiscard]] model::Result<MarketRuntimeEvidence> collect_quiescent_evidence() const;
 
   // --------------------------------------------------------
   // Apply an ordered attributable capacity-loss fence before later work for that source.
@@ -330,11 +335,11 @@ private:
   // Share stable-address construction while keeping observation-only and fake-only entry points
   // explicit and preventing a generic transport dependency from entering the composition root.
   [[nodiscard]] static model::Result<std::unique_ptr<MarketRuntime>>
-  create_impl(configuration::StartupConfiguration configuration, RuntimePolicy policy,
-              model::ClockProvider& executor_clock,
-              model::ClockProvider& callback_measurement_clock,
-              std::vector<BotStrategyRegistration> strategies,
-              std::optional<FakeSubmissionRuntimeParams> submission_params);
+  create_market_runtime_composition(configuration::StartupConfiguration configuration,
+                                    RuntimePolicy policy, model::ClockProvider& executor_clock,
+                                    model::ClockProvider& callback_measurement_clock,
+                                    std::vector<BotStrategyRegistration> strategies,
+                                    std::optional<FakeSubmissionRuntimeParams> submission_params);
 
   // --------------------------------------------------------
   // Copy the complete optional submission owner only after the enclosing runtime is quiescent.
@@ -343,51 +348,52 @@ private:
   // --------------------------------------------------------
   // Bridge fixed inline executor commands into stable-address owner methods.
   [[nodiscard]] static model::Result<void>
-  execute_frame(const FrameCommand& command, const AcceptedTurnContext& context) noexcept;
+  execute_frame_command(const FrameCommand& command, const AcceptedTurnContext& context) noexcept;
   [[nodiscard]] static model::Result<void>
-  execute_bootstrap(const BootstrapCommand& command, const AcceptedTurnContext& context) noexcept;
+  execute_bootstrap_command(const BootstrapCommand& command,
+                            const AcceptedTurnContext& context) noexcept;
   [[nodiscard]] static model::Result<void>
-  execute_resynchronize(const ResynchronizeCommand& command,
-                        const AcceptedTurnContext& context) noexcept;
+  execute_resynchronize_command(const ResynchronizeCommand& command,
+                                const AcceptedTurnContext& context) noexcept;
 
   // --------------------------------------------------------
   // Consume one accepted slot and contain parse/normalization failure inside its source boundary.
-  [[nodiscard]] model::Result<void> process_frame(std::uint32_t slot_index,
-                                                  const AcceptedTurnContext& context);
+  [[nodiscard]] model::Result<void> execute_frame_turn(std::uint32_t slot_index,
+                                                       const AcceptedTurnContext& context);
 
   // --------------------------------------------------------
   // Initialize sources in canonical order and enqueue only the next source after this one commits.
-  [[nodiscard]] model::Result<void> process_bootstrap(std::uint32_t source_index,
-                                                      const AcceptedTurnContext& context);
+  [[nodiscard]] model::Result<void> execute_bootstrap_turn(std::uint32_t source_index,
+                                                           const AcceptedTurnContext& context);
 
   // --------------------------------------------------------
   // Apply one explicit source reset on the serialized owner.
-  [[nodiscard]] model::Result<void> process_resynchronize(std::uint32_t source_index,
-                                                          const AcceptedTurnContext& context);
+  [[nodiscard]] model::Result<void>
+  execute_resynchronization_turn(std::uint32_t source_index, const AcceptedTurnContext& context);
 
   // --------------------------------------------------------
   // Route one complete normalized command through preflight, transactional state, and dispatch.
   [[nodiscard]] model::Result<void>
-  process_normalized(market_data::NormalizedRecordedMarketCommand command,
-                     const AcceptedTurnContext& context);
+  execute_normalized_market_turn(market_data::NormalizedRecordedMarketCommand command,
+                                 const AcceptedTurnContext& context);
 
   // --------------------------------------------------------
   // Convert one attributable malformed/unsupported frame into a sanitized state outcome.
-  [[nodiscard]] model::Result<void>
-  process_attributable_failure(const RuntimeSource& source, model::SessionEpoch session_epoch,
-                               const AdmissionReceipt& receipt,
-                               trace::RuntimeInputDisposition disposition,
-                               PendingDiagnostic diagnostic, const AcceptedTurnContext& context);
+  [[nodiscard]] model::Result<void> execute_attributable_failure_turn(
+      const RuntimeSource& source, model::SessionEpoch session_epoch,
+      const AdmissionReceipt& receipt, trace::RuntimeInputDisposition disposition,
+      PendingDiagnostic diagnostic, const AcceptedTurnContext& context);
 
   // --------------------------------------------------------
   // Dispatch one successful state-machine outcome and convert every later failure into a latched
   // close while preserving the applied turn's successful executor report.
-  void finish_outcome(const BotDispatchPlan& plan, market_data::MarketTurnOutcome& outcome,
-                      std::optional<PendingDiagnostic> diagnostic) noexcept;
+  void finalize_market_turn_outcome(const BotDispatchPlan& plan,
+                                    market_data::MarketTurnOutcome& outcome,
+                                    std::optional<PendingDiagnostic> diagnostic) noexcept;
 
   // --------------------------------------------------------
   // Preserve the first runtime fault, reject later ingress, and suppress subsequent callbacks.
-  void latch_fault(model::DomainError error) noexcept;
+  void latch_runtime_fault(model::DomainError error) noexcept;
 
   // --------------------------------------------------------
   // Reject recursive owner progression through BotRuntime's callback-local evidence path.
@@ -395,7 +401,7 @@ private:
 
   // --------------------------------------------------------
   // Copy a completed deterministic report for later status and quiescent evidence.
-  void remember_turn(const std::optional<TurnReport>& report);
+  void record_completed_turn_report(const std::optional<TurnReport>& report);
 
   // --------------------------------------------------------
   // Publish synchronized copies of owner-local bot and diagnostic health for concurrent status

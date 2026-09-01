@@ -25,7 +25,10 @@ class ExternalSubmissionMeasurementClock final : public execution::SubmissionMea
 private:
 
   // --------------------------------------------------------
-  [[nodiscard]] std::optional<std::uint64_t> read_now_nanoseconds() noexcept override { return 0U; }
+  // Return one harmless reading solely to complete the inaccessible external implementation probe.
+  [[nodiscard]] std::optional<std::uint64_t> claim_next_nanosecond_reading() noexcept override {
+    return 0U;
+  }
 
   // --------------------------------------------------------
 };
@@ -39,8 +42,8 @@ static_assert(!std::is_default_constructible_v<ExternalSubmissionMeasurementCloc
 TEST_CASE("steady submission measurement clock is locally monotonic",
           "[execution][submission][measurement][clock][m3]") {
   execution::SteadySubmissionMeasurementClock clock;
-  const auto first = clock.now_nanoseconds();
-  const auto second = clock.now_nanoseconds();
+  const auto first = clock.take_nanosecond_reading();
+  const auto second = clock.take_nanosecond_reading();
 
   REQUIRE(first);
   REQUIRE(second);
@@ -56,11 +59,11 @@ TEST_CASE("deterministic submission measurement clock preserves scripted optiona
       {std::optional<std::uint64_t>{10U}, std::nullopt, std::optional<std::uint64_t>{5U}},
       std::optional<std::uint64_t>{99U}};
 
-  CHECK(clock.now_nanoseconds() == 10U);
-  CHECK_FALSE(clock.now_nanoseconds());
-  CHECK(clock.now_nanoseconds() == 5U);
-  CHECK(clock.now_nanoseconds() == 99U);
-  CHECK(clock.now_nanoseconds() == 99U);
+  CHECK(clock.take_nanosecond_reading() == 10U);
+  CHECK_FALSE(clock.take_nanosecond_reading());
+  CHECK(clock.take_nanosecond_reading() == 5U);
+  CHECK(clock.take_nanosecond_reading() == 99U);
+  CHECK(clock.take_nanosecond_reading() == 99U);
   CHECK(clock.readings_consumed() == 3U);
 }
 
@@ -80,7 +83,8 @@ TEST_CASE("deterministic submission measurement clock assigns concurrent reads e
   std::vector<std::thread> readers;
   readers.reserve(reader_count);
   for (std::size_t index = 0U; index < reader_count; ++index) {
-    readers.emplace_back([&clock, &observed, index] { observed[index] = clock.now_nanoseconds(); });
+    readers.emplace_back(
+        [&clock, &observed, index] { observed[index] = clock.take_nanosecond_reading(); });
   }
   for (auto& reader : readers) {
     reader.join();
@@ -96,7 +100,7 @@ TEST_CASE("deterministic submission measurement clock assigns concurrent reads e
     CHECK(values[index] == index + 1U);
   }
   CHECK(clock.readings_consumed() == reader_count);
-  CHECK_FALSE(clock.now_nanoseconds());
+  CHECK_FALSE(clock.take_nanosecond_reading());
 }
 
 // --------------------------------------------------------

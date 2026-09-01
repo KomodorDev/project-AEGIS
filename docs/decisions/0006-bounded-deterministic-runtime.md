@@ -25,6 +25,9 @@ turn or admitting orders, sockets, credentials, private sessions, risk, OMS, or 
 
 ## Decision
 
+The following subsections define the adopted bounded runtime, its owner-turn protocol, and its
+evidence contract.
+
 ### Immutable runtime policy
 
 M2 adds one validated immutable runtime policy that references the sealed M1 configuration
@@ -106,15 +109,17 @@ data-plane state and remain owner-local.
 
 ### Owner binding and bounded turns
 
-Exactly one execution context binds as owner before a turn may begin. `run_one` executes zero or one
-oldest runnable command or discontinuity fence to completion and returns a report; it never waits for
-future work. A bounded `drive(max_turns)` calls the same primitive no more than its validated limit
-and reports completed turns plus remaining command and fence counts. Closing rejects new admission
-while preserving ordinal drainage of the merged accepted-command/fence prefix; an empty closed
-executor reports no completed turn rather than inventing work.
+Exactly one execution context binds as owner before a turn may begin. `execute_next_turn` executes
+zero or one oldest runnable command or discontinuity fence to completion and returns a report; it
+never waits for future work. A bounded `execute_pending_turns(max_turns)` calls the same primitive no
+more than its validated limit and reports completed turns plus remaining command and fence counts.
+Closing rejects new admission while preserving ordinal drainage of the merged
+accepted-command/fence prefix; an empty closed executor reports no completed turn rather than
+inventing work.
 Wrong-owner, unbound, counter-exhausted, and clock-regression conditions return stable failures.
 
-A turn is non-preemptible and non-reentrant. Nested `run_one`, nested `drive`, recursive subscription
+A turn is non-preemptible and non-reentrant. Nested `execute_next_turn`, nested
+`execute_pending_turns`, recursive subscription
 dispatch, or recursive strategy callback execution returns `ReentryDetected` before mutable work
 begins. Owner-side admission during a turn may enqueue work for a later turn but cannot execute it
 until the current call stack returns.
@@ -144,7 +149,8 @@ fence exists and wakes for ingress, a fence, or shutdown; it does not move mutab
 producers.
 
 The deterministic driver binds one caller as the exclusive owner, advances a scripted clock only
-when instructed, and supports `run_one` and bounded `drive`. Both drivers invoke the same turn
+when instructed, and supports `execute_next_turn` and bounded `execute_pending_turns`. Both drivers
+invoke the same turn
 processor and therefore share admission, ordering, ownership, error, and reporting behavior.
 
 Replay identity includes the M1 configuration fingerprint, M2 runtime-policy fingerprint, ordered
@@ -170,6 +176,9 @@ and exhaustion intentionally halts this runtime rather than silently losing evid
 record is overwritten or evicted.
 
 ## Consequences
+
+The bounded-runtime decision makes overload and replay behavior explicit while accepting
+fixed-capacity planning work.
 
 - Queue capacity and scheduling behavior become part of reproducible runtime provenance.
 - A transient overload conservatively invalidates the affected source instead of claiming

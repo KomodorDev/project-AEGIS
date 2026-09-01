@@ -21,7 +21,7 @@ using namespace aegis;
 
 // --------------------------------------------------------
 // Assigned channel and route-state values are encoded as one-byte event payloads in schema 1.
-[[nodiscard]] trace::TracePayload one_byte_payload(std::uint8_t value) {
+[[nodiscard]] trace::TracePayload create_one_byte_payload_or_throw(std::uint8_t value) {
   const std::array bytes{std::byte{value}};
   auto result = trace::TracePayload::copy_from(bytes);
   if (!result) {
@@ -33,8 +33,8 @@ using namespace aegis;
 // --------------------------------------------------------
 // Replay the accepted rulebook in causal order: seal, derived attribution, observation grant, then
 // execution grant. Any append failure is a broken deterministic fixture, not an expected branch.
-void append_reference_records(trace::TraceSink& sink,
-                              const configuration::StartupConfiguration& configuration) {
+void append_reference_records_or_throw(trace::TraceSink& sink,
+                                       const configuration::StartupConfiguration& configuration) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve every immutable configuration projection needed by the causal trace sequence.
@@ -53,8 +53,9 @@ void append_reference_records(trace::TraceSink& sink,
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The seal is the subject-free root record and therefore carries no instrument revision.
-  auto appended = sink.append(trace::TraceEventKind::ConfigurationSealed, {},
-                              trace::TraceProvenance::from(configuration.provenance()));
+  auto appended = sink.append_trace_record(
+      trace::TraceEventKind::ConfigurationSealed, {},
+      trace::TraceProvenance::trace_provenance_from_configuration(configuration.provenance()));
   if (!appended) {
     throw std::logic_error{"failed to append configuration trace record"};
   }
@@ -66,8 +67,9 @@ void append_reference_records(trace::TraceSink& sink,
   bot_subjects.desk_id = attribution.desk_id;
   bot_subjects.bot_id = attribution.bot_id;
   bot_subjects.strategy_id = attribution.strategy_id;
-  appended = sink.append(trace::TraceEventKind::BotAttributed, std::move(bot_subjects),
-                         trace::TraceProvenance::from(configuration.provenance()));
+  appended = sink.append_trace_record(
+      trace::TraceEventKind::BotAttributed, std::move(bot_subjects),
+      trace::TraceProvenance::trace_provenance_from_configuration(configuration.provenance()));
   if (!appended) {
     throw std::logic_error{"failed to append bot-attribution trace record"};
   }
@@ -79,10 +81,11 @@ void append_reference_records(trace::TraceSink& sink,
   subscription_subjects.venue_id = subscription.venue_id;
   subscription_subjects.instrument_id = subscription.instrument_id;
   subscription_subjects.subscription_id = subscription.id;
-  appended =
-      sink.append(trace::TraceEventKind::SubscriptionConfigured, std::move(subscription_subjects),
-                  trace::TraceProvenance::from(configuration.provenance(), *metadata_revision),
-                  one_byte_payload(static_cast<std::uint8_t>(subscription.channel)));
+  appended = sink.append_trace_record(
+      trace::TraceEventKind::SubscriptionConfigured, std::move(subscription_subjects),
+      trace::TraceProvenance::trace_provenance_from_configuration(configuration.provenance(),
+                                                                  *metadata_revision),
+      create_one_byte_payload_or_throw(static_cast<std::uint8_t>(subscription.channel)));
   if (!appended) {
     throw std::logic_error{"failed to append subscription trace record"};
   }
@@ -95,10 +98,11 @@ void append_reference_records(trace::TraceSink& sink,
   route_subjects.logical_account_id = route.logical_account_id;
   route_subjects.instrument_id = route.instrument_id;
   route_subjects.route_id = route.id;
-  appended =
-      sink.append(trace::TraceEventKind::RouteConfigured, std::move(route_subjects),
-                  trace::TraceProvenance::from(configuration.provenance(), *metadata_revision),
-                  one_byte_payload(static_cast<std::uint8_t>(route.state)));
+  appended = sink.append_trace_record(
+      trace::TraceEventKind::RouteConfigured, std::move(route_subjects),
+      trace::TraceProvenance::trace_provenance_from_configuration(configuration.provenance(),
+                                                                  *metadata_revision),
+      create_one_byte_payload_or_throw(static_cast<std::uint8_t>(route.state)));
   if (!appended) {
     throw std::logic_error{"failed to append route trace record"};
   }
@@ -108,14 +112,14 @@ void append_reference_records(trace::TraceSink& sink,
 
 // --------------------------------------------------------
 // Render a fixed digest as an owning string for exact scenario assertions.
-[[nodiscard]] std::string digest_hex(const model::Sha256Digest& digest) {
-  const auto encoded = model::sha256_hex(digest);
+[[nodiscard]] std::string digest_to_hex(const model::Sha256Digest& digest) {
+  const auto encoded = model::sha256_hex_from_digest(digest);
   return std::string{encoded.begin(), encoded.end()};
 }
 
 // --------------------------------------------------------
 // Render canonical stream bytes as lowercase hexadecimal without changing their order.
-[[nodiscard]] std::string hexadecimal(std::span<const std::byte> bytes) {
+[[nodiscard]] std::string bytes_to_hexadecimal(std::span<const std::byte> bytes) {
   constexpr std::string_view digits = "0123456789abcdef";
   std::string result;
   result.reserve(bytes.size() * 2U);
@@ -129,8 +133,9 @@ void append_reference_records(trace::TraceSink& sink,
 
 // --------------------------------------------------------
 // Exercise the canonical collection-order path independently of the ordinary reference builder.
-[[nodiscard]] configuration::StartupConfigurationParams reordered_reference_params() {
-  auto params = test_support::reference_configuration_params();
+[[nodiscard]] configuration::StartupConfigurationParams
+create_reordered_reference_params_or_throw() {
+  auto params = test_support::create_reference_configuration_params_or_throw();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The accepted reference has one value per collection today. Deliberately take the independent
@@ -159,9 +164,11 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
   // Build the singleton fixture through its ordinary and deliberate reorder code paths. Reversal is
   // a no-op today; equality keeps this scenario ready for future multi-value fixture growth.
   const auto first_configuration =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+      configuration::StartupConfiguration::create_startup_configuration(
+          test_support::create_reference_configuration_params_or_throw());
   const auto second_configuration =
-      configuration::StartupConfiguration::create(reordered_reference_params());
+      configuration::StartupConfiguration::create_startup_configuration(
+          create_reordered_reference_params_or_throw());
   REQUIRE(first_configuration);
   REQUIRE(second_configuration);
 
@@ -169,8 +176,8 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
   // Replay both accepted snapshots into independently owned bounded sinks.
   trace::TraceSink first_trace{4U};
   trace::TraceSink second_trace{4U};
-  append_reference_records(first_trace, first_configuration.value());
-  append_reference_records(second_trace, second_configuration.value());
+  append_reference_records_or_throw(first_trace, first_configuration.value());
+  append_reference_records_or_throw(second_trace, second_configuration.value());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Record equality proves stable order, ordinal assignment, and copied section provenance.
@@ -202,19 +209,19 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
   CHECK_FALSE(first_trace.records()[0U].provenance().instrument_metadata_revision.has_value());
   CHECK_FALSE(first_trace.records()[1U].provenance().instrument_metadata_revision.has_value());
   CHECK(first_trace.records()[2U].provenance().instrument_metadata_revision ==
-        model::InstrumentMetadataRevision::initial());
+        model::InstrumentMetadataRevision::create_initial());
   CHECK(first_trace.records()[3U].provenance().instrument_metadata_revision ==
-        model::InstrumentMetadataRevision::initial());
+        model::InstrumentMetadataRevision::create_initial());
   CHECK_FALSE(first_trace.records()[2U].subjects().route_id.has_value());
   CHECK(first_trace.records()[3U].payload().bytes().front() == std::byte{0U});
   CHECK(first_configuration.value().routes().routes().front().is_enabled() == false);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Canonical stream identity closes the replay proof across the complete record sequence.
-  const auto first_bytes = first_trace.canonical_bytes();
-  const auto second_bytes = second_trace.canonical_bytes();
-  const auto first_digest = first_trace.digest();
-  const auto second_digest = second_trace.digest();
+  const auto first_bytes = first_trace.encode_canonical_bytes();
+  const auto second_bytes = second_trace.encode_canonical_bytes();
+  const auto first_digest = first_trace.derive_digest();
+  const auto second_digest = second_trace.derive_digest();
   REQUIRE(first_bytes);
   REQUIRE(second_bytes);
   REQUIRE(first_digest);
@@ -223,13 +230,13 @@ TEST_CASE("the exact reference configuration produces one deterministic bounded 
   CHECK(first_digest.value() == second_digest.value());
   CHECK(first_bytes.value().size() == 1285U);
   REQUIRE(first_bytes.value().size() >= 14U);
-  CHECK(hexadecimal(std::span<const std::byte>{first_bytes.value()}.first(14U)) ==
+  CHECK(bytes_to_hexadecimal(std::span<const std::byte>{first_bytes.value()}.first(14U)) ==
         "4145474953545253000100000004");
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The compact fixed size, canonical stream prefix, and SHA-256 cover the full 1,285-byte stream
   // without embedding a second multi-kilobyte hexadecimal fixture beside the unit byte vector.
-  CHECK(digest_hex(first_digest.value()) ==
+  CHECK(digest_to_hex(first_digest.value()) ==
         "242691fdfaa6377bf86b0bd3642ece7a8223e52936d3a67d7a2d5b5731033749");
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -243,42 +250,45 @@ TEST_CASE("reference trace capacity failure preserves every accepted prefix reco
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Build the complete four-record reference trace as the source of accepted records.
-  const auto configured =
-      configuration::StartupConfiguration::create(test_support::reference_configuration_params());
+  const auto configured = configuration::StartupConfiguration::create_startup_configuration(
+      test_support::create_reference_configuration_params_or_throw());
   REQUIRE(configured);
 
   trace::TraceSink complete{4U};
-  append_reference_records(complete, configured.value());
+  append_reference_records_or_throw(complete, configured.value());
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy the first three records into a sink whose capacity is now exactly full.
   trace::TraceSink bounded{3U};
   const auto& complete_records = complete.records();
-  REQUIRE(bounded.append(complete_records[0U].kind(), complete_records[0U].subjects(),
-                         complete_records[0U].provenance(), complete_records[0U].payload()));
-  REQUIRE(bounded.append(complete_records[1U].kind(), complete_records[1U].subjects(),
-                         complete_records[1U].provenance(), complete_records[1U].payload()));
-  REQUIRE(bounded.append(complete_records[2U].kind(), complete_records[2U].subjects(),
-                         complete_records[2U].provenance(), complete_records[2U].payload()));
-  const auto prefix_bytes = bounded.canonical_bytes();
-  const auto prefix_digest = bounded.digest();
+  REQUIRE(bounded.append_trace_record(complete_records[0U].kind(), complete_records[0U].subjects(),
+                                      complete_records[0U].provenance(),
+                                      complete_records[0U].payload()));
+  REQUIRE(bounded.append_trace_record(complete_records[1U].kind(), complete_records[1U].subjects(),
+                                      complete_records[1U].provenance(),
+                                      complete_records[1U].payload()));
+  REQUIRE(bounded.append_trace_record(complete_records[2U].kind(), complete_records[2U].subjects(),
+                                      complete_records[2U].provenance(),
+                                      complete_records[2U].payload()));
+  const auto prefix_bytes = bounded.encode_canonical_bytes();
+  const auto prefix_digest = bounded.derive_digest();
   REQUIRE(prefix_bytes);
   REQUIRE(prefix_digest);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject the fourth record without altering the accepted prefix or consuming state.
-  const auto rejected =
-      bounded.append(complete_records[3U].kind(), complete_records[3U].subjects(),
-                     complete_records[3U].provenance(), complete_records[3U].payload());
+  const auto rejected = bounded.append_trace_record(
+      complete_records[3U].kind(), complete_records[3U].subjects(),
+      complete_records[3U].provenance(), complete_records[3U].payload());
   REQUIRE_FALSE(rejected);
   CHECK(rejected.error() ==
-        model::DomainError::at_index(model::DomainErrorCode::TraceCapacityExceeded, "trace.records",
-                                     3U));
-  CHECK(bounded.size() == 3U);
-  REQUIRE(bounded.canonical_bytes());
-  REQUIRE(bounded.digest());
-  CHECK(bounded.canonical_bytes().value() == prefix_bytes.value());
-  CHECK(bounded.digest().value() == prefix_digest.value());
+        model::DomainError::create_at_index(model::DomainErrorCode::TraceCapacityExceeded,
+                                            "trace.records", 3U));
+  CHECK(bounded.record_count() == 3U);
+  REQUIRE(bounded.encode_canonical_bytes());
+  REQUIRE(bounded.derive_digest());
+  CHECK(bounded.encode_canonical_bytes().value() == prefix_bytes.value());
+  CHECK(bounded.derive_digest().value() == prefix_digest.value());
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

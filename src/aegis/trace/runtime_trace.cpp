@@ -28,7 +28,7 @@ inline constexpr std::string_view runtime_record_magic = "AEGISRTR";
 // ########################################################################
 // Every number is a schema-one compatibility tag; fields are always emitted in this order even
 // when their optional values are absent.
-enum class RuntimeRecordTag : std::uint16_t {
+enum class RuntimeTraceRecordTag : std::uint16_t {
   Ordinal = 0x0001,
   EventKind = 0x0002,
   AdmissionOrdinal = 0x0003,
@@ -60,7 +60,8 @@ enum class RuntimeRecordTag : std::uint16_t {
 
 // --------------------------------------------------------
 // Convert a stable tag to its portable fixed-width representation.
-[[nodiscard]] constexpr std::uint16_t tag(RuntimeRecordTag value) noexcept {
+[[nodiscard]] constexpr std::uint16_t
+runtime_trace_record_tag_code(RuntimeTraceRecordTag value) noexcept {
   return static_cast<std::uint16_t>(value);
 }
 
@@ -69,7 +70,7 @@ enum class RuntimeRecordTag : std::uint16_t {
 // ########################################################################
 // This schema-local writer emits portable big-endian primitives and explicit optional-presence
 // markers; it deliberately exposes no decoder or general serialization surface.
-class CanonicalRuntimeWriter final {
+class CanonicalRuntimeTraceWriter final {
 public:
 
   // --------------------------------------------------------
@@ -157,14 +158,14 @@ public:
   // --------------------------------------------------------
   // Encode one unsigned 16-bit value as a tagged field.
   [[nodiscard]] bool append_u16_field(std::uint16_t field_tag, std::uint16_t value) {
-    CanonicalRuntimeWriter payload;
+    CanonicalRuntimeTraceWriter payload;
     return payload.append_u16(value) && append_field(field_tag, payload.bytes());
   }
 
   // --------------------------------------------------------
   // Encode one unsigned 64-bit value as a tagged field.
   [[nodiscard]] bool append_u64_field(std::uint16_t field_tag, std::uint64_t value) {
-    CanonicalRuntimeWriter payload;
+    CanonicalRuntimeTraceWriter payload;
     return payload.append_u64(value) && append_field(field_tag, payload.bytes());
   }
 
@@ -172,7 +173,7 @@ public:
   // Encode an optional unsigned value with an explicit presence byte.
   [[nodiscard]] bool append_optional_u64_field(std::uint16_t field_tag,
                                                const std::optional<std::uint64_t>& value) {
-    CanonicalRuntimeWriter payload;
+    CanonicalRuntimeTraceWriter payload;
     if (!payload.append_byte(value.has_value() ? 1U : 0U)) {
       return false;
     }
@@ -190,7 +191,7 @@ public:
 
     // ++++++++++++++++++++++++++++++++++++++++
     // Emit absence explicitly so later fields cannot shift into the identifier's position.
-    CanonicalRuntimeWriter payload;
+    CanonicalRuntimeTraceWriter payload;
     if (!payload.append_byte(identifier != nullptr ? 1U : 0U)) {
       return false;
     }
@@ -214,7 +215,7 @@ public:
   // Encode an optional exact price as presence, signed coefficient bits, and canonical scale.
   [[nodiscard]] bool append_optional_price_field(std::uint16_t field_tag,
                                                  const std::optional<model::Price>& price) {
-    CanonicalRuntimeWriter payload;
+    CanonicalRuntimeTraceWriter payload;
     if (!payload.append_byte(price.has_value() ? 1U : 0U)) {
       return false;
     }
@@ -362,16 +363,19 @@ private:
 }
 
 // --------------------------------------------------------
+// Report whether an input-disposition record carries only accepted-envelope context.
 [[nodiscard]] bool has_envelope_state_context(const RuntimeTraceFields& fields) noexcept {
   return fields.admission_ordinal.has_value() && has_envelope_market_context(fields);
 }
 
 // --------------------------------------------------------
+// Report whether a source-discontinuity record carries only its failed admission identity.
 [[nodiscard]] bool has_discontinuity_state_context(const RuntimeTraceFields& fields) noexcept {
   return fields.admission_ordinal.has_value() && has_no_market_context(fields);
 }
 
 // --------------------------------------------------------
+// Report whether an owner-authored state observation correctly omits admission and market context.
 [[nodiscard]] bool has_owner_state_context(const RuntimeTraceFields& fields) noexcept {
   return !fields.admission_ordinal && has_no_market_context(fields);
 }
@@ -395,7 +399,8 @@ private:
 
 // --------------------------------------------------------
 // Current or previous Ready/Stale state proves that at least one book commit already exists.
-[[nodiscard]] bool requires_book_identity(const RuntimeTraceFields& fields) noexcept {
+[[nodiscard]] bool
+does_runtime_trace_event_require_book_identity(const RuntimeTraceFields& fields) noexcept {
   return fields.state == RuntimeMarketState::Ready || fields.state == RuntimeMarketState::Stale ||
          fields.previous_state == RuntimeMarketState::Ready ||
          fields.previous_state == RuntimeMarketState::Stale;
@@ -470,8 +475,8 @@ private:
 
 // --------------------------------------------------------
 // A disposition's resulting readiness is part of its stable semantic meaning.
-[[nodiscard]] bool disposition_matches_state(RuntimeInputDisposition disposition,
-                                             RuntimeMarketState state) noexcept {
+[[nodiscard]] bool does_disposition_match_state(RuntimeInputDisposition disposition,
+                                                RuntimeMarketState state) noexcept {
   switch (disposition) {
   case RuntimeInputDisposition::SnapshotApplied:
   case RuntimeInputDisposition::DeltaApplied:
@@ -503,7 +508,7 @@ private:
 
 // --------------------------------------------------------
 // Each disposition selects exactly one parsed, envelope-only, or discontinuity context profile.
-[[nodiscard]] bool input_context_matches_disposition(const RuntimeTraceFields& fields) noexcept {
+[[nodiscard]] bool does_input_context_match_disposition(const RuntimeTraceFields& fields) noexcept {
   switch (fields.input_disposition) {
   case RuntimeInputDisposition::SnapshotApplied:
   case RuntimeInputDisposition::DeltaApplied:
@@ -534,14 +539,15 @@ private:
 // Input records require the exact context profile selected by their assigned disposition.
 [[nodiscard]] bool is_valid_input_disposition(const RuntimeTraceFields& fields) noexcept {
   return has_valid_source_identity(fields) && fields.admission_ordinal.has_value() &&
-         fields.turn_ordinal.has_value() && input_context_matches_disposition(fields) &&
+         fields.turn_ordinal.has_value() && does_input_context_match_disposition(fields) &&
          has_supported_book_identity(fields) && has_no_callback_identity(fields) &&
          is_known(fields.input_disposition) && is_known(fields.state) &&
          fields.input_disposition != RuntimeInputDisposition::Unspecified &&
          fields.previous_state == RuntimeMarketState::Unspecified &&
          fields.failure_reason == RuntimeTraceFailureReason::None && !fields.best_bid &&
-         !fields.best_ask && disposition_matches_state(fields.input_disposition, fields.state) &&
-         (!requires_book_identity(fields) || has_committed_book_identity(fields));
+         !fields.best_ask && does_disposition_match_state(fields.input_disposition, fields.state) &&
+         (!does_runtime_trace_event_require_book_identity(fields) ||
+          has_committed_book_identity(fields));
 }
 
 // --------------------------------------------------------
@@ -555,7 +561,8 @@ private:
          has_valid_transition_states(fields) && has_valid_state_transition_profile(fields) &&
          fields.failure_reason == RuntimeTraceFailureReason::None && !fields.best_bid &&
          !fields.best_ask &&
-         (!requires_book_identity(fields) || has_committed_book_identity(fields));
+         (!does_runtime_trace_event_require_book_identity(fields) ||
+          has_committed_book_identity(fields));
 }
 
 // --------------------------------------------------------
@@ -581,7 +588,8 @@ private:
          has_valid_transition_states(fields) && has_valid_state_transition_profile(fields) &&
          fields.failure_reason == RuntimeTraceFailureReason::None && !fields.best_bid &&
          !fields.best_ask &&
-         (!requires_book_identity(fields) || has_committed_book_identity(fields));
+         (!does_runtime_trace_event_require_book_identity(fields) ||
+          has_committed_book_identity(fields));
 }
 
 // --------------------------------------------------------
@@ -604,9 +612,10 @@ private:
 
 // --------------------------------------------------------
 // Construct a stable schema failure without retaining caller text in canonical evidence.
-[[nodiscard]] model::Result<void> invalid_record(std::string_view field) {
-  return model::Result<void>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidValue, std::string{field}));
+[[nodiscard]] model::Result<void>
+create_invalid_runtime_trace_record_result(std::string_view field) {
+  return model::Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidValue, std::string{field}));
 }
 
 // --------------------------------------------------------
@@ -618,27 +627,31 @@ private:
   // Unknown enum representations and kind-specific partial groups fail before sink mutation.
   if (!is_known(fields.input_disposition) || !is_known(fields.previous_state) ||
       !is_known(fields.state) || !is_known(fields.failure_reason)) {
-    return invalid_record("runtime_trace.enum");
+    return create_invalid_runtime_trace_record_result("runtime_trace.enum");
   }
   switch (kind) {
   case RuntimeTraceEventKind::InputDisposition:
-    return is_valid_input_disposition(fields) ? model::Result<void>::success()
-                                              : invalid_record("runtime_trace.input_disposition");
+    return is_valid_input_disposition(fields)
+               ? model::Result<void>::create_success()
+               : create_invalid_runtime_trace_record_result("runtime_trace.input_disposition");
   case RuntimeTraceEventKind::MarketStateTransition:
-    return is_valid_state_transition(fields)
-               ? model::Result<void>::success()
-               : invalid_record("runtime_trace.market_state_transition");
+    return is_valid_state_transition(fields) ? model::Result<void>::create_success()
+                                             : create_invalid_runtime_trace_record_result(
+                                                   "runtime_trace.market_state_transition");
   case RuntimeTraceEventKind::MarketCallback:
-    return is_valid_market_callback(fields) ? model::Result<void>::success()
-                                            : invalid_record("runtime_trace.market_callback");
+    return is_valid_market_callback(fields)
+               ? model::Result<void>::create_success()
+               : create_invalid_runtime_trace_record_result("runtime_trace.market_callback");
   case RuntimeTraceEventKind::StateCallback:
-    return is_valid_state_callback(fields) ? model::Result<void>::success()
-                                           : invalid_record("runtime_trace.state_callback");
+    return is_valid_state_callback(fields)
+               ? model::Result<void>::create_success()
+               : create_invalid_runtime_trace_record_result("runtime_trace.state_callback");
   case RuntimeTraceEventKind::ReentryDetected:
-    return is_valid_reentry(fields) ? model::Result<void>::success()
-                                    : invalid_record("runtime_trace.reentry_detected");
+    return is_valid_reentry(fields)
+               ? model::Result<void>::create_success()
+               : create_invalid_runtime_trace_record_result("runtime_trace.reentry_detected");
   default:
-    return invalid_record("runtime_trace.kind");
+    return create_invalid_runtime_trace_record_result("runtime_trace.kind");
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -648,7 +661,7 @@ private:
 // Convert a nominal optional counter into the primitive form assigned to schema-one bytes.
 template <typename Counter>
 [[nodiscard]] std::optional<std::uint64_t>
-counter_value(const std::optional<Counter>& value) noexcept {
+optional_uint64_from_optional_counter(const std::optional<Counter>& value) noexcept {
   return value.has_value() ? std::optional<std::uint64_t>{value->value()} : std::nullopt;
 }
 
@@ -659,7 +672,7 @@ encode_record(const RuntimeTraceRecord& record, const RuntimeTraceProvenance& pr
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Borrow optional identifier values without allocating temporary nominal values.
-  CanonicalRuntimeWriter writer;
+  CanonicalRuntimeTraceWriter writer;
   const auto& fields = record.fields();
   const auto* source = fields.source.has_value() ? &*fields.source : nullptr;
   const auto source_ordinal = source != nullptr
@@ -674,64 +687,86 @@ encode_record(const RuntimeTraceRecord& record, const RuntimeTraceProvenance& pr
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Project nominal counters into stable unsigned fields without changing their type at the API.
-  const auto session_epoch = counter_value(fields.session_epoch);
-  const auto source_sequence = counter_value(fields.source_sequence);
-  const auto admission_ordinal = counter_value(fields.admission_ordinal);
-  const auto turn_ordinal = counter_value(fields.turn_ordinal);
-  const auto callback_ordinal = counter_value(fields.callback_ordinal);
-  const auto receive_sequence = counter_value(fields.receive_sequence);
-  const auto metadata_revision = counter_value(fields.metadata_revision);
-  const auto book_generation = counter_value(fields.book_generation);
-  const auto book_revision = counter_value(fields.book_revision);
+  const auto session_epoch = optional_uint64_from_optional_counter(fields.session_epoch);
+  const auto source_sequence = optional_uint64_from_optional_counter(fields.source_sequence);
+  const auto admission_ordinal = optional_uint64_from_optional_counter(fields.admission_ordinal);
+  const auto turn_ordinal = optional_uint64_from_optional_counter(fields.turn_ordinal);
+  const auto callback_ordinal = optional_uint64_from_optional_counter(fields.callback_ordinal);
+  const auto receive_sequence = optional_uint64_from_optional_counter(fields.receive_sequence);
+  const auto metadata_revision = optional_uint64_from_optional_counter(fields.metadata_revision);
+  const auto book_generation = optional_uint64_from_optional_counter(fields.book_generation);
+  const auto book_revision = optional_uint64_from_optional_counter(fields.book_revision);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit the independent record envelope and all tagged values in compatibility order.
   const bool success =
       writer.append_ascii(runtime_record_magic) && writer.append_u16(record.schema_version()) &&
-      writer.append_u64_field(tag(RuntimeRecordTag::Ordinal), record.ordinal().value()) &&
-      writer.append_u16_field(tag(RuntimeRecordTag::EventKind),
+      writer.append_u64_field(runtime_trace_record_tag_code(RuntimeTraceRecordTag::Ordinal),
+                              record.ordinal().value()) &&
+      writer.append_u16_field(runtime_trace_record_tag_code(RuntimeTraceRecordTag::EventKind),
                               static_cast<std::uint16_t>(record.kind())) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::AdmissionOrdinal),
-                                       admission_ordinal) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::TurnOrdinal), turn_ordinal) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::CallbackOrdinal), callback_ordinal) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::SourceOrdinal), source_ordinal) &&
-      writer.append_optional_identifier_field(tag(RuntimeRecordTag::VenueId), venue_id) &&
-      writer.append_optional_identifier_field(tag(RuntimeRecordTag::InstrumentId), instrument_id) &&
-      writer.append_optional_identifier_field(tag(RuntimeRecordTag::VenueInstrumentId),
-                                              venue_instrument_id) &&
-      writer.append_optional_identifier_field(tag(RuntimeRecordTag::BotId), bot_id) &&
-      writer.append_optional_identifier_field(tag(RuntimeRecordTag::SubscriptionId),
-                                              subscription_id) &&
-      writer.append_field(tag(RuntimeRecordTag::ConfigurationFingerprint),
-                          provenance.configuration_fingerprint().bytes()) &&
-      writer.append_field(tag(RuntimeRecordTag::RuntimePolicyFingerprint),
-                          provenance.runtime_policy_fingerprint().bytes()) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::SessionEpoch), session_epoch) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::SourceSequence), source_sequence) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::ReceiveSequence), receive_sequence) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::MetadataRevision),
-                                       metadata_revision) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::BookGeneration), book_generation) &&
-      writer.append_optional_u64_field(tag(RuntimeRecordTag::BookRevision), book_revision) &&
-      writer.append_u16_field(tag(RuntimeRecordTag::InputDisposition),
-                              static_cast<std::uint16_t>(fields.input_disposition)) &&
-      writer.append_u16_field(tag(RuntimeRecordTag::PreviousState),
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::AdmissionOrdinal),
+          admission_ordinal) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::TurnOrdinal), turn_ordinal) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::CallbackOrdinal),
+          callback_ordinal) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::SourceOrdinal), source_ordinal) &&
+      writer.append_optional_identifier_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::VenueId), venue_id) &&
+      writer.append_optional_identifier_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::InstrumentId), instrument_id) &&
+      writer.append_optional_identifier_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::VenueInstrumentId),
+          venue_instrument_id) &&
+      writer.append_optional_identifier_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::BotId), bot_id) &&
+      writer.append_optional_identifier_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::SubscriptionId), subscription_id) &&
+      writer.append_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::ConfigurationFingerprint),
+          provenance.configuration_fingerprint().bytes()) &&
+      writer.append_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::RuntimePolicyFingerprint),
+          provenance.runtime_policy_fingerprint().bytes()) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::SessionEpoch), session_epoch) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::SourceSequence), source_sequence) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::ReceiveSequence),
+          receive_sequence) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::MetadataRevision),
+          metadata_revision) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::BookGeneration), book_generation) &&
+      writer.append_optional_u64_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::BookRevision), book_revision) &&
+      writer.append_u16_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::InputDisposition),
+          static_cast<std::uint16_t>(fields.input_disposition)) &&
+      writer.append_u16_field(runtime_trace_record_tag_code(RuntimeTraceRecordTag::PreviousState),
                               static_cast<std::uint16_t>(fields.previous_state)) &&
-      writer.append_u16_field(tag(RuntimeRecordTag::State),
+      writer.append_u16_field(runtime_trace_record_tag_code(RuntimeTraceRecordTag::State),
                               static_cast<std::uint16_t>(fields.state)) &&
-      writer.append_u16_field(tag(RuntimeRecordTag::FailureReason),
+      writer.append_u16_field(runtime_trace_record_tag_code(RuntimeTraceRecordTag::FailureReason),
                               static_cast<std::uint16_t>(fields.failure_reason)) &&
-      writer.append_optional_price_field(tag(RuntimeRecordTag::BestBid), fields.best_bid) &&
-      writer.append_optional_price_field(tag(RuntimeRecordTag::BestAsk), fields.best_ask);
+      writer.append_optional_price_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::BestBid), fields.best_bid) &&
+      writer.append_optional_price_field(
+          runtime_trace_record_tag_code(RuntimeTraceRecordTag::BestAsk), fields.best_ask);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Publish no partial bytes when any nested writer reaches an encoding limit.
   if (!success) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_trace.record_encoding"));
+    return model::Result<std::vector<std::byte>>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::EncodingOverflow, "runtime_trace.record_encoding"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -769,20 +804,22 @@ RuntimeTraceSink::RuntimeTraceSink(const runtime::RuntimePolicy& policy)
 
 // --------------------------------------------------------
 // Reject the first record beyond the bound without reserving ordinals or changing accepted bytes.
-model::Result<void> RuntimeTraceSink::preflight(std::uint32_t additional_records) const {
+model::Result<void>
+RuntimeTraceSink::preflight_trace_append(std::uint32_t additional_records) const {
   if (additional_records > remaining_capacity()) {
-    return model::Result<void>::failure(
-        DomainError::at_index(DomainErrorCode::TraceCapacityExceeded, "runtime_trace.records",
-                              static_cast<std::size_t>(capacity_)));
+    return model::Result<void>::create_failure(
+        DomainError::create_at_index(DomainErrorCode::TraceCapacityExceeded,
+                                     "runtime_trace.records", static_cast<std::size_t>(capacity_)));
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Expose shape validation so a turn can build and prove every record before committing domain
 // state.
-model::Result<void> RuntimeTraceSink::validate(RuntimeTraceEventKind kind,
-                                               const RuntimeTraceFields& fields) const {
+model::Result<void>
+RuntimeTraceSink::validate_trace_record(RuntimeTraceEventKind kind,
+                                        const RuntimeTraceFields& fields) const {
   auto shape = validate_event(kind, fields);
   if (!shape) {
     return shape;
@@ -794,30 +831,30 @@ model::Result<void> RuntimeTraceSink::validate(RuntimeTraceEventKind kind,
     const auto ordinal = fields.source->source_ordinal().value();
     if (ordinal > sources_.size() ||
         sources_[static_cast<std::size_t>(ordinal - 1U)] != fields.source.value()) {
-      return model::Result<void>::failure(DomainError::at_field(
+      return model::Result<void>::create_failure(DomainError::create_at_field(
           DomainErrorCode::RuntimeSourceNotConfigured, "runtime_trace.source"));
     }
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Capacity and schema validation both complete before the accepted prefix mutates.
-model::Result<void> RuntimeTraceSink::append(RuntimeTraceEventKind kind,
-                                             RuntimeTraceFields fields) {
+model::Result<void> RuntimeTraceSink::append_trace_record(RuntimeTraceEventKind kind,
+                                                          RuntimeTraceFields fields) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Capacity has deterministic precedence and makes a full sink reject every attempted shape alike.
-  auto capacity_check = preflight(1U);
+  auto capacity_check = preflight_trace_append(1U);
   if (!capacity_check) {
     return capacity_check;
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate all fixed-field groups before assigning the next one-based ordinal.
-  auto validation = validate(kind, fields);
+  auto validation = validate_trace_record(kind, fields);
   if (!validation) {
     return validation;
   }
@@ -826,20 +863,21 @@ model::Result<void> RuntimeTraceSink::append(RuntimeTraceEventKind kind,
   // Append exactly one complete record after every fallible domain check has succeeded.
   const auto ordinal = RuntimeTraceOrdinal{static_cast<std::uint64_t>(records_.size()) + 1U};
   records_.push_back(RuntimeTraceRecord{ordinal, kind, std::move(fields)});
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // A stream is magic, version, count, and length-prefixed canonical records in accepted order.
-model::Result<std::vector<std::byte>> RuntimeTraceSink::canonical_bytes() const {
+model::Result<std::vector<std::byte>> RuntimeTraceSink::encode_canonical_bytes() const {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Emit the fixed stream envelope before traversing the immutable accepted prefix.
-  CanonicalRuntimeWriter writer;
+  CanonicalRuntimeTraceWriter writer;
   bool success = writer.append_ascii(runtime_stream_magic) &&
-                 writer.append_u16(runtime_trace_schema_version) && writer.append_u32(size());
+                 writer.append_u16(runtime_trace_schema_version) &&
+                 writer.append_u32(record_count());
   for (const auto& record : records_) {
     auto encoded = encode_record(record, provenance_);
     if (!encoded || !writer.append_length_prefixed(encoded.value())) {
@@ -851,22 +889,23 @@ model::Result<std::vector<std::byte>> RuntimeTraceSink::canonical_bytes() const 
   // ++++++++++++++++++++++++++++++++++++++++
   // Return either the complete stream or one stable encoding failure, never a partial projection.
   if (!success) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_trace.stream_encoding"));
+    return model::Result<std::vector<std::byte>>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::EncodingOverflow, "runtime_trace.stream_encoding"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------
 // Digest identity is exactly SHA-256 over canonical bytes and contains no ambient timing input.
-model::Result<model::Sha256Digest> RuntimeTraceSink::digest() const {
-  auto encoded = canonical_bytes();
+model::Result<model::Sha256Digest> RuntimeTraceSink::derive_digest() const {
+  auto encoded = encode_canonical_bytes();
   if (!encoded) {
-    return model::Result<model::Sha256Digest>::failure(std::move(encoded).error());
+    return model::Result<model::Sha256Digest>::create_failure(std::move(encoded).error());
   }
-  return model::Result<model::Sha256Digest>::success(model::sha256(encoded.value()));
+  return model::Result<model::Sha256Digest>::create_success(
+      model::calculate_sha256_digest(encoded.value()));
 }
 
 // --------------------------------------------------------

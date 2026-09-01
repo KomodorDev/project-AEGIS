@@ -8,7 +8,8 @@ namespace {
 
 // --------------------------------------------------------
 // Return the first ordinary validation failure without constructing partially approved economics.
-[[nodiscard]] CanonicalValidationDecision rejected(SubmissionReason reason) noexcept {
+[[nodiscard]] CanonicalValidationDecision
+create_rejected_validation_decision(SubmissionReason reason) noexcept {
   return CanonicalValidationDecision{std::nullopt, reason};
 }
 
@@ -25,40 +26,40 @@ validate_canonical_order(const OrderRequest& request,
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject unassigned enum storage before interpreting any economic value.
   if (request.side != OrderSide::Buy && request.side != OrderSide::Sell) {
-    return rejected(SubmissionReason::UnsupportedSide);
+    return create_rejected_validation_decision(SubmissionReason::UnsupportedSide);
   }
   if (request.type != OrderType::Limit) {
-    return rejected(SubmissionReason::UnsupportedOrderType);
+    return create_rejected_validation_decision(SubmissionReason::UnsupportedOrderType);
   }
   if (request.time_in_force != TimeInForce::GoodTilCancelled) {
-    return rejected(SubmissionReason::UnsupportedTimeInForce);
+    return create_rejected_validation_decision(SubmissionReason::UnsupportedTimeInForce);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate exact price precision and tick alignment without quantizing the caller's value.
   if (request.price.coefficient() <= 0) {
-    return rejected(SubmissionReason::PriceNotPositive);
+    return create_rejected_validation_decision(SubmissionReason::PriceNotPositive);
   }
   if (request.price.scale() > metadata.price_scale()) {
-    return rejected(SubmissionReason::PriceScaleExceeded);
+    return create_rejected_validation_decision(SubmissionReason::PriceScaleExceeded);
   }
   if (!metadata.validate_price_alignment(request.price)) {
-    return rejected(SubmissionReason::PriceTickMismatch);
+    return create_rejected_validation_decision(SubmissionReason::PriceTickMismatch);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate positive quantity, maximum precision, minimum, and exact lot-step alignment.
   if (request.quantity.coefficient() <= 0) {
-    return rejected(SubmissionReason::QuantityNotPositive);
+    return create_rejected_validation_decision(SubmissionReason::QuantityNotPositive);
   }
   if (request.quantity.scale() > metadata.quantity_scale()) {
-    return rejected(SubmissionReason::QuantityScaleExceeded);
+    return create_rejected_validation_decision(SubmissionReason::QuantityScaleExceeded);
   }
   if (request.quantity < metadata.minimum_quantity()) {
-    return rejected(SubmissionReason::QuantityBelowMinimum);
+    return create_rejected_validation_decision(SubmissionReason::QuantityBelowMinimum);
   }
   if (!metadata.validate_quantity_alignment(request.quantity)) {
-    return rejected(SubmissionReason::QuantityStepMismatch);
+    return create_rejected_validation_decision(SubmissionReason::QuantityStepMismatch);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -67,7 +68,7 @@ validate_canonical_order(const OrderRequest& request,
       metadata.quantity_unit() != model::QuantityUnit::Contracts ||
       metadata.contract_multiplier_unit() !=
           model::ContractMultiplierUnit::QuoteCurrencyPerContract) {
-    return rejected(SubmissionReason::UnsupportedContractEconomics);
+    return create_rejected_validation_decision(SubmissionReason::UnsupportedContractEconomics);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++

@@ -60,13 +60,13 @@ enum class RuntimeSourceTag : std::uint16_t {
 
 // --------------------------------------------------------
 // Convert a persisted top-level enum to its fixed-width tag without implicit narrowing.
-[[nodiscard]] constexpr std::uint16_t tag(RuntimePolicyTag value) noexcept {
+[[nodiscard]] constexpr std::uint16_t runtime_policy_tag_code(RuntimePolicyTag value) noexcept {
   return static_cast<std::uint16_t>(value);
 }
 
 // --------------------------------------------------------
 // Convert a persisted source-record enum to its fixed-width tag without implicit narrowing.
-[[nodiscard]] constexpr std::uint16_t tag(RuntimeSourceTag value) noexcept {
+[[nodiscard]] constexpr std::uint16_t runtime_source_tag_code(RuntimeSourceTag value) noexcept {
   return static_cast<std::uint16_t>(value);
 }
 
@@ -220,9 +220,9 @@ private:
 
 // --------------------------------------------------------
 // Return one stable policy error without exposing prose or caller-dependent values.
-[[nodiscard]] model::Result<void> invalid_policy(std::string field) {
-  return model::Result<void>::failure(
-      DomainError::at_field(DomainErrorCode::InvalidRuntimePolicy, std::move(field)));
+[[nodiscard]] model::Result<void> create_invalid_runtime_policy_result(std::string field) {
+  return model::Result<void>::create_failure(
+      DomainError::create_at_field(DomainErrorCode::InvalidRuntimePolicy, std::move(field)));
 }
 
 // --------------------------------------------------------
@@ -232,39 +232,39 @@ private:
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject absence in the fixed order that the limits are encoded and exposed.
   if (limits.ingress_capacity == 0U) {
-    return invalid_policy("runtime_policy.ingress_capacity");
+    return create_invalid_runtime_policy_result("runtime_policy.ingress_capacity");
   }
   if (limits.maximum_frame_bytes == 0U ||
       limits.maximum_frame_bytes > maximum_runtime_frame_bytes) {
-    return invalid_policy("runtime_policy.maximum_frame_bytes");
+    return create_invalid_runtime_policy_result("runtime_policy.maximum_frame_bytes");
   }
   if (limits.maximum_changes_per_update == 0U ||
       limits.maximum_changes_per_update > maximum_runtime_changes_per_update) {
-    return invalid_policy("runtime_policy.maximum_changes_per_update");
+    return create_invalid_runtime_policy_result("runtime_policy.maximum_changes_per_update");
   }
   if (limits.retained_book_depth == 0U ||
       limits.retained_book_depth > maximum_runtime_retained_book_depth) {
-    return invalid_policy("runtime_policy.retained_book_depth");
+    return create_invalid_runtime_policy_result("runtime_policy.retained_book_depth");
   }
   if (limits.stale_threshold_nanoseconds == 0U) {
-    return invalid_policy("runtime_policy.stale_threshold_nanoseconds");
+    return create_invalid_runtime_policy_result("runtime_policy.stale_threshold_nanoseconds");
   }
   if (limits.maximum_callbacks_per_turn == 0U) {
-    return invalid_policy("runtime_policy.maximum_callbacks_per_turn");
+    return create_invalid_runtime_policy_result("runtime_policy.maximum_callbacks_per_turn");
   }
   if (limits.diagnostic_capacity == 0U) {
-    return invalid_policy("runtime_policy.diagnostic_capacity");
+    return create_invalid_runtime_policy_result("runtime_policy.diagnostic_capacity");
   }
   if (limits.runtime_trace_capacity == 0U) {
-    return invalid_policy("runtime_policy.runtime_trace_capacity");
+    return create_invalid_runtime_policy_result("runtime_policy.runtime_trace_capacity");
   }
   if (limits.maximum_drive_turns == 0U) {
-    return invalid_policy("runtime_policy.maximum_drive_turns");
+    return create_invalid_runtime_policy_result("runtime_policy.maximum_drive_turns");
   }
   if (limits.callback_budget_nanoseconds == 0U) {
-    return invalid_policy("runtime_policy.callback_budget_nanoseconds");
+    return create_invalid_runtime_policy_result("runtime_policy.callback_budget_nanoseconds");
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -279,26 +279,26 @@ validate_source(const configuration::StartupConfiguration& configuration,
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve the configured venue and venue/instrument metadata without accepting partial keys.
   if (configuration.find_venue(source.venue_id) == nullptr) {
-    return model::Result<std::uint64_t>::failure(DomainError::at_index(
+    return model::Result<std::uint64_t>::create_failure(DomainError::create_at_index(
         DomainErrorCode::RuntimeSourceNotConfigured, "runtime_policy.sources.venue_id", index));
   }
   const auto* const metadata =
       configuration.find_instrument_metadata(source.venue_id, source.instrument_id);
   if (metadata == nullptr) {
-    return model::Result<std::uint64_t>::failure(
-        DomainError::at_index(DomainErrorCode::RuntimeSourceNotConfigured,
-                              "runtime_policy.sources.instrument_id", index));
+    return model::Result<std::uint64_t>::create_failure(
+        DomainError::create_at_index(DomainErrorCode::RuntimeSourceNotConfigured,
+                                     "runtime_policy.sources.instrument_id", index));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Require the venue-native name and metadata revision to match the immutable M1 catalog exactly.
   if (metadata->venue_instrument_id() != source.venue_instrument_id) {
-    return model::Result<std::uint64_t>::failure(
-        DomainError::at_index(DomainErrorCode::InvalidRuntimePolicy,
-                              "runtime_policy.sources.venue_instrument_id", index));
+    return model::Result<std::uint64_t>::create_failure(
+        DomainError::create_at_index(DomainErrorCode::InvalidRuntimePolicy,
+                                     "runtime_policy.sources.venue_instrument_id", index));
   }
   if (metadata->revision() != source.metadata_revision) {
-    return model::Result<std::uint64_t>::failure(DomainError::at_index(
+    return model::Result<std::uint64_t>::create_failure(DomainError::create_at_index(
         DomainErrorCode::InvalidRuntimePolicy, "runtime_policy.sources.metadata_revision", index));
   }
 
@@ -314,14 +314,14 @@ validate_source(const configuration::StartupConfiguration& configuration,
     }
   }
   if (matching_subscriptions == 0U) {
-    return model::Result<std::uint64_t>::failure(DomainError::at_index(
+    return model::Result<std::uint64_t>::create_failure(DomainError::create_at_index(
         DomainErrorCode::RuntimeSourceNotConfigured, "runtime_policy.sources.subscription", index));
   }
   if (matching_subscriptions > static_cast<std::uint64_t>(maximum_callbacks_per_turn / 2U)) {
-    return model::Result<std::uint64_t>::failure(DomainError::at_index(
+    return model::Result<std::uint64_t>::create_failure(DomainError::create_at_index(
         DomainErrorCode::InvalidRuntimePolicy, "runtime_policy.sources.fanout", index));
   }
-  return model::Result<std::uint64_t>::success(matching_subscriptions);
+  return model::Result<std::uint64_t>::create_success(matching_subscriptions);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -331,24 +331,25 @@ validate_source(const configuration::StartupConfiguration& configuration,
 [[nodiscard]] model::Result<std::vector<std::byte>> encode_source(const RuntimeSource& source) {
   CanonicalRuntimePolicyWriter writer;
   const bool encoded =
-      writer.append_ascii_field(tag(RuntimeSourceTag::SourceId),
+      writer.append_ascii_field(runtime_source_tag_code(RuntimeSourceTag::SourceId),
                                 source.definition().source_id.value()) &&
-      writer.append_u64_field(tag(RuntimeSourceTag::Ordinal), source.ordinal().value()) &&
-      writer.append_ascii_field(tag(RuntimeSourceTag::VenueId),
+      writer.append_u64_field(runtime_source_tag_code(RuntimeSourceTag::Ordinal),
+                              source.ordinal().value()) &&
+      writer.append_ascii_field(runtime_source_tag_code(RuntimeSourceTag::VenueId),
                                 source.definition().venue_id.value()) &&
-      writer.append_ascii_field(tag(RuntimeSourceTag::InstrumentId),
+      writer.append_ascii_field(runtime_source_tag_code(RuntimeSourceTag::InstrumentId),
                                 source.definition().instrument_id.value()) &&
-      writer.append_ascii_field(tag(RuntimeSourceTag::VenueInstrumentId),
+      writer.append_ascii_field(runtime_source_tag_code(RuntimeSourceTag::VenueInstrumentId),
                                 source.definition().venue_instrument_id.value()) &&
-      writer.append_u8_field(tag(RuntimeSourceTag::Channel),
+      writer.append_u8_field(runtime_source_tag_code(RuntimeSourceTag::Channel),
                              static_cast<std::uint8_t>(RuntimeSource::channel())) &&
-      writer.append_u64_field(tag(RuntimeSourceTag::MetadataRevision),
+      writer.append_u64_field(runtime_source_tag_code(RuntimeSourceTag::MetadataRevision),
                               source.definition().metadata_revision.value());
   if (!encoded) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 }
 
 // --------------------------------------------------------
@@ -356,23 +357,23 @@ validate_source(const configuration::StartupConfiguration& configuration,
 [[nodiscard]] model::Result<std::vector<std::byte>>
 encode_sources(const std::vector<RuntimeSource>& sources) {
   if (sources.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
   }
 
   CanonicalRuntimePolicyWriter writer;
   if (!writer.append_u32(static_cast<std::uint32_t>(sources.size()))) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
   }
   for (const auto& source : sources) {
     auto encoded = encode_source(source);
     if (!encoded || !writer.append_length_prefixed(encoded.value())) {
-      return model::Result<std::vector<std::byte>>::failure(
-          DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
+      return model::Result<std::vector<std::byte>>::create_failure(DomainError::create_at_field(
+          DomainErrorCode::EncodingOverflow, "runtime_policy.sources"));
     }
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 }
 
 // --------------------------------------------------------
@@ -382,40 +383,41 @@ encode_policy(const configuration::ConfigurationFingerprint& configuration_finge
               const RuntimePolicyLimits& limits, const std::vector<RuntimeSource>& sources) {
   auto source_bytes = encode_sources(sources);
   if (!source_bytes) {
-    return model::Result<std::vector<std::byte>>::failure(source_bytes.error());
+    return model::Result<std::vector<std::byte>>::create_failure(source_bytes.error());
   }
 
   CanonicalRuntimePolicyWriter writer;
   const bool encoded =
       writer.append_ascii_raw("AEGISRTP") &&
       writer.append_u16(canonical_runtime_policy_schema_version) &&
-      writer.append_field(tag(RuntimePolicyTag::ConfigurationFingerprint),
+      writer.append_field(runtime_policy_tag_code(RuntimePolicyTag::ConfigurationFingerprint),
                           configuration_fingerprint.bytes()) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::IngressCapacity), limits.ingress_capacity) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::MaximumFrameBytes),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::IngressCapacity),
+                              limits.ingress_capacity) &&
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::MaximumFrameBytes),
                               limits.maximum_frame_bytes) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::MaximumChangesPerUpdate),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::MaximumChangesPerUpdate),
                               limits.maximum_changes_per_update) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::RetainedBookDepth),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::RetainedBookDepth),
                               limits.retained_book_depth) &&
-      writer.append_u64_field(tag(RuntimePolicyTag::StaleThresholdNanoseconds),
+      writer.append_u64_field(runtime_policy_tag_code(RuntimePolicyTag::StaleThresholdNanoseconds),
                               limits.stale_threshold_nanoseconds) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::MaximumCallbacksPerTurn),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::MaximumCallbacksPerTurn),
                               limits.maximum_callbacks_per_turn) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::DiagnosticCapacity),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::DiagnosticCapacity),
                               limits.diagnostic_capacity) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::RuntimeTraceCapacity),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::RuntimeTraceCapacity),
                               limits.runtime_trace_capacity) &&
-      writer.append_u32_field(tag(RuntimePolicyTag::MaximumDriveTurns),
+      writer.append_u32_field(runtime_policy_tag_code(RuntimePolicyTag::MaximumDriveTurns),
                               limits.maximum_drive_turns) &&
-      writer.append_u64_field(tag(RuntimePolicyTag::CallbackBudgetNanoseconds),
+      writer.append_u64_field(runtime_policy_tag_code(RuntimePolicyTag::CallbackBudgetNanoseconds),
                               limits.callback_budget_nanoseconds) &&
-      writer.append_field(tag(RuntimePolicyTag::Sources), source_bytes.value());
+      writer.append_field(runtime_policy_tag_code(RuntimePolicyTag::Sources), source_bytes.value());
   if (!encoded) {
-    return model::Result<std::vector<std::byte>>::failure(
-        DomainError::at_field(DomainErrorCode::EncodingOverflow, "runtime_policy"));
+    return model::Result<std::vector<std::byte>>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EncodingOverflow, "runtime_policy"));
   }
-  return model::Result<std::vector<std::byte>>::success(std::move(writer).take_bytes());
+  return model::Result<std::vector<std::byte>>::create_success(std::move(writer).take_bytes());
 }
 
 // --------------------------------------------------------
@@ -425,29 +427,29 @@ encode_policy(const configuration::ConfigurationFingerprint& configuration_finge
 // --------------------------------------------------------
 // Render the binary identity without changing or recomputing it.
 std::string RuntimePolicyFingerprint::to_hex() const {
-  const model::Sha256Hex hex = model::sha256_hex(bytes_);
+  const model::Sha256Hex hex = model::sha256_hex_from_digest(bytes_);
   return std::string{hex.begin(), hex.end()};
 }
 
 // --------------------------------------------------------
 // Validate the complete authored policy before publishing any canonicalized or derived state.
 model::Result<RuntimePolicy>
-RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
-                      RuntimePolicyParams params) {
+RuntimePolicy::create_runtime_policy(const configuration::StartupConfiguration& configuration,
+                                     RuntimePolicyParams params) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject limit defects before source canonicalization can obscure the primary authoring error.
   const auto limits_validation = validate_limits(params.limits);
   if (!limits_validation) {
-    return model::Result<RuntimePolicy>::failure(limits_validation.error());
+    return model::Result<RuntimePolicy>::create_failure(limits_validation.error());
   }
   if (params.sources.empty()) {
-    return model::Result<RuntimePolicy>::failure(
-        DomainError::at_field(DomainErrorCode::EmptyCollection, "runtime_policy.sources"));
+    return model::Result<RuntimePolicy>::create_failure(
+        DomainError::create_at_field(DomainErrorCode::EmptyCollection, "runtime_policy.sources"));
   }
   if (params.sources.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
-    return model::Result<RuntimePolicy>::failure(
-        DomainError::at_field(DomainErrorCode::InvalidRuntimePolicy, "runtime_policy.sources"));
+    return model::Result<RuntimePolicy>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::InvalidRuntimePolicy, "runtime_policy.sources"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -458,7 +460,7 @@ RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
             });
   for (std::size_t index = 1U; index < params.sources.size(); ++index) {
     if (params.sources[index - 1U].source_id == params.sources[index].source_id) {
-      return model::Result<RuntimePolicy>::failure(DomainError::at_index(
+      return model::Result<RuntimePolicy>::create_failure(DomainError::create_at_index(
           DomainErrorCode::DuplicateIdentifier, "runtime_policy.sources.source_id", index));
     }
   }
@@ -474,7 +476,7 @@ RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
              .emplace(source.venue_id, source.instrument_id,
                       market_data::SubscriptionChannel::OrderBook)
              .second) {
-      return model::Result<RuntimePolicy>::failure(DomainError::at_index(
+      return model::Result<RuntimePolicy>::create_failure(DomainError::create_at_index(
           DomainErrorCode::DuplicateIdentifier, "runtime_policy.sources.key", index));
     }
   }
@@ -488,12 +490,12 @@ RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
     const auto validation = validate_source(configuration, params.sources[index], index,
                                             params.limits.maximum_callbacks_per_turn);
     if (!validation) {
-      return model::Result<RuntimePolicy>::failure(validation.error());
+      return model::Result<RuntimePolicy>::create_failure(validation.error());
     }
     maximum_matching_subscriptions = std::max(maximum_matching_subscriptions, validation.value());
     const auto ordinal = model::MarketSourceOrdinal::from_value(index + 1U);
     if (!ordinal) {
-      return model::Result<RuntimePolicy>::failure(ordinal.error());
+      return model::Result<RuntimePolicy>::create_failure(ordinal.error());
     }
     sources.push_back(RuntimeSource{std::move(params.sources[index]), ordinal.value(),
                                     static_cast<std::uint32_t>(validation.value())});
@@ -505,7 +507,7 @@ RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
   // even that maximum single-turn accepted prefix.
   const std::uint64_t minimum_trace_capacity = 2U + (4U * maximum_matching_subscriptions);
   if (static_cast<std::uint64_t>(params.limits.runtime_trace_capacity) < minimum_trace_capacity) {
-    return model::Result<RuntimePolicy>::failure(DomainError::at_field(
+    return model::Result<RuntimePolicy>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidRuntimePolicy, "runtime_policy.runtime_trace_capacity"));
   }
 
@@ -514,10 +516,10 @@ RuntimePolicy::create(const configuration::StartupConfiguration& configuration,
   const auto configuration_fingerprint = configuration.fingerprint();
   auto canonical_bytes = encode_policy(configuration_fingerprint, params.limits, sources);
   if (!canonical_bytes) {
-    return model::Result<RuntimePolicy>::failure(canonical_bytes.error());
+    return model::Result<RuntimePolicy>::create_failure(canonical_bytes.error());
   }
-  RuntimePolicyFingerprint fingerprint{model::sha256(canonical_bytes.value())};
-  return model::Result<RuntimePolicy>::success(
+  RuntimePolicyFingerprint fingerprint{model::calculate_sha256_digest(canonical_bytes.value())};
+  return model::Result<RuntimePolicy>::create_success(
       RuntimePolicy{configuration_fingerprint, params.limits, std::move(sources),
                     std::move(canonical_bytes).value(), std::move(fingerprint)});
 

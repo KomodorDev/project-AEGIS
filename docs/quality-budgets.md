@@ -181,7 +181,7 @@ exchange acknowledgement timing cannot enter either fixture because M3 contains 
 exchange session.
 
 Latency samples and the named operation rate use those internal start/end readings. Allocation
-tracking instead starts immediately before `context.submit(request)` and stops immediately after the
+tracking instead starts immediately before `context.submit_order(request)` and stops immediately after the
 whole call returns. It therefore also covers successful post-endpoint OMS/trace/result finalization;
 the required allocation count is not made artificially smaller by stopping at the latency endpoint.
 

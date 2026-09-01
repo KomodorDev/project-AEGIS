@@ -23,7 +23,7 @@ namespace {
 
 // ########################################################################
 // One retained fixture owns the exact sealed M1-M3 authority chain used by public M4 construction.
-struct PolicyAuthority {
+struct M4PolicyAuthorityFixture {
   aegis::configuration::StartupConfiguration configuration;
   aegis::runtime::RuntimePolicy runtime_policy;
   std::unique_ptr<aegis::runtime::SubmissionCoordinator> submission;
@@ -33,7 +33,7 @@ struct PolicyAuthority {
 
 // ########################################################################
 // Test-owned field metadata drives only negative authoring cases and never production encoding.
-struct CapacityCase {
+struct M4PolicyCapacityCase {
   std::uint64_t aegis::runtime::M4PolicyCapacities::*member;
   std::string_view name;
 };
@@ -42,7 +42,7 @@ struct CapacityCase {
 
 // --------------------------------------------------------
 // Enumerate all capacity members independently so omissions cannot hide scalar validation gaps.
-constexpr std::array<CapacityCase, 26U> capacity_cases{{
+constexpr std::array<M4PolicyCapacityCase, 26U> capacity_cases{{
     {&aegis::runtime::M4PolicyCapacities::max_private_admissions, "max_private_admissions"},
     {&aegis::runtime::M4PolicyCapacities::max_reconciliation_admissions,
      "max_reconciliation_admissions"},
@@ -84,7 +84,7 @@ constexpr std::array<CapacityCase, 26U> capacity_cases{{
 // Parse exact fixture identifiers and fail immediately for an authored test defect.
 template <typename Identifier>
 [[nodiscard]] Identifier parse_identifier_or_throw(std::string_view text) {
-  auto parsed = Identifier::parse(text);
+  auto parsed = Identifier::parse_identifier(text);
   if (!parsed) {
     throw std::logic_error{"invalid identifier in M4 policy fixture"};
   }
@@ -95,7 +95,7 @@ template <typename Identifier>
 // Create the unchanged sealed M3 runtime policy or throw for an invalid test fixture.
 [[nodiscard]] aegis::runtime::RuntimePolicy
 create_runtime_policy_or_throw(const aegis::configuration::StartupConfiguration& configuration) {
-  auto created = aegis::runtime::RuntimePolicy::create(
+  auto created = aegis::runtime::RuntimePolicy::create_runtime_policy(
       configuration,
       aegis::runtime::RuntimePolicyParams{
           aegis::runtime::RuntimePolicyLimits{2U, 4096U, 64U, 20U, 5'000'000'000U, 4U, 64U, 128U,
@@ -104,7 +104,7 @@ create_runtime_policy_or_throw(const aegis::configuration::StartupConfiguration&
             parse_identifier_or_throw<aegis::model::VenueId>("deribit"),
             parse_identifier_or_throw<aegis::model::InstrumentId>("BTC-USD-PERPETUAL"),
             parse_identifier_or_throw<aegis::model::VenueInstrumentId>("BTC-PERPETUAL"),
-            aegis::model::InstrumentMetadataRevision::initial()}},
+            aegis::model::InstrumentMetadataRevision::create_initial()}},
       });
   if (!created) {
     throw std::logic_error{"invalid runtime policy in M4 policy fixture"};
@@ -119,17 +119,18 @@ create_submission_coordinator_or_throw(
     const aegis::configuration::StartupConfiguration& configuration,
     const aegis::runtime::RuntimePolicy& policy) {
   constexpr std::uint64_t maximum_attempts = 10U;
-  auto encoder = aegis::execution::FakeEncoderScript::create(
+  auto encoder = aegis::execution::FakeEncoderScript::create_fake_encoder_script(
       aegis::execution::FakeEncodingAction::Encode, maximum_attempts,
       {{1U, aegis::execution::FakeEncodingAction::Fail}});
-  auto initiator = aegis::execution::FakeInitiatorScript::create(
+  auto initiator = aegis::execution::FakeInitiatorScript::create_fake_initiator_script(
       aegis::execution::FakeInitiationOutcome::AcceptedAndInitiated, maximum_attempts,
       {{1U, aegis::execution::FakeInitiationOutcome::DefiniteFailureBeforeAcceptance},
        {2U, aegis::execution::FakeInitiationOutcome::AcceptedThenOutcomeLost}});
   aegis::model::OrderNamespace::Bytes namespace_bytes{};
   namespace_bytes.fill(0x42U);
-  auto order_ids = aegis::model::DeterministicOrderIdProvider::create(
-      aegis::model::OrderNamespace{namespace_bytes});
+  auto order_ids =
+      aegis::model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(
+          aegis::model::OrderNamespace{namespace_bytes});
   if (!encoder || !initiator || !order_ids) {
     throw std::logic_error{"invalid deterministic fake in M4 policy fixture"};
   }
@@ -139,10 +140,10 @@ create_submission_coordinator_or_throw(
   for (std::uint64_t index = 0U; index < maximum_attempts * 2U; ++index) {
     clock_readings.emplace_back(10'000U + index);
   }
-  auto created = aegis::runtime::SubmissionCoordinator::create(
+  auto created = aegis::runtime::SubmissionCoordinator::create_submission_coordinator(
       configuration, policy,
       aegis::runtime::FakeSubmissionRuntimeParams{
-          aegis::test_support::m3_reference_risk_policy_params(configuration),
+          aegis::test_support::create_m3_reference_risk_policy_params_or_throw(configuration),
           aegis::execution::SubmissionPolicyCapacities{maximum_attempts, 4U, 4U, 1'024U, 2U, 110U,
                                                        8U},
           std::move(encoder).value(), std::move(initiator).value(),
@@ -157,8 +158,9 @@ create_submission_coordinator_or_throw(
 
 // --------------------------------------------------------
 // Create complete sealed authority or throw; the optional peer deliberately changes its hash.
-[[nodiscard]] PolicyAuthority create_policy_authority_or_throw(bool add_peer_subscription = false) {
-  auto params = aegis::test_support::m3_enabled_two_firm_configuration_params();
+[[nodiscard]] M4PolicyAuthorityFixture
+create_policy_authority_or_throw(bool add_peer_subscription = false) {
+  auto params = aegis::test_support::create_m3_enabled_two_firm_configuration_params_or_throw();
   if (add_peer_subscription) {
     params.subscriptions.push_back(aegis::market_data::Subscription{
         parse_identifier_or_throw<aegis::model::SubscriptionId>(
@@ -168,14 +170,16 @@ create_submission_coordinator_or_throw(
         parse_identifier_or_throw<aegis::model::InstrumentId>("BTC-USD-PERPETUAL"),
         aegis::market_data::SubscriptionChannel::OrderBook});
   }
-  auto configured = aegis::configuration::StartupConfiguration::create(std::move(params));
+  auto configured =
+      aegis::configuration::StartupConfiguration::create_startup_configuration(std::move(params));
   if (!configured) {
     throw std::logic_error{"invalid startup configuration in M4 policy fixture"};
   }
   auto configuration = std::move(configured).value();
   auto runtime = create_runtime_policy_or_throw(configuration);
   auto submission = create_submission_coordinator_or_throw(configuration, runtime);
-  return PolicyAuthority{std::move(configuration), std::move(runtime), std::move(submission)};
+  return M4PolicyAuthorityFixture{std::move(configuration), std::move(runtime),
+                                  std::move(submission)};
 }
 
 // --------------------------------------------------------
@@ -199,10 +203,11 @@ create_submission_coordinator_or_throw(
 // --------------------------------------------------------
 // Create an M4 policy result through the sole public factory and retained M3 authority.
 [[nodiscard]] aegis::model::Result<aegis::runtime::M4Policy>
-create_m4_policy(const PolicyAuthority& sealed, aegis::runtime::M4PolicyCapacities capacities) {
-  return aegis::runtime::M4Policy::create(sealed.configuration, sealed.runtime_policy,
-                                          sealed.submission->reservations().policy(),
-                                          sealed.submission->policy(), capacities);
+create_m4_policy(const M4PolicyAuthorityFixture& sealed,
+                 aegis::runtime::M4PolicyCapacities capacities) {
+  return aegis::runtime::M4Policy::create_m4_policy(sealed.configuration, sealed.runtime_policy,
+                                                    sealed.submission->reservations().policy(),
+                                                    sealed.submission->policy(), capacities);
 }
 
 // --------------------------------------------------------
@@ -220,7 +225,8 @@ void append_u64(std::vector<std::byte>& bytes, std::uint64_t value) {
 
 // --------------------------------------------------------
 // Derive complete expected bytes without calling a production writer or capacity table.
-[[nodiscard]] std::vector<std::byte> derive_golden_m4_policy_bytes(const PolicyAuthority& sealed) {
+[[nodiscard]] std::vector<std::byte>
+derive_golden_m4_policy_bytes(const M4PolicyAuthorityFixture& sealed) {
   const auto capacities = create_golden_m4_policy_capacities();
   const auto& risk_policy = sealed.submission->reservations().policy();
   const auto& submission_policy = sealed.submission->policy();
@@ -492,19 +498,19 @@ TEST_CASE("M4 policy rejects every mismatched sealed authority") {
   const auto first = create_policy_authority_or_throw();
   const auto second = create_policy_authority_or_throw(true);
 
-  auto result = aegis::runtime::M4Policy::create(
+  auto result = aegis::runtime::M4Policy::create_m4_policy(
       second.configuration, first.runtime_policy, first.submission->reservations().policy(),
       first.submission->policy(), create_ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.runtime_policy_fingerprint");
 
-  result = aegis::runtime::M4Policy::create(
+  result = aegis::runtime::M4Policy::create_m4_policy(
       first.configuration, first.runtime_policy, second.submission->reservations().policy(),
       first.submission->policy(), create_ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);
   REQUIRE(result.error().context.field == "m4_policy.risk_policy_fingerprint");
 
-  result = aegis::runtime::M4Policy::create(
+  result = aegis::runtime::M4Policy::create_m4_policy(
       first.configuration, first.runtime_policy, first.submission->reservations().policy(),
       second.submission->policy(), create_ordinary_m4_policy_capacities());
   REQUIRE_FALSE(result);

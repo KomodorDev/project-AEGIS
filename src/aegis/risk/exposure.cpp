@@ -25,22 +25,23 @@ calculate_order_exposure(const execution::CanonicalOrderEconomics& economics,
           model::ContractMultiplierUnit::QuoteCurrencyPerContract ||
       metadata.contract_value_currency() != metadata.quote_currency() ||
       notional_scale > model::FixedPoint::maximum_scale) {
-    return model::Result<OrderExposure>::failure(model::DomainError::at_field(
+    return model::Result<OrderExposure>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::InvalidRiskPolicy, "risk_exposure.economics"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Convert and conservatively round exactly once before any scope accumulator sees the value.
-  auto notional = metadata.contract_value(economics.quantity, notional_scale,
-                                          model::RoundingMode::AwayFromZero);
+  auto notional = metadata.calculate_contract_value(economics.quantity, notional_scale,
+                                                    model::RoundingMode::AwayFromZero);
   if (!notional) {
-    return model::Result<OrderExposure>::failure(std::move(notional).error());
+    return model::Result<OrderExposure>::create_failure(std::move(notional).error());
   }
   if (notional.value().coefficient() <= 0) {
-    return model::Result<OrderExposure>::failure(model::DomainError::at_field(
+    return model::Result<OrderExposure>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::ArithmeticOverflow, "risk_exposure.quote_notional"));
   }
-  return model::Result<OrderExposure>::success(OrderExposure{economics.quantity, notional.value()});
+  return model::Result<OrderExposure>::create_success(
+      OrderExposure{economics.quantity, notional.value()});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

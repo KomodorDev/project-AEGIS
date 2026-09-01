@@ -50,10 +50,10 @@ public:
   // Validate length and copy every byte, including embedded zero bytes, into fixed inline storage.
   [[nodiscard]] static Result<BoundedOpaqueIdentity> from_bytes(std::span<const std::byte> bytes) {
     if (bytes.empty() || bytes.size() > maximum_byte_size) {
-      return Result<BoundedOpaqueIdentity>::failure(
-          DomainError::at_field(Tag::invalid_code, std::string{Tag::field}));
+      return Result<BoundedOpaqueIdentity>::create_failure(
+          DomainError::create_at_field(Tag::invalid_code, std::string{Tag::field}));
     }
-    return Result<BoundedOpaqueIdentity>::success(BoundedOpaqueIdentity{bytes});
+    return Result<BoundedOpaqueIdentity>::create_success(BoundedOpaqueIdentity{bytes});
   }
 
   // --------------------------------------------------------
@@ -151,16 +151,16 @@ public:
   // Validate a type-preserving authored counter before encoding its exact namespace prefix.
   template <detail::CheckedIntegerInput Counter>
   [[nodiscard]] static Result<NamespaceCounterIdentity>
-  from_parts(const OrderNamespace& order_namespace, Counter counter) {
+  identity_from_namespace_and_counter(const OrderNamespace& order_namespace, Counter counter) {
     if (!std::in_range<std::uint64_t>(counter) || counter == 0) {
-      return Result<NamespaceCounterIdentity>::failure(
-          DomainError::at_field(Tag::invalid_code, std::string{Tag::field}));
+      return Result<NamespaceCounterIdentity>::create_failure(
+          DomainError::create_at_field(Tag::invalid_code, std::string{Tag::field}));
     }
     const auto validated_counter = static_cast<std::uint64_t>(counter);
     Bytes bytes{};
     detail::append_identity_counter<OrderNamespace::byte_size>(bytes, order_namespace.bytes(),
                                                                validated_counter);
-    return Result<NamespaceCounterIdentity>::success(
+    return Result<NamespaceCounterIdentity>::create_success(
         NamespaceCounterIdentity{order_namespace, validated_counter, bytes});
   }
 
@@ -213,21 +213,24 @@ public:
   // --------------------------------------------------------
   // Begin an ordinary identity stream at the accepted first counter.
   [[nodiscard]] static Result<NamespaceCounterIdentityProvider>
-  create(OrderNamespace order_namespace) {
-    return create(order_namespace, 1U);
+  create_namespace_counter_identity_provider(OrderNamespace order_namespace) {
+    return create_namespace_counter_identity_provider(order_namespace, 1U);
   }
 
   // --------------------------------------------------------
   // Restore or inject a checked nonzero high-water successor without implicit signed conversion.
   template <detail::CheckedIntegerInput Counter>
   [[nodiscard]] static Result<NamespaceCounterIdentityProvider>
-  create(OrderNamespace order_namespace, Counter initial_counter) {
-    const auto validation = Identity::from_parts(order_namespace, initial_counter);
+  create_namespace_counter_identity_provider(OrderNamespace order_namespace,
+                                             Counter initial_counter) {
+    const auto validation =
+        Identity::identity_from_namespace_and_counter(order_namespace, initial_counter);
     if (!validation) {
-      return Result<NamespaceCounterIdentityProvider>::failure(validation.error());
+      return Result<NamespaceCounterIdentityProvider>::create_failure(validation.error());
     }
-    return Result<NamespaceCounterIdentityProvider>::success(NamespaceCounterIdentityProvider{
-        order_namespace, static_cast<std::uint64_t>(initial_counter)});
+    return Result<NamespaceCounterIdentityProvider>::create_success(
+        NamespaceCounterIdentityProvider{order_namespace,
+                                         static_cast<std::uint64_t>(initial_counter)});
   }
 
   // --------------------------------------------------------
@@ -257,12 +260,12 @@ public:
 
   // --------------------------------------------------------
   // Publish the current value once, then advance or enter sticky terminal exhaustion.
-  [[nodiscard]] Result<Identity> next() {
+  [[nodiscard]] Result<Identity> generate_next_identity() {
     if (exhausted_) {
-      return Result<Identity>::failure(
-          DomainError::at_field(Identity::exhaustion_code, std::string{Identity::field}));
+      return Result<Identity>::create_failure(
+          DomainError::create_at_field(Identity::exhaustion_code, std::string{Identity::field}));
     }
-    auto identity = Identity::from_parts(order_namespace_, next_counter_);
+    auto identity = Identity::identity_from_namespace_and_counter(order_namespace_, next_counter_);
     if (next_counter_ == std::numeric_limits<std::uint64_t>::max()) {
       exhausted_ = true;
     } else {
@@ -300,10 +303,10 @@ public:
   template <detail::CheckedIntegerInput Value>
   [[nodiscard]] static Result<OneBasedComponentOrdinal> from_value(Value value) {
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
-      return Result<OneBasedComponentOrdinal>::failure(
-          DomainError::at_field(Tag::invalid_code, std::string{Tag::field}));
+      return Result<OneBasedComponentOrdinal>::create_failure(
+          DomainError::create_at_field(Tag::invalid_code, std::string{Tag::field}));
     }
-    return Result<OneBasedComponentOrdinal>::success(
+    return Result<OneBasedComponentOrdinal>::create_success(
         OneBasedComponentOrdinal{static_cast<std::uint64_t>(value)});
   }
 
@@ -313,12 +316,12 @@ public:
 
   // --------------------------------------------------------
   // Advance once or report the component-specific error before unsigned wrap.
-  [[nodiscard]] Result<OneBasedComponentOrdinal> next() const {
+  [[nodiscard]] Result<OneBasedComponentOrdinal> derive_next_ordinal() const {
     if (value_ == std::numeric_limits<std::uint64_t>::max()) {
-      return Result<OneBasedComponentOrdinal>::failure(
-          DomainError::at_field(Tag::exhaustion_code, std::string{Tag::field}));
+      return Result<OneBasedComponentOrdinal>::create_failure(
+          DomainError::create_at_field(Tag::exhaustion_code, std::string{Tag::field}));
     }
-    return Result<OneBasedComponentOrdinal>::success(OneBasedComponentOrdinal{value_ + 1U});
+    return Result<OneBasedComponentOrdinal>::create_success(OneBasedComponentOrdinal{value_ + 1U});
   }
 
   // --------------------------------------------------------

@@ -1,5 +1,5 @@
-# Purpose: compile and register AEGIS unit, tooling, and M1-M3 deterministic-scenario tests with
-# CTest.
+# Purpose: compile and register AEGIS M0-M4 unit and tooling coverage plus M1-M3
+# deterministic-scenario tests with CTest.
 
 # Keep the exact accepted startup inputs in one owned fixture library so unit and scenario evidence
 # cannot silently diverge on configuration provenance.

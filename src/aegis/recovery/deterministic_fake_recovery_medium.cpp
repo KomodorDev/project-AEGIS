@@ -23,7 +23,7 @@ namespace {
 // Construct one stable fake-recovery error without leaking implementation slot details.
 [[nodiscard]] model::DomainError domain_error_from_fake_recovery_field(model::DomainErrorCode code,
                                                                        const char* field) {
-  return model::DomainError::at_field(code, field);
+  return model::DomainError::create_at_field(code, field);
 }
 
 // --------------------------------------------------------
@@ -149,28 +149,28 @@ validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
   const auto expected_sequence =
       JournalSequence::from_value(static_cast<std::uint64_t>(index) + 1U);
   if (!expected_sequence || record.sequence() != expected_sequence.value()) {
-    return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.sequence"));
   }
   if (index == 0U) {
     if (record.predecessor()) {
-      return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.predecessor"));
     }
   } else {
     const auto* const predecessor = published_journal_record_pointer_at(backing, index - 1U);
     if (predecessor == nullptr || !record.predecessor() ||
         *record.predecessor() != predecessor->sequence()) {
-      return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.predecessor"));
     }
   }
   if (record.lineage_id() != backing.lineage_id) {
-    return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.lineage_id"));
   }
   if (record.root_provenance() != backing.root_provenance) {
-    return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.root_provenance"));
   }
 
@@ -180,15 +180,15 @@ validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
     if (!std::holds_alternative<NamespaceRegisteredJournalPayload>(record.payload()) ||
         record.runtime_epoch_id() || record.subject_provenance() || record.replay_provenance() ||
         record.audit_span()) {
-      return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.namespace_record"));
     }
-    return model::Result<void>::success();
+    return model::Result<void>::create_success();
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Every non-namespace assignment remains unavailable until its complete owner slice exists.
-  return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+  return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
       model::DomainErrorCode::InvalidJournalState, "journal.unsupported_record_kind"));
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -207,7 +207,7 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
   if (backing.acknowledged_journal_record_count > backing.published_journal_record_count ||
       backing.published_journal_record_count > backing.journal_slots.size() ||
       backing.registered_namespace_count > backing.namespace_slots.size()) {
-    return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.prefix_counts"));
   }
 
@@ -217,7 +217,7 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
   for (std::uint32_t index = 0U; index < backing.published_journal_record_count; ++index) {
     const auto* const record = published_journal_record_pointer_at(backing, index);
     if (record == nullptr) {
-      return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.published_gap"));
     }
     auto valid = validate_fake_journal_record(backing, *record, index);
@@ -228,7 +228,7 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
       ++observed_namespaces;
       const auto& payload = std::get<NamespaceRegisteredJournalPayload>(record->payload());
       if (payload.registry_count_after_append != observed_namespaces) {
-        return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+        return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
             model::DomainErrorCode::InvalidJournalState, "journal.namespace_count"));
       }
       for (std::uint32_t prior = 0U; prior < index; ++prior) {
@@ -237,7 +237,7 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
             prior_record->kind() == JournalRecordKind::NamespaceRegistered &&
             std::get<NamespaceRegisteredJournalPayload>(prior_record->payload()).order_namespace ==
                 payload.order_namespace) {
-          return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+          return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
               model::DomainErrorCode::InvalidJournalState, "journal.duplicate_namespace"));
         }
       }
@@ -245,7 +245,7 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
         const auto* const retained =
             registered_namespace_pointer_at(backing, observed_namespaces - 1U);
         if (retained == nullptr || *retained != payload.order_namespace) {
-          return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+          return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
               model::DomainErrorCode::InvalidJournalState, "journal.namespace_registry"));
         }
       }
@@ -262,7 +262,7 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
     }
   }
   if (acknowledged_namespaces != backing.registered_namespace_count) {
-    return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.namespace_registry"));
   }
 
@@ -271,18 +271,18 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
   for (std::uint32_t index = backing.published_journal_record_count;
        index < static_cast<std::uint32_t>(backing.journal_slots.size()); ++index) {
     if (backing.journal_slots[static_cast<std::size_t>(index)]) {
-      return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.unpublished_slot"));
     }
   }
   for (std::uint32_t index = backing.registered_namespace_count;
        index < static_cast<std::uint32_t>(backing.namespace_slots.size()); ++index) {
     if (backing.namespace_slots[static_cast<std::size_t>(index)]) {
-      return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.namespace_slot"));
     }
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -338,15 +338,15 @@ DeterministicFakeRecoveryMedium::create_deterministic_fake_recovery_medium_from_
     auto backing = std::make_shared<detail::FakeRecoveryBacking>(
         lineage_id, policy.root_provenance(), journal_record_capacity,
         registered_namespace_capacity);
-    return model::Result<std::unique_ptr<DeterministicFakeRecoveryMedium>>::success(
+    return model::Result<std::unique_ptr<DeterministicFakeRecoveryMedium>>::create_success(
         std::unique_ptr<DeterministicFakeRecoveryMedium>{
             new DeterministicFakeRecoveryMedium{std::move(backing)}});
   } catch (const std::bad_alloc&) {
-    return model::Result<std::unique_ptr<DeterministicFakeRecoveryMedium>>::failure(
+    return model::Result<std::unique_ptr<DeterministicFakeRecoveryMedium>>::create_failure(
         domain_error_from_fake_recovery_field(model::DomainErrorCode::InvalidRecoveryPolicy,
                                               "fake_recovery_medium.capacity_allocation"));
   } catch (const std::length_error&) {
-    return model::Result<std::unique_ptr<DeterministicFakeRecoveryMedium>>::failure(
+    return model::Result<std::unique_ptr<DeterministicFakeRecoveryMedium>>::create_failure(
         domain_error_from_fake_recovery_field(model::DomainErrorCode::InvalidRecoveryPolicy,
                                               "fake_recovery_medium.capacity_allocation"));
   }
@@ -371,25 +371,25 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
   // Validate lease, policy, provenance, and the complete cold medium before any mutation.
   auto& backing = *backing_;
   if (backing.lease_active) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.append_lease"));
   }
   if (policy.root_provenance() != backing.root_provenance ||
       policy.capacities().max_journal_records != backing.journal_slots.size() ||
       policy.capacities().max_namespace_registrations != backing.namespace_slots.size()) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::RecoveryProvenanceMismatch, "fake_recovery_medium.policy"));
   }
   auto cold = validate_cold_fake_recovery_backing(backing);
   if (!cold) {
-    return model::Result<RecoveryBootstrap>::failure(std::move(cold).error());
+    return model::Result<RecoveryBootstrap>::create_failure(std::move(cold).error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Require the explicit crash-tail operation to discard any volatile suffix before bootstrap.
   // This keeps every reported bootstrap failure side-effect-free.
   if (backing.published_journal_record_count != backing.acknowledged_journal_record_count) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.unacknowledged_suffix"));
   }
 
@@ -398,7 +398,7 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
   for (std::uint32_t index = 0U; index < backing.acknowledged_journal_record_count; ++index) {
     const auto* const record = published_journal_record_pointer_at(backing, index);
     if (record == nullptr || record->kind() != JournalRecordKind::NamespaceRegistered) {
-      return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.replay_required"));
     }
   }
@@ -409,35 +409,36 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
                                     [&backing](std::uint32_t position) {
                                       return registered_namespace_pointer_at(backing, position);
                                     })) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.duplicate_namespace"));
   }
   if (backing.registered_namespace_count == backing.namespace_slots.size()) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::RecoveryCounterExhausted, "journal.namespace_capacity"));
   }
   if (backing.published_journal_record_count == backing.journal_slots.size()) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::JournalCapacityExceeded, "journal.capacity"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Construct every fallible runtime identity and startup allocation before journal publication.
-  auto runtime_epoch = RuntimeEpochId::from_parts(fresh_namespace, 1U);
-  auto order_ids = model::DeterministicOrderIdProvider::create(fresh_namespace);
+  auto runtime_epoch = RuntimeEpochId::identity_from_namespace_and_counter(fresh_namespace, 1U);
+  auto order_ids =
+      model::DeterministicOrderIdProvider::create_deterministic_order_id_provider(fresh_namespace);
   const auto next_sequence = JournalSequence::from_value(
       static_cast<std::uint64_t>(backing.published_journal_record_count) + 1U);
   if (!runtime_epoch) {
-    return model::Result<RecoveryBootstrap>::failure(std::move(runtime_epoch).error());
+    return model::Result<RecoveryBootstrap>::create_failure(std::move(runtime_epoch).error());
   }
   if (!order_ids) {
-    return model::Result<RecoveryBootstrap>::failure(std::move(order_ids).error());
+    return model::Result<RecoveryBootstrap>::create_failure(std::move(order_ids).error());
   }
   if (!next_sequence) {
-    return model::Result<RecoveryBootstrap>::failure(std::move(next_sequence).error());
+    return model::Result<RecoveryBootstrap>::create_failure(std::move(next_sequence).error());
   }
   if (backing.lease_generation == std::numeric_limits<std::uint64_t>::max()) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::RecoveryCounterExhausted, "journal.lease_generation"));
   }
   std::shared_ptr<detail::FakeJournalLeaseControl> lease;
@@ -445,7 +446,7 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
     lease =
         std::make_shared<detail::FakeJournalLeaseControl>(backing_, backing.lease_generation + 1U);
   } catch (const std::bad_alloc&) {
-    return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidRecoveryPolicy, "fake_recovery_medium.lease_allocation"));
   }
 
@@ -454,7 +455,7 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
     const auto* const prior =
         published_journal_record_pointer_at(backing, backing.published_journal_record_count - 1U);
     if (prior == nullptr) {
-      return model::Result<RecoveryBootstrap>::failure(domain_error_from_fake_recovery_field(
+      return model::Result<RecoveryBootstrap>::create_failure(domain_error_from_fake_recovery_field(
           model::DomainErrorCode::InvalidJournalState, "journal.predecessor"));
     }
     predecessor = prior->sequence();
@@ -476,7 +477,7 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
   // ++++++++++++++++++++++++++++++++++++++++
   // Materialize the complete return value before the no-fail commit. The lease control remains
   // inert until the backing generation and active flag are published below.
-  auto successful_bootstrap = model::Result<RecoveryBootstrap>::success(
+  auto successful_bootstrap = model::Result<RecoveryBootstrap>::create_success(
       RecoveryBootstrap{backing.lineage_id, std::move(runtime_epoch).value(), fresh_namespace,
                         backing.root_provenance, std::move(lease), std::move(order_ids).value()});
 
@@ -534,10 +535,10 @@ std::uint32_t DeterministicFakeRecoveryMedium::journal_record_capacity() const n
 model::Result<std::uint32_t>
 DeterministicFakeRecoveryMedium::published_journal_record_count() const {
   if (backing_->lease_active) {
-    return model::Result<std::uint32_t>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<std::uint32_t>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.read_lease"));
   }
-  return model::Result<std::uint32_t>::success(backing_->published_journal_record_count);
+  return model::Result<std::uint32_t>::create_success(backing_->published_journal_record_count);
 }
 
 // --------------------------------------------------------
@@ -547,10 +548,10 @@ DeterministicFakeRecoveryMedium::published_journal_record_count() const {
 model::Result<std::uint32_t>
 DeterministicFakeRecoveryMedium::acknowledged_journal_record_count() const {
   if (backing_->lease_active) {
-    return model::Result<std::uint32_t>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<std::uint32_t>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.read_lease"));
   }
-  return model::Result<std::uint32_t>::success(backing_->acknowledged_journal_record_count);
+  return model::Result<std::uint32_t>::create_success(backing_->acknowledged_journal_record_count);
 }
 
 // --------------------------------------------------------
@@ -567,10 +568,10 @@ std::uint32_t DeterministicFakeRecoveryMedium::registered_namespace_capacity() c
 // Return the acknowledged namespace count during cold inspection; reject an active lease.
 model::Result<std::uint32_t> DeterministicFakeRecoveryMedium::registered_namespace_count() const {
   if (backing_->lease_active) {
-    return model::Result<std::uint32_t>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<std::uint32_t>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.read_lease"));
   }
-  return model::Result<std::uint32_t>::success(backing_->registered_namespace_count);
+  return model::Result<std::uint32_t>::create_success(backing_->registered_namespace_count);
 }
 
 // --------------------------------------------------------
@@ -580,15 +581,15 @@ model::Result<std::uint32_t> DeterministicFakeRecoveryMedium::registered_namespa
 model::Result<JournalRecord> DeterministicFakeRecoveryMedium::published_journal_record_at(
     std::uint32_t chronological_index) const {
   if (backing_->lease_active) {
-    return model::Result<JournalRecord>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<JournalRecord>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.read_lease"));
   }
   const auto* const record = published_journal_record_pointer_at(*backing_, chronological_index);
   if (record == nullptr) {
-    return model::Result<JournalRecord>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<JournalRecord>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.record_index"));
   }
-  return model::Result<JournalRecord>::success(*record);
+  return model::Result<JournalRecord>::create_success(*record);
 }
 
 // --------------------------------------------------------
@@ -598,15 +599,17 @@ model::Result<JournalRecord> DeterministicFakeRecoveryMedium::published_journal_
 model::Result<model::OrderNamespace>
 DeterministicFakeRecoveryMedium::registered_namespace_at(std::uint32_t chronological_index) const {
   if (backing_->lease_active) {
-    return model::Result<model::OrderNamespace>::failure(domain_error_from_fake_recovery_field(
-        model::DomainErrorCode::InvalidJournalState, "journal.read_lease"));
+    return model::Result<model::OrderNamespace>::create_failure(
+        domain_error_from_fake_recovery_field(model::DomainErrorCode::InvalidJournalState,
+                                              "journal.read_lease"));
   }
   const auto* const value = registered_namespace_pointer_at(*backing_, chronological_index);
   if (value == nullptr) {
-    return model::Result<model::OrderNamespace>::failure(domain_error_from_fake_recovery_field(
-        model::DomainErrorCode::InvalidJournalState, "journal.namespace_index"));
+    return model::Result<model::OrderNamespace>::create_failure(
+        domain_error_from_fake_recovery_field(model::DomainErrorCode::InvalidJournalState,
+                                              "journal.namespace_index"));
   }
-  return model::Result<model::OrderNamespace>::success(*value);
+  return model::Result<model::OrderNamespace>::create_success(*value);
 }
 
 // --------------------------------------------------------
@@ -616,7 +619,7 @@ DeterministicFakeRecoveryMedium::registered_namespace_at(std::uint32_t chronolog
 // preserves every acknowledged row and is a no-op when no volatile suffix exists.
 model::Result<void> DeterministicFakeRecoveryMedium::discard_unacknowledged_journal_suffix() {
   if (backing_->lease_active) {
-    return model::Result<void>::failure(domain_error_from_fake_recovery_field(
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.append_lease"));
   }
   auto valid = validate_cold_fake_recovery_backing(*backing_);
@@ -624,7 +627,7 @@ model::Result<void> DeterministicFakeRecoveryMedium::discard_unacknowledged_jour
     return valid;
   }
   discard_volatile_journal_suffix(*backing_);
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------

@@ -49,6 +49,7 @@ struct FakeEncodingOverride {
   FakeEncodingAction action;
 
   // --------------------------------------------------------
+  // Compare the complete scripted ordinal and action for deterministic fixture equality.
   friend bool operator==(const FakeEncodingOverride&, const FakeEncodingOverride&) = default;
 
   // --------------------------------------------------------
@@ -64,16 +65,19 @@ public:
   // --------------------------------------------------------
   // Validate assigned actions and bounded one-based ordinals, then canonicalize override order.
   [[nodiscard]] static model::Result<FakeEncoderScript>
-  create(FakeEncodingAction default_action, std::uint64_t maximum_invocations,
-         std::vector<FakeEncodingOverride> overrides);
+  create_fake_encoder_script(FakeEncodingAction default_action, std::uint64_t maximum_invocations,
+                             std::vector<FakeEncodingOverride> overrides);
 
   // --------------------------------------------------------
+  // Return the action used when no ordinal-specific override exists.
   [[nodiscard]] FakeEncodingAction default_action() const noexcept { return default_action_; }
 
   // --------------------------------------------------------
+  // Return the maximum number of one-based invocations the script permits.
   [[nodiscard]] std::uint64_t maximum_invocations() const noexcept { return maximum_invocations_; }
 
   // --------------------------------------------------------
+  // Borrow the canonical ordinal-sorted override sequence.
   [[nodiscard]] const std::vector<FakeEncodingOverride>& overrides() const noexcept {
     return overrides_;
   }
@@ -106,17 +110,21 @@ class EncodedFakeOrder final {
 public:
 
   // --------------------------------------------------------
+  // Return the submission attempt represented by these immutable encoded bytes.
   [[nodiscard]] model::SubmissionAttemptId attempt_id() const noexcept { return attempt_id_; }
 
   // --------------------------------------------------------
+  // Return the encoder invocation that produced these bytes.
   [[nodiscard]] model::EncoderInvocationOrdinal invocation_ordinal() const noexcept {
     return invocation_ordinal_;
   }
 
   // --------------------------------------------------------
+  // Return the exact number of valid bytes in the fixed-capacity storage.
   [[nodiscard]] std::uint16_t byte_length() const noexcept { return byte_length_; }
 
   // --------------------------------------------------------
+  // Borrow only the initialized encoded prefix, excluding unused fixed storage.
   [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
     return {bytes_.data(), byte_length_};
   }
@@ -134,6 +142,8 @@ private:
   // --------------------------------------------------------
 
   // ########################################################################
+  // Interesting syntax: friendship restricts successful byte construction to the validated fake
+  // encoder path without exposing a public partial-state constructor.
   friend class DeterministicFakeOrderEncoder;
 
   // ########################################################################
@@ -153,17 +163,21 @@ class FakeEncodingResult final {
 public:
 
   // --------------------------------------------------------
+  // Return the scripted action consumed for this invocation.
   [[nodiscard]] FakeEncodingAction action() const noexcept { return action_; }
 
   // --------------------------------------------------------
+  // Return the one-based invocation ordinal consumed even when encoding failed.
   [[nodiscard]] model::EncoderInvocationOrdinal invocation_ordinal() const noexcept {
     return invocation_ordinal_;
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] bool encoded() const noexcept { return encoded_order_.has_value(); }
+  // Report whether this invocation produced a complete encoded order.
+  [[nodiscard]] bool is_encoded() const noexcept { return encoded_order_.has_value(); }
 
   // --------------------------------------------------------
+  // Borrow the complete encoded order, or return null when the scripted action failed.
   [[nodiscard]] const EncodedFakeOrder* encoded_order() const noexcept {
     return encoded_order_ ? &*encoded_order_ : nullptr;
   }
@@ -182,6 +196,8 @@ private:
   // --------------------------------------------------------
 
   // ########################################################################
+  // Interesting syntax: friendship centralizes construction of both result alternatives in the
+  // deterministic encoder that owns invocation sequencing.
   friend class DeterministicFakeOrderEncoder;
 
   // ########################################################################
@@ -202,21 +218,25 @@ public:
   // --------------------------------------------------------
   // Bind one validated script and a positive policy-selected capacity no larger than 1,024 bytes.
   [[nodiscard]] static model::Result<DeterministicFakeOrderEncoder>
-  create(FakeEncoderScript script, std::uint16_t byte_capacity);
+  create_deterministic_fake_order_encoder(FakeEncoderScript script, std::uint16_t byte_capacity);
 
   // --------------------------------------------------------
   // Consume one invocation/action, then either fail as scripted or preserve exact OMS economics.
-  [[nodiscard]] model::Result<FakeEncodingResult> encode(const oms::OutboundOrderRecord& order);
+  [[nodiscard]] model::Result<FakeEncodingResult>
+  encode_order(const oms::OutboundOrderRecord& order);
 
   // --------------------------------------------------------
+  // Return the fixed maximum encoded byte count accepted at construction.
   [[nodiscard]] std::uint16_t byte_capacity() const noexcept { return byte_capacity_; }
 
   // --------------------------------------------------------
+  // Return how many invocation ordinals have been consumed, including scripted failures.
   [[nodiscard]] std::uint64_t invocations_consumed() const noexcept {
     return invocations_consumed_;
   }
 
   // --------------------------------------------------------
+  // Borrow the immutable validated action script that governs future invocations.
   [[nodiscard]] const FakeEncoderScript& script() const noexcept { return script_; }
 
   // --------------------------------------------------------

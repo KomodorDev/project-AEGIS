@@ -30,6 +30,9 @@ machine, or power-loss durability.
 
 ## Decision
 
+The following subsections define the accepted recovery authority, journal/snapshot ordering, replay
+fences, and safe-convergence decisions.
+
 ### Stable recovery errors
 
 M4 appends these stable `DomainErrorCode` values:
@@ -480,7 +483,7 @@ It drives exactly this existing M3 request:
 | Quantity | `2` |
 
 The intent waits through non-Ready callbacks. On the next Ready market-data callback, the owner
-marks it consumed immediately before the one same-callback `BotContext::submit` invocation. It is
+marks it consumed immediately before the one same-callback `BotContext::submit_order` invocation. It is
 consumed regardless of `LocallyRejected`, `WriteInitiated`, or `SubmissionUnknown`. Replay,
 reconnect, order callbacks, recovery notifications, and later Ready callbacks never invoke submit
 for that intent again.
@@ -668,6 +671,9 @@ or `BENCH-M3-SUBMIT-002`. M4 qualification regresses the existing M0, M2, and M3
 validators unchanged.
 
 ## Consequences
+
+The recovery decision provides the following crash-consistency guarantees while deferring real
+durable I/O.
 
 - Recovery makes an honest distinction between operational and quarantined convergence.
 - An uncertain order cannot be released using open-order absence alone.

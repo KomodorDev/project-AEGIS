@@ -1,15 +1,17 @@
 # AEGIS
 
-> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1-M3
+> **Purpose:** Give a new contributor the shortest safe path to understand the integrated M1-M4
 > fake-backed capability baseline without mistaking it for a connected system.
 
 AEGIS (Asynchronous Exchange Gateway and Inventory System) is a deterministic trading and risk
 engine under development. M1 provides the dependency-light values and sealed startup rulebook. M2
 adds a bounded serialized owner, recorded fixture playback, transactional market books, and
 Ready-only strategy dispatch. M3 adds route authorization, exact fixed risk, outbound OMS
-admission, exact fake encoding, and an in-memory fake write-initiation boundary. The reference slice
-remains deliberately narrow: one Deribit testnet account alias, one BTC inverse perpetual, one
-active subscribed bot, and no exchange connectivity.
+admission, exact fake encoding, and an in-memory fake write-initiation boundary. The integrated M4
+foundation adds bounded private-order identities and events, deterministic first-seen correlation,
+owner-bound reconciliation planning, fake recovery authority, and typed semantic evidence. The
+reference slice remains deliberately narrow: one Deribit testnet account alias, one BTC inverse
+perpetual, one active subscribed bot, and no exchange connectivity.
 
 M3's canonical order, fixed startup risk, outbound OMS, and conservative fake-initiation contracts
 are accepted in ADR-0008 and ADR-0009. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
@@ -90,6 +92,28 @@ fake accepted-slot boundary; they do not encode or transmit a venue-native order
 - Bounded canonical `AEGISSTS` evidence, bounded diagnostics, deterministic manual/dedicated replay,
   named submission benchmarks, and a fail-closed forbidden-capability audit.
 
+## What the integrated M4 foundation provides
+
+These remain credential-free, fake-backed contracts. They make private-order and recovery behavior
+representable and owner-bound without adding a venue session, native query, socket, database, or
+durable external journal.
+
+- Bounded private-order, exchange-order, trade, cancellation-attempt, runtime-epoch, and recovery
+  identities with explicit origin and lifetime rules.
+- One immutable fingerprinted M4 capacity policy plus source-bound provenance resolution that must
+  succeed before private or recovery authority can be installed.
+- Receive-time-free normalized private-order events and immutable first-admission resolutions whose
+  correlation-independent fields can be compared without losing the original event identity.
+- Owner-local first-seen correlation planning and a dormant private-event reconciler boundary that
+  cannot accept events before its authority and empty identity tables are installed.
+- A bounded deterministic fake recovery medium that acknowledges namespace publication before the
+  runtime exposes recovery-backed identity authority.
+- Typed M4 semantic evidence and audit-span relationships that remain storage-free until a later
+  accepted canonical byte schema and durable implementation are added.
+
+This foundation does not claim completion of the full M4 inventory, reservation-conversion,
+reconciliation, crash-matrix, or exit-evidence gate.
+
 ## Quick start
 
 The supported baseline is C++20 with CMake 3.25 or newer and Ninja. Python 3.11 or newer runs the
@@ -155,6 +179,10 @@ fake and is never an exchange acknowledgement. The first market and account assu
 described in [the reference scenario](docs/reference-scenario.md).
 
 ## Milestone records
+
+These records preserve the revision-specific implementation, verification, publication, and
+integration facts for each completed milestone gate; they are historical evidence, not a claim that
+later milestones are absent from the current branch.
 
 - [Serialized data-plane decision](docs/decisions/0001-serialized-data-plane-execution.md)
 - [Delivery and toolchain decision](docs/decisions/0002-delivery-toolchain.md)

@@ -9,28 +9,31 @@
 namespace aegis::test_support {
 
 // --------------------------------------------------------
-// The first builder returns the exact credential-free golden scenario.
-[[nodiscard]] configuration::StartupConfigurationParams reference_configuration_params();
+// Creates the exact credential-free golden scenario parameters.
+[[nodiscard]] configuration::StartupConfigurationParams
+create_reference_configuration_params_or_throw();
 
 // --------------------------------------------------------
-// The second builder adds a peer subsidiary without introducing parent-company aggregation or
-// cross-firm execution authority.
-[[nodiscard]] configuration::StartupConfigurationParams two_firm_configuration_params();
+// Creates parameters with a peer subsidiary but no parent-company aggregation or cross-firm
+// execution authority.
+[[nodiscard]] configuration::StartupConfigurationParams
+create_two_firm_configuration_params_or_throw();
 
 // --------------------------------------------------------
-// The M3-specific builder enables both explicit routes without changing M1/M2 golden inputs.
-[[nodiscard]] configuration::StartupConfigurationParams m3_enabled_two_firm_configuration_params();
+// Creates M3 parameters with both explicit routes enabled without changing M1/M2 golden inputs.
+[[nodiscard]] configuration::StartupConfigurationParams
+create_m3_enabled_two_firm_configuration_params_or_throw();
 
 // --------------------------------------------------------
-// The generous complete policy supports the 10,000-order success workload without weakening any
-// configured route, attribution, metadata, or seven-scope provenance check.
-[[nodiscard]] risk::RiskPolicyParams
-m3_reference_risk_policy_params(const configuration::StartupConfiguration& configuration);
+// Creates the complete policy for the 10,000-order success workload; invalid sealed authority
+// causes an exception rather than a partial policy.
+[[nodiscard]] risk::RiskPolicyParams create_m3_reference_risk_policy_params_or_throw(
+    const configuration::StartupConfiguration& configuration);
 
 // --------------------------------------------------------
-// The paired benchmark policy differs only at the baseline bot's first single-order quantity limit.
-[[nodiscard]] risk::RiskPolicyParams
-m3_rejecting_risk_policy_params(const configuration::StartupConfiguration& configuration);
+// Creates the paired rejection policy; missing baseline-bot authority causes an exception.
+[[nodiscard]] risk::RiskPolicyParams create_m3_rejecting_risk_policy_params_or_throw(
+    const configuration::StartupConfiguration& configuration);
 
 // --------------------------------------------------------
 } // namespace aegis::test_support

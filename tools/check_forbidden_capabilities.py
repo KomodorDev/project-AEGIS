@@ -482,15 +482,15 @@ DIRECT_PATH_FORBIDDEN_IDENTIFIERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "executor handoff",
-        re.compile(r"\b(?:SerializedExecutor|WorkItem|try_admit)\b"),
+        re.compile(r"\b(?:SerializedExecutor|InlineCommandWorkItem|try_admit)\b"),
     ),
 )
 
 
 # ########################################################################
-# One stable scanner finding carries repository-relative location and an assigned rule label.
+# Own one immutable forbidden-capability finding with deterministic ordering across stored fields.
 @dataclass(frozen=True, order=True)
-class Violation:
+class ForbiddenCapabilityViolation:
     """Describe one deterministic forbidden-capability match."""
 
     path: str
@@ -702,8 +702,8 @@ def strip_approved_non_capability_identifiers(text: str, relative: Path) -> str:
 
 
 # --------------------------------------------------------
-# Convert an absolute character offset into stable one-based line and column coordinates.
-def source_position(text: str, offset: int) -> tuple[int, int]:
+# Calculate stable one-based line and column coordinates from an absolute character offset.
+def calculate_source_position(text: str, offset: int) -> tuple[int, int]:
     """Return the one-based line and column for an offset into source text."""
 
     line = text.count("\n", 0, offset) + 1
@@ -741,8 +741,8 @@ def is_cmake_path(relative: Path) -> bool:
 
 
 # --------------------------------------------------------
-# Require every explicitly assigned M3/M4/build artifact and discovery root before defaults.
-def validate_required_manifest(repository: Path) -> None:
+# Require every assigned M3/M4/build artifact and discovery root before default scanning.
+def require_complete_scanner_manifest(repository: Path) -> None:
     """Fail closed when an assigned file or directory silently disappears from default discovery."""
 
     # ++++++++++++++++++++++++++++++++++++++++
@@ -774,13 +774,13 @@ def validate_required_manifest(repository: Path) -> None:
 
 
 # --------------------------------------------------------
-# Discover every assigned M3/M4 source, test, fixture, tool, benchmark, and build artifact.
-def discover_default_paths(repository: Path) -> list[Path]:
-    """Return the validated explicit/directory union in deterministic repository-relative order."""
+# Discover every default scan path or raise when the assigned manifest is incomplete.
+def discover_default_scan_paths_or_raise(repository: Path) -> list[Path]:
+    """Return the validated default path union, or raise when assigned artifacts are missing."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Reject incomplete authority before collecting any best-effort directory contents.
-    validate_required_manifest(repository)
+    require_complete_scanner_manifest(repository)
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Union recursive M3/CMake files with every explicit M3/M4 and build assignment.
@@ -805,40 +805,44 @@ def discover_default_paths(repository: Path) -> list[Path]:
 
 
 # --------------------------------------------------------
-# Report a match once with repository-relative source coordinates and the assigned capability rule.
-def violation(
+# Create one finding from a match with repository-relative coordinates and its capability rule.
+def forbidden_capability_violation_from_match(
     repository: Path, path: Path, text: str, match: re.Match[str], rule: str
-) -> Violation:
-    """Build one canonical finding from a regex match."""
+) -> ForbiddenCapabilityViolation:
+    """Return one canonical finding from a regular-expression match."""
 
-    line, column = source_position(text, match.start())
-    return Violation(path.relative_to(repository).as_posix(), line, column, rule, match.group(0))
+    line, column = calculate_source_position(text, match.start())
+    return ForbiddenCapabilityViolation(
+        path.relative_to(repository).as_posix(), line, column, rule, match.group(0)
+    )
 
 
 # --------------------------------------------------------
-# Report a caller-selected source span when command parsing identifies a forbidden build token.
-def violation_at(
+# Create one finding from an offset selected while parsing a forbidden build token.
+def forbidden_capability_violation_from_offset(
     repository: Path, path: Path, text: str, offset: int, rule: str, token: str
-) -> Violation:
-    """Build one canonical finding from an offset rather than a regular-expression match."""
+) -> ForbiddenCapabilityViolation:
+    """Return one canonical finding from a source offset and caller-supplied token."""
 
-    line, column = source_position(text, offset)
-    return Violation(path.relative_to(repository).as_posix(), line, column, rule, token)
+    line, column = calculate_source_position(text, offset)
+    return ForbiddenCapabilityViolation(
+        path.relative_to(repository).as_posix(), line, column, rule, token
+    )
 
 
 # --------------------------------------------------------
 # Require the full immutable URL/hash/option grammar for both approved FetchContent dependencies.
 def scan_pinned_fetchcontent_declarations(
     repository: Path, path: Path, text: str
-) -> list[Violation]:
+) -> list[ForbiddenCapabilityViolation]:
     """Reject every approved-name declaration that differs from its exact pinned token sequence."""
 
-    findings: list[Violation] = []
+    findings: list[ForbiddenCapabilityViolation] = []
     for match in CMAKE_FETCHCONTENT_DECLARE.finditer(text):
         arguments = list(CMAKE_ARGUMENT.finditer(match.group("body")))
         if not arguments:
             findings.append(
-                violation_at(
+                forbidden_capability_violation_from_offset(
                     repository,
                     path,
                     text,
@@ -853,7 +857,7 @@ def scan_pinned_fetchcontent_declarations(
         expected = PINNED_FETCHCONTENT_DECLARATIONS.get(tokens[0])
         if expected is not None and tokens != expected:
             findings.append(
-                violation_at(
+                forbidden_capability_violation_from_offset(
                     repository,
                     path,
                     text,
@@ -867,10 +871,12 @@ def scan_pinned_fetchcontent_declarations(
 
 # --------------------------------------------------------
 # Enforce exact CMake acquisition, module, subdirectory, and target-link dependency allow-sets.
-def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Violation]:
+def scan_cmake_dependencies(
+    repository: Path, path: Path, text: str
+) -> list[ForbiddenCapabilityViolation]:
     """Return deny-by-default CMake command and link-edge findings."""
 
-    findings: list[Violation] = []
+    findings: list[ForbiddenCapabilityViolation] = []
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Bind approved FetchContent names to their exact immutable archive and checksum declarations.
@@ -883,7 +889,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
         input_name = match.group("input").strip('"')
         if input_name not in ALLOWED_CMAKE_COMMAND_INPUTS[command]:
             findings.append(
-                violation_at(
+                forbidden_capability_violation_from_offset(
                     repository,
                     path,
                     text,
@@ -897,7 +903,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
     # Reject acquisition commands for which M3/M4 has no accepted input vocabulary at all.
     for match in CMAKE_UNAPPROVED_ACQUISITION_COMMAND.finditer(text):
         findings.append(
-            violation_at(
+            forbidden_capability_violation_from_offset(
                 repository,
                 path,
                 text,
@@ -911,7 +917,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
     # Reject global/property/directory link surfaces for which M3/M4 has no accepted use.
     for match in CMAKE_UNAPPROVED_LINK_SURFACE.finditer(text):
         findings.append(
-            violation_at(
+            forbidden_capability_violation_from_offset(
                 repository,
                 path,
                 text,
@@ -932,7 +938,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
             if link_input in ALLOWED_CMAKE_LINK_INPUTS:
                 continue
             findings.append(
-                violation_at(
+                forbidden_capability_violation_from_offset(
                     repository,
                     path,
                     text,
@@ -953,7 +959,7 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
             if link_option in ALLOWED_CMAKE_LINK_OPTIONS:
                 continue
             findings.append(
-                violation_at(
+                forbidden_capability_violation_from_offset(
                     repository,
                     path,
                     text,
@@ -969,9 +975,11 @@ def scan_cmake_dependencies(repository: Path, path: Path, text: str) -> list[Vio
 
 # --------------------------------------------------------
 # Inspect one source/build path under general rules and add direct-path rules only when classified.
-def scan_file(repository: Path, path: Path) -> list[Violation]:
+def scan_file(repository: Path, path: Path) -> list[ForbiddenCapabilityViolation]:
     """Return general live findings plus production-only blocking or owner-hop findings."""
 
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Classify the file and derive language-aware scan text without changing source coordinates.
     raw_text = path.read_text(encoding="utf-8")
     relative = path.relative_to(repository)
     is_build_file = is_build_path(relative)
@@ -990,31 +998,52 @@ def scan_file(repository: Path, path: Path) -> list[Violation]:
         text = strip_cpp_string_literals(include_text)
         text = strip_negative_capability_probes(text, relative)
     text = strip_approved_non_capability_identifiers(text, relative)
-    findings: list[Violation] = []
+    findings: list[ForbiddenCapabilityViolation] = []
 
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Apply general rules first, then add language/build rules only to their governed file classes.
     for match in GENERAL_FORBIDDEN_INCLUDE.finditer(include_text):
-        findings.append(violation(repository, path, include_text, match, "forbidden include"))
+        findings.append(
+            forbidden_capability_violation_from_match(
+                repository, path, include_text, match, "forbidden include"
+            )
+        )
     for rule, pattern in GENERAL_FORBIDDEN_IDENTIFIERS:
         for match in pattern.finditer(text):
-            findings.append(violation(repository, path, text, match, rule))
+            findings.append(
+                forbidden_capability_violation_from_match(repository, path, text, match, rule)
+            )
     if is_python:
         for rule, pattern in PYTHON_FORBIDDEN_IDENTIFIERS:
             for match in pattern.finditer(text):
-                findings.append(violation(repository, path, text, match, rule))
+                findings.append(
+                    forbidden_capability_violation_from_match(repository, path, text, match, rule)
+                )
     if is_build_file:
         for rule, pattern in BUILD_FORBIDDEN_DEPENDENCIES:
             for match in pattern.finditer(text):
-                findings.append(violation(repository, path, text, match, rule))
+                findings.append(
+                    forbidden_capability_violation_from_match(repository, path, text, match, rule)
+                )
     if is_cmake_path(relative):
         findings.extend(scan_cmake_dependencies(repository, path, text))
 
+    # ++++++++++++++++++++++++++++++++++++++++
+    # Apply the stricter blocking and owner-hop rules only to production paths in the direct stack.
     if is_direct_path(relative):
         for match in DIRECT_PATH_FORBIDDEN_INCLUDE.finditer(include_text):
-            findings.append(violation(repository, path, include_text, match, "forbidden include"))
+            findings.append(
+                forbidden_capability_violation_from_match(
+                    repository, path, include_text, match, "forbidden include"
+                )
+            )
         for rule, pattern in DIRECT_PATH_FORBIDDEN_IDENTIFIERS:
             for match in pattern.finditer(text):
-                findings.append(violation(repository, path, text, match, rule))
+                findings.append(
+                    forbidden_capability_violation_from_match(repository, path, text, match, rule)
+                )
 
+    # ++++++++++++++++++++++++++++++++++++++++
     # Real Python URL literals remain evidence except in the two scanner-owned files whose strings
     # are deliberately malicious fixtures. Other languages reuse the API-scanning representation.
     if is_python and relative not in EMBEDDED_SCANNER_FIXTURE_PATHS:
@@ -1026,18 +1055,24 @@ def scan_file(repository: Path, path: Path) -> list[Violation]:
     for match in re.finditer(r"https?://[^\s\"')]+", url_text):
         if is_build_file and match.group(0) in ALLOWED_BUILD_URLS:
             continue
-        findings.append(violation(repository, path, url_text, match, "live URL"))
+        findings.append(
+            forbidden_capability_violation_from_match(repository, path, url_text, match, "live URL")
+        )
 
     return findings
 
+    # ++++++++++++++++++++++++++++++++++++++++
+
 
 # --------------------------------------------------------
-# Validate explicit or discovered files and return findings in deterministic path/location order.
-def scan_paths(repository: Path, paths: Iterable[Path] | None = None) -> list[Violation]:
-    """Scan M3/M4 defaults or caller-selected files beneath one repository root."""
+# Scan explicit or default repository paths, or raise when their path contract is invalid.
+def scan_repository_paths_or_raise(
+    repository: Path, paths: Iterable[Path] | None = None
+) -> list[ForbiddenCapabilityViolation]:
+    """Return ordered findings for M3/M4 paths, or raise for invalid repository inputs."""
 
     repository = repository.resolve()
-    selected = discover_default_paths(repository) if paths is None else list(paths)
+    selected = discover_default_scan_paths_or_raise(repository) if paths is None else list(paths)
     resolved: list[Path] = []
     for path in selected:
         candidate = path if path.is_absolute() else repository / path
@@ -1055,9 +1090,11 @@ def scan_paths(repository: Path, paths: Iterable[Path] | None = None) -> list[Vi
 
 
 # --------------------------------------------------------
-# Parse the repository root and optional explicit file list used by CI and focused self-tests.
-def parse_arguments(arguments: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse deterministic scanner inputs without accepting implicit external paths."""
+# Parse the CLI repository root and explicit file list, or exit for invalid arguments.
+def parse_cli_arguments_or_exit(
+    arguments: Sequence[str] | None = None,
+) -> argparse.Namespace:
+    """Return deterministic scanner inputs, or exit rather than accept invalid CLI arguments."""
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1076,14 +1113,14 @@ def parse_arguments(arguments: Sequence[str] | None = None) -> argparse.Namespac
 
 
 # --------------------------------------------------------
-# Print stable machine-readable findings and fail exactly when a forbidden capability is present.
-def main(arguments: Sequence[str] | None = None) -> int:
-    """Run the scanner and return a conventional process status."""
+# Report stable machine-readable findings and encode scan outcomes in the process status.
+def report_forbidden_capability_findings(arguments: Sequence[str] | None = None) -> int:
+    """Print scanner findings and return zero, one, or two for clean, findings, or scan error."""
 
-    options = parse_arguments(arguments)
+    options = parse_cli_arguments_or_exit(arguments)
     selected = options.paths if options.paths else None
     try:
-        findings = scan_paths(options.root, selected)
+        findings = scan_repository_paths_or_raise(options.root, selected)
     except (FileNotFoundError, UnicodeDecodeError, ValueError, tokenize.TokenError) as error:
         print(f"forbidden-capability scanner error: {error}", file=sys.stderr)
         return 2
@@ -1099,5 +1136,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
 # --------------------------------------------------------
 
 
+# Forward the scanner's conventional status only when this file is invoked as a command.
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(report_forbidden_capability_findings())

@@ -1,16 +1,17 @@
 # Repository Layout
 
-> **Purpose:** Describe the implemented M1-M3 and accepted M4 source/test ownership boundaries,
-> later growth direction, and dependency rules that expose current coupling and prevent empty
-> scaffolding or hidden new cycles.
+> **Purpose:** Describe the implemented M1-M4 source/test ownership boundaries, later growth
+> direction, and dependency rules that expose current coupling and prevent empty scaffolding or
+> hidden new cycles.
 
-**Status:** The directories used through M3 are implemented and integrated. The intended dependency
-direction has documented M2 and M3 same-library coupling described below; the folder graph is not
+**Status:** The directories used by the integrated M1-M4 foundation are implemented. The intended
+dependency direction has documented same-library coupling described below; the folder graph is not
 claimed to be acyclic. Strategy and bot contracts live with their serialized owner under `runtime`;
-there is no separate empty `strategy` area. [PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10)
-merged the final M3 feature tree unchanged into `dev` as
-`962eb8602c13c1930a74c59232f96920482edb2b`; areas named for later milestones remain
-**Proposed**. Runtime ownership
+there is no separate empty `strategy` area. M3 was integrated through
+[PR #10](https://github.com/KomodorDev/project-AEGIS/pull/10) at merge commit
+`962eb8602c13c1930a74c59232f96920482edb2b`; subsequent M4 policy, private-event, correlation,
+fake-recovery, provenance, and semantic-evidence foundations are integrated in the current baseline.
+Areas named for later milestones remain **Proposed**. Runtime ownership
 follows [ADR-0001](../decisions/0001-serialized-data-plane-execution.md); M1 value and provenance
 boundaries follow [ADR-0004](../decisions/0004-domain-value-contracts.md) and
 [ADR-0005](../decisions/0005-immutable-configuration-provenance.md); M2 runtime and market ownership
@@ -39,7 +40,7 @@ The source layout should make it easy to answer three questions:
 Directories are added only when the first real implementation or test needs them. Empty scaffolding
 and `.gitkeep` files do not establish useful architecture.
 
-## Implemented M1-M3 Source Shape
+## Implemented M1-M4 Source Shape
 
 Headers shared across repository targets live under `include/aegis`; implementations mirror their
 owning area under `src/aegis`. This is a source-build boundary, not a stable installed API or ABI.
@@ -132,7 +133,10 @@ not as permission to reach through another component's immutable API and mutate 
 Avoid generic directories such as `common`, `utils`, or `core`. A reusable helper remains with the
 subsystem that gives it meaning until there is evidence of a genuinely independent abstraction.
 
-## Implemented M1-M3 Test Shape
+## Implemented M1-M4 Test Shape
+
+The test tree keeps focused unit/tooling contracts separate from milestone-spanning deterministic
+scenarios and from benchmark measurement code.
 
 ```text
 tests/

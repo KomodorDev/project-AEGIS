@@ -27,7 +27,7 @@ void record_successful_allocation() noexcept {
 
 // --------------------------------------------------------
 // Allocate one ordinary block before publishing its successful allocation observation.
-[[nodiscard]] void* allocate(std::size_t size) {
+[[nodiscard]] void* allocate_tracked_block(std::size_t size) {
   void* const pointer = std::malloc(size == 0U ? 1U : size);
   if (pointer == nullptr) {
     throw std::bad_alloc{};
@@ -38,7 +38,7 @@ void record_successful_allocation() noexcept {
 
 // --------------------------------------------------------
 // Honor C++ over-alignment through the platform allocator and count only successful blocks.
-[[nodiscard]] void* allocate_aligned(std::size_t size, std::align_val_t alignment) {
+[[nodiscard]] void* allocate_tracked_aligned_block(std::size_t size, std::align_val_t alignment) {
   void* pointer = nullptr;
   const auto byte_alignment = static_cast<std::size_t>(alignment);
   if (posix_memalign(&pointer, byte_alignment, size == 0U ? 1U : size) != 0) {
@@ -54,14 +54,14 @@ void record_successful_allocation() noexcept {
 
 // --------------------------------------------------------
 // Reset and enable the calling thread's bounded measurement interval.
-void begin() noexcept {
+void begin_allocation_interval() noexcept {
   successful_allocations = 0U;
   tracking_enabled = true;
 }
 
 // --------------------------------------------------------
 // Disable observation before returning the interval's exact successful-allocation count.
-std::uint64_t finish() noexcept {
+std::uint64_t finish_allocation_interval() noexcept {
   tracking_enabled = false;
   return successful_allocations;
 }
@@ -74,19 +74,21 @@ std::uint64_t finish() noexcept {
 // Interesting syntax: replaceable global allocation overloads let one shared scoped counter observe
 // library containers and every benchmark translation unit without duplicate operator definitions.
 void* operator new(std::size_t size) {
-  return aegis_benchmark_support::allocation_tracking::allocate(size);
+  return aegis_benchmark_support::allocation_tracking::allocate_tracked_block(size);
 }
 
 void* operator new[](std::size_t size) {
-  return aegis_benchmark_support::allocation_tracking::allocate(size);
+  return aegis_benchmark_support::allocation_tracking::allocate_tracked_block(size);
 }
 
 void* operator new(std::size_t size, std::align_val_t alignment) {
-  return aegis_benchmark_support::allocation_tracking::allocate_aligned(size, alignment);
+  return aegis_benchmark_support::allocation_tracking::allocate_tracked_aligned_block(size,
+                                                                                      alignment);
 }
 
 void* operator new[](std::size_t size, std::align_val_t alignment) {
-  return aegis_benchmark_support::allocation_tracking::allocate_aligned(size, alignment);
+  return aegis_benchmark_support::allocation_tracking::allocate_tracked_aligned_block(size,
+                                                                                      alignment);
 }
 
 // --------------------------------------------------------

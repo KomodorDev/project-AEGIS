@@ -17,6 +17,9 @@ cannot accidentally be reported as platform-wide or integration proof.
 
 ## Scope evidence
 
+The table maps every promised M0 scope item to the repository artifact or operating contract that
+supplies it.
+
 | Gate | Evidence |
 |---|---|
 | `M0-S01` Toolchain choices | [ADR-0002](../decisions/0002-delivery-toolchain.md), `CMakeLists.txt`, and `CMakePresets.json` |
@@ -30,6 +33,8 @@ cannot accidentally be reported as platform-wide or integration proof.
 
 ## Exit-gate evidence
 
+The table records the reproducible proof and current completion state for every M0 exit condition.
+
 | Gate | Reproducible evidence | State |
 |---|---|---|
 | `M0-E01` Fresh checkout configures, builds, and tests with one command locally and in CI | `cmake --workflow --preset verify`; identical command in README and compiler-matrix CI jobs | Local pass: arm64 macOS 15.7.4 / AppleClang 16; remote Linux/macOS matrix pass in [run 32158462423](https://github.com/KomodorDev/project-AEGIS/actions/runs/32158462423) |
@@ -39,6 +44,9 @@ cannot accidentally be reported as platform-wide or integration proof.
 | `M0-E05` Default path needs no credential or production endpoint | Build graph contains only local AEGIS code and checksum-pinned test dependencies; no exchange client or transmission target exists | Complete |
 
 ## Commands to record before closure
+
+Run and retain the result of each command below at the exact candidate revision before claiming M0
+closure.
 
 ```sh
 cmake --workflow --preset verify

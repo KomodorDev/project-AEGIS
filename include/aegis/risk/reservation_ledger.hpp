@@ -41,6 +41,7 @@ struct ReservationEvidence {
   OrderExposure exposure;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete reservation identity, state, side, and economics.
   friend bool operator==(const ReservationEvidence&, const ReservationEvidence&) = default;
 
   // --------------------------------------------------------
@@ -63,6 +64,7 @@ struct RiskScopeExposure {
   model::Notional worst_case_position_quote_notional;
 
   // --------------------------------------------------------
+  // Structural equality compares every coherent mutable exposure cell in the scope projection.
   friend bool operator==(const RiskScopeExposure&, const RiskScopeExposure&) = default;
 
   // --------------------------------------------------------
@@ -82,6 +84,7 @@ struct RiskScopeExposureEvidence {
   RiskScopeExposure exposure;
 
   // --------------------------------------------------------
+  // Structural equality compares the complete policy key and its coherent exposure projection.
   friend bool operator==(const RiskScopeExposureEvidence&,
                          const RiskScopeExposureEvidence&) = default;
 
@@ -98,33 +101,39 @@ public:
 
   // --------------------------------------------------------
   // Construct an ordinary arithmetic or capacity rejection that has no limit evidence.
-  [[nodiscard]] static RiskCheckResult rejected(execution::SubmissionReason reason) noexcept {
+  [[nodiscard]] static RiskCheckResult
+  create_rejected_risk_check_result(execution::SubmissionReason reason) noexcept {
     return RiskCheckResult{reason, std::nullopt, std::nullopt, std::nullopt};
   }
 
   // --------------------------------------------------------
   // Construct the first exceeded fixed limit with its exact typed scope evidence.
   [[nodiscard]] static RiskCheckResult
-  rejected(execution::SubmissionReason reason,
-           execution::RiskLimitEvidence risk_evidence) noexcept {
+  create_rejected_risk_check_result(execution::SubmissionReason reason,
+                                    execution::RiskLimitEvidence risk_evidence) noexcept {
     return RiskCheckResult{reason, std::nullopt, std::nullopt, std::move(risk_evidence)};
   }
 
   // --------------------------------------------------------
-  [[nodiscard]] bool reserved() const noexcept { return reservation_id_.has_value(); }
+  // Report whether the check atomically committed a held reservation.
+  [[nodiscard]] bool is_reserved() const noexcept { return reservation_id_.has_value(); }
 
   // --------------------------------------------------------
+  // Return the stable submission reason for the committed reservation or ordinary rejection.
   [[nodiscard]] execution::SubmissionReason reason() const noexcept { return reason_; }
 
   // --------------------------------------------------------
+  // Borrow the committed reservation identity, absent for every rejection.
   [[nodiscard]] const std::optional<model::ReservationId>& reservation_id() const noexcept {
     return reservation_id_;
   }
 
   // --------------------------------------------------------
+  // Borrow the once-calculated approved exposure, absent for every rejection.
   [[nodiscard]] const std::optional<OrderExposure>& exposure() const noexcept { return exposure_; }
 
   // --------------------------------------------------------
+  // Borrow exact exceeded-limit evidence when a fixed limit caused rejection.
   [[nodiscard]] const std::optional<execution::RiskLimitEvidence>& risk_evidence() const noexcept {
     return risk_evidence_;
   }
@@ -139,6 +148,7 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
+  // Retain one internally consistent success or rejection shape minted by ReservationLedger.
   RiskCheckResult(execution::SubmissionReason reason,
                   std::optional<model::ReservationId> reservation_id,
                   std::optional<OrderExposure> exposure,
@@ -164,10 +174,11 @@ public:
 
   // --------------------------------------------------------
   // Build all shared Count/Quantity/Notional/Directional cells and exactly capacity reusable slots.
-  [[nodiscard]] static model::Result<ReservationLedger> create(RiskPolicySnapshot policy,
-                                                               std::uint32_t capacity);
+  [[nodiscard]] static model::Result<ReservationLedger>
+  create_reservation_ledger(RiskPolicySnapshot policy, std::uint32_t capacity);
 
   // --------------------------------------------------------
+  // Keep sole ownership of the preallocated ledger while allowing explicit owner relocation.
   ReservationLedger(const ReservationLedger&) = delete;
   ReservationLedger& operator=(const ReservationLedger&) = delete;
   ReservationLedger(ReservationLedger&&) noexcept;
@@ -184,15 +195,18 @@ public:
 
   // --------------------------------------------------------
   // Apply stored inverse deltas and transition one matching Held reservation exactly once.
-  [[nodiscard]] model::Result<void> release(model::ReservationId reservation_id);
+  [[nodiscard]] model::Result<void> release_reservation(model::ReservationId reservation_id);
 
   // --------------------------------------------------------
+  // Borrow the immutable policy against which every reservation is checked.
   [[nodiscard]] const RiskPolicySnapshot& policy() const noexcept;
 
   // --------------------------------------------------------
+  // Return the fixed number of reusable reservation slots allocated at construction.
   [[nodiscard]] std::uint32_t capacity() const noexcept;
 
   // --------------------------------------------------------
+  // Return the number of slots currently retaining held exposure.
   [[nodiscard]] std::uint32_t held_reservation_count() const noexcept;
 
   // --------------------------------------------------------
@@ -216,25 +230,26 @@ public:
   scope_evidence_at(std::size_t canonical_index) const;
 
   // --------------------------------------------------------
-  // Recompose one coherent scope projection from its shared mutable cells without mutation.
+  // Calculate one coherent scope projection from its shared mutable cells without mutation.
   [[nodiscard]] std::optional<RiskScopeExposure>
-  scope_exposure(const model::FirmId& firm_id, RiskScopeKind scope, std::string_view scope_subject,
-                 const model::InstrumentId& instrument_id,
-                 std::string_view quote_currency) const noexcept;
+  calculate_scope_exposure(const model::FirmId& firm_id, RiskScopeKind scope,
+                           std::string_view scope_subject, const model::InstrumentId& instrument_id,
+                           std::string_view quote_currency) const noexcept;
 
 private:
 
   // ########################################################################
   // Hide the fixed risk-cell and reservation-slot representation behind one stable owner handle.
-  struct Impl;
+  struct ReservationLedgerStorage;
 
   // ########################################################################
 
   // --------------------------------------------------------
-  explicit ReservationLedger(std::unique_ptr<Impl> implementation) noexcept;
+  // Adopt the completely allocated private storage after factory validation succeeds.
+  explicit ReservationLedger(std::unique_ptr<ReservationLedgerStorage> implementation) noexcept;
 
   // --------------------------------------------------------
-  std::unique_ptr<Impl> implementation_;
+  std::unique_ptr<ReservationLedgerStorage> implementation_;
 };
 
 // ########################################################################

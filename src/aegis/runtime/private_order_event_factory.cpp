@@ -16,16 +16,18 @@ namespace {
 // Return the stable attempt-shape failure without exposing an open caller detail channel.
 [[nodiscard]] model::Result<oms::PrivateOrderIngressAttempt>
 private_order_ingress_attempt_failure_from_field(std::string_view field) {
-  return model::Result<oms::PrivateOrderIngressAttempt>::failure(model::DomainError::at_field(
-      model::DomainErrorCode::InvalidPrivateEvent, std::string{field}));
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_failure(
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                          std::string{field}));
 }
 
 // --------------------------------------------------------
 // Return the equivalent normalized-input failure for reconciliation compatibility paths.
 [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
 normalized_private_order_input_failure_from_field(std::string_view field) {
-  return model::Result<oms::NormalizedPrivateOrderInput>::failure(model::DomainError::at_field(
-      model::DomainErrorCode::InvalidPrivateEvent, std::string{field}));
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                          std::string{field}));
 }
 
 // --------------------------------------------------------
@@ -156,7 +158,7 @@ PrivateOrderEventFactory::create_venue_acknowledgement_attempt(
     std::optional<model::OrderId> local_order_locator) const {
   const auto account = origin.event_key.logical_account_id;
   const auto venue = origin.event_key.venue_id;
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       create_authoritative_private_order_ingress_attempt(
           std::move(origin), account, venue, std::nullopt,
           oms::ExchangeAcknowledgedPayload{std::move(exchange_order_id),
@@ -174,9 +176,9 @@ PrivateOrderEventFactory::normalize_venue_acknowledgement(
       oms::VenuePrivateIngressOrigin{std::move(origin.event_key), origin.source_time},
       std::move(exchange_order_id), std::move(local_order_locator));
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 
@@ -196,7 +198,7 @@ PrivateOrderEventFactory::normalize_reconciliation_acknowledgement(
       std::move(logical_account_id), std::move(venue_id), source_instrument_id,
       oms::ExchangeAcknowledgedPayload{std::move(exchange_order_id),
                                        std::move(local_order_locator)});
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt, received_at));
 }
 
@@ -210,13 +212,13 @@ PrivateOrderEventFactory::create_venue_rejection_attempt(oms::VenuePrivateIngres
   if (!is_exchange_rejection_category_assigned(category)) {
     return private_order_ingress_attempt_failure_from_field("private_event.rejection_category");
   }
-  auto retained_detail = oms::PrivateRejectionDetail::create(detail);
+  auto retained_detail = oms::PrivateRejectionDetail::create_private_rejection_detail(detail);
   if (!retained_detail) {
-    return model::Result<oms::PrivateOrderIngressAttempt>::failure(retained_detail.error());
+    return model::Result<oms::PrivateOrderIngressAttempt>::create_failure(retained_detail.error());
   }
   const auto account = origin.event_key.logical_account_id;
   const auto venue = origin.event_key.venue_id;
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       create_authoritative_private_order_ingress_attempt(
           std::move(origin), account, venue, std::nullopt,
           oms::ExchangeRejectedPayload{std::move(locator), category,
@@ -233,9 +235,9 @@ model::Result<oms::NormalizedPrivateOrderInput> PrivateOrderEventFactory::normal
       oms::VenuePrivateIngressOrigin{std::move(origin.event_key), origin.source_time},
       std::move(locator), category, detail);
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 
@@ -249,9 +251,9 @@ PrivateOrderEventFactory::normalize_reconciliation_rejection(
   if (!is_exchange_rejection_category_assigned(category)) {
     return normalized_private_order_input_failure_from_field("private_event.rejection_category");
   }
-  auto retained_detail = oms::PrivateRejectionDetail::create(detail);
+  auto retained_detail = oms::PrivateRejectionDetail::create_private_rejection_detail(detail);
   if (!retained_detail) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(retained_detail.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(retained_detail.error());
   }
   const auto received_at = origin.receive_time;
   const auto attempt = create_authoritative_private_order_ingress_attempt(
@@ -261,7 +263,7 @@ PrivateOrderEventFactory::normalize_reconciliation_rejection(
       std::move(logical_account_id), std::move(venue_id), std::nullopt,
       oms::ExchangeRejectedPayload{std::move(locator), category,
                                    std::move(retained_detail).value()});
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt, received_at));
 }
 
@@ -282,7 +284,7 @@ PrivateOrderEventFactory::create_venue_execution_attempt(
   const auto account = origin.event_key.logical_account_id;
   const auto venue = origin.event_key.venue_id;
   const auto source_instrument = instrument_id;
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       create_authoritative_private_order_ingress_attempt(
           std::move(origin), account, venue, source_instrument,
           oms::ExecutionPayload{std::move(locator), std::move(trade_id), std::move(instrument_id),
@@ -303,9 +305,9 @@ model::Result<oms::NormalizedPrivateOrderInput> PrivateOrderEventFactory::normal
       std::move(locator), std::move(trade_id), std::move(instrument_id), metadata_revision,
       incremental_quantity, cumulative_quantity, execution_price, source_side);
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 
@@ -334,7 +336,7 @@ PrivateOrderEventFactory::normalize_reconciliation_execution(
       oms::ExecutionPayload{std::move(locator), std::move(trade_id), std::move(instrument_id),
                             metadata_revision, incremental_quantity, cumulative_quantity,
                             execution_price, source_side});
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt, received_at));
 }
 
@@ -353,7 +355,7 @@ PrivateOrderEventFactory::create_venue_cancellation_result_attempt(
   }
   const auto account = origin.event_key.logical_account_id;
   const auto venue = origin.event_key.venue_id;
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       create_authoritative_private_order_ingress_attempt(
           std::move(origin), account, venue, std::nullopt,
           oms::CancellationResultPayload{std::move(locator), result, std::nullopt,
@@ -368,7 +370,7 @@ PrivateOrderEventFactory::create_venue_cancel_rejection_attempt_with_causal_id(
     oms::CancelAttemptId causal_cancel_attempt_id) const {
   const auto account = origin.event_key.logical_account_id;
   const auto venue = origin.event_key.venue_id;
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       create_authoritative_private_order_ingress_attempt(
           std::move(origin), account, venue, std::nullopt,
           oms::CancellationResultPayload{std::move(locator),
@@ -388,9 +390,9 @@ PrivateOrderEventFactory::normalize_venue_cancellation_result(
       oms::VenuePrivateIngressOrigin{std::move(origin.event_key), origin.source_time},
       std::move(locator), result, terminal_cumulative_quantity);
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 
@@ -405,9 +407,9 @@ PrivateOrderEventFactory::normalize_venue_cancel_rejection_with_causal_id(
       oms::VenuePrivateIngressOrigin{std::move(origin.event_key), origin.source_time},
       std::move(locator), std::move(causal_cancel_attempt_id));
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 
@@ -432,7 +434,7 @@ PrivateOrderEventFactory::normalize_reconciliation_cancellation_result(
       std::move(logical_account_id), std::move(venue_id), std::nullopt,
       oms::CancellationResultPayload{std::move(locator), result, std::nullopt,
                                      terminal_cumulative_quantity});
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt, received_at));
 }
 
@@ -444,9 +446,9 @@ PrivateOrderEventFactory::create_account_timeout_attempt(oms::LocalPrivateIngres
                                                          model::VenueId venue_id) const {
   auto provenance = resolver_.create_configured_account_provenance(logical_account_id, venue_id);
   if (!provenance) {
-    return model::Result<oms::PrivateOrderIngressAttempt>::failure(provenance.error());
+    return model::Result<oms::PrivateOrderIngressAttempt>::create_failure(provenance.error());
   }
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       oms::PrivateOrderIngressAttempt{oms::PrivateEventIngressSemanticValue{
           std::move(origin), oms::PrivateEventSubjectScope::Account, std::move(logical_account_id),
           std::move(venue_id), std::move(provenance).value(),
@@ -464,9 +466,9 @@ PrivateOrderEventFactory::normalize_account_timeout(oms::LocalPrivateEventOrigin
       oms::LocalPrivateIngressOrigin{std::move(origin.event_id), origin.source_time},
       std::move(logical_account_id), std::move(venue_id));
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 
@@ -477,9 +479,9 @@ model::Result<oms::PrivateOrderIngressAttempt> PrivateOrderEventFactory::create_
     model::VenueId venue_id, oms::PrivateSourceEpochId affected_source_epoch_id) const {
   auto provenance = resolver_.create_configured_account_provenance(logical_account_id, venue_id);
   if (!provenance) {
-    return model::Result<oms::PrivateOrderIngressAttempt>::failure(provenance.error());
+    return model::Result<oms::PrivateOrderIngressAttempt>::create_failure(provenance.error());
   }
-  return model::Result<oms::PrivateOrderIngressAttempt>::success(
+  return model::Result<oms::PrivateOrderIngressAttempt>::create_success(
       oms::PrivateOrderIngressAttempt{oms::PrivateEventIngressSemanticValue{
           std::move(origin), oms::PrivateEventSubjectScope::PrivateSource,
           std::move(logical_account_id), std::move(venue_id), std::move(provenance).value(),
@@ -496,9 +498,9 @@ model::Result<oms::NormalizedPrivateOrderInput> PrivateOrderEventFactory::normal
       oms::LocalPrivateIngressOrigin{std::move(origin.event_id), origin.source_time},
       std::move(logical_account_id), std::move(venue_id), std::move(affected_source_epoch_id));
   if (!attempt) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::failure(attempt.error());
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
   }
-  return model::Result<oms::NormalizedPrivateOrderInput>::success(
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
       normalize_private_order_ingress_attempt(attempt.value(), received_at));
 }
 

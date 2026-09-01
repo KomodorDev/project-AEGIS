@@ -36,7 +36,7 @@ from run_benchmarks import (
     M3_RUN_NAMES,
     M3_SAMPLE_COUNT,
     M3_WORKLOAD_IDS,
-    worktree_fingerprint,
+    calculate_worktree_fingerprint_sha256_or_raise,
 )
 
 EXPECTED_AGGREGATES = {"mean", "median", "stddev", "cv"}
@@ -92,9 +92,9 @@ M3_RECORD_CONTRACTS = {
 
 
 # --------------------------------------------------------
-# Runs one repository-inspection command with strict failure propagation.
-def command_output(arguments: Sequence[str], *, cwd: Path) -> str:
-    """Run a repository-inspection command and return trimmed standard output."""
+# Execute one repository-inspection command, returning output or propagating its failure.
+def execute_command_for_output_or_raise(arguments: Sequence[str], *, cwd: Path) -> str:
+    """Return trimmed standard output; raise when repository inspection fails."""
 
     # check=True makes a broken Git checkout fail validation instead of producing partial evidence.
     completed = subprocess.run(
@@ -108,17 +108,17 @@ def command_output(arguments: Sequence[str], *, cwd: Path) -> str:
 
 
 # --------------------------------------------------------
-# Computes the canonical lowercase SHA-256 digest for one file.
-def sha256(path: Path) -> str:
+# Calculate the canonical lowercase SHA-256 digest for one file.
+def calculate_file_sha256(path: Path) -> str:
     """Return the lowercase SHA-256 digest of one evidence or executable file."""
 
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # --------------------------------------------------------
-# Loads evidence JSON while enforcing the object-shaped document contract.
-def read_json_object(path: Path) -> dict[str, Any]:
-    """Load a JSON document and require an object at its root."""
+# Parse one evidence JSON file, raising when its root is not an object.
+def parse_json_object_file_or_raise(path: Path) -> dict[str, Any]:
+    """Return one JSON object; raise for invalid JSON or a non-object document root."""
 
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
@@ -127,8 +127,8 @@ def read_json_object(path: Path) -> dict[str, Any]:
 
 
 # --------------------------------------------------------
-# Converts failed evidence invariants into one consistent validation error.
-def require(condition: bool, message: str) -> None:
+# Require one evidence invariant and convert failure into a consistent validation error.
+def require_evidence_condition(condition: bool, message: str) -> None:
     """Raise one consistent validation error when an evidence invariant is false."""
 
     if not condition:
@@ -141,7 +141,9 @@ def require_nonempty_string(document: dict[str, Any], key: str) -> str:
     """Return a required nonempty string field from a JSON object."""
 
     value = document.get(key)
-    require(isinstance(value, str) and bool(value), f"{key} must be a nonempty string")
+    require_evidence_condition(
+        isinstance(value, str) and bool(value), f"{key} must be a nonempty string"
+    )
     # The assertion narrows the static type after the runtime check above.
     assert isinstance(value, str)
     return value
@@ -153,7 +155,7 @@ def require_string_list(document: dict[str, Any], key: str) -> list[str]:
     """Return a required nonempty list containing only nonempty strings."""
 
     value = document.get(key)
-    require(
+    require_evidence_condition(
         isinstance(value, list)
         and bool(value)
         and all(isinstance(item, str) and item for item in value),
@@ -170,7 +172,7 @@ def require_nonnegative_number(document: dict[str, Any], key: str, *, location: 
     """Return one finite nonnegative number without accepting booleans as integers."""
 
     value = document.get(key)
-    require(
+    require_evidence_condition(
         isinstance(value, (int, float))
         and not isinstance(value, bool)
         and math.isfinite(value)
@@ -182,29 +184,33 @@ def require_nonnegative_number(document: dict[str, Any], key: str, *, location: 
 
 
 # --------------------------------------------------------
-# Parses one exact M2 configuration-attribution label.
-def m2_fingerprint_pair(record: dict[str, Any], *, location: str) -> tuple[str, str]:
+# Parse one exact M2 configuration-attribution label or raise for invalid evidence.
+def parse_m2_fingerprint_pair_or_raise(record: dict[str, Any], *, location: str) -> tuple[str, str]:
     """Return the two lowercase SHA-256 fingerprints encoded in one exact M2 record label."""
 
     label = record.get("label")
-    require(isinstance(label, str), f"{location} label must be a string")
+    require_evidence_condition(isinstance(label, str), f"{location} label must be a string")
     assert isinstance(label, str)
     match = VALID_M2_FINGERPRINT_LABEL.fullmatch(label)
-    require(match is not None, f"{location} label has invalid fingerprint grammar")
+    require_evidence_condition(
+        match is not None, f"{location} label has invalid fingerprint grammar"
+    )
     assert match is not None
     return match.group(1), match.group(2)
 
 
 # --------------------------------------------------------
-# Parses one exact M3 provenance label into the same typed object stored in the manifest.
-def m3_provenance(record: dict[str, Any], *, location: str) -> dict[str, object]:
+# Parse one exact M3 provenance label or raise for invalid evidence.
+def parse_m3_provenance_or_raise(record: dict[str, Any], *, location: str) -> dict[str, object]:
     """Return every canonical M3 benchmark-provenance field from one anchored label."""
 
     label = record.get("label")
-    require(isinstance(label, str), f"{location} label must be a string")
+    require_evidence_condition(isinstance(label, str), f"{location} label must be a string")
     assert isinstance(label, str)
     match = M3_PROVENANCE_LABEL_PATTERN.fullmatch(label)
-    require(match is not None, f"{location} label has invalid M3 provenance grammar")
+    require_evidence_condition(
+        match is not None, f"{location} label has invalid M3 provenance grammar"
+    )
     assert match is not None
     numeric_keys = {
         "configuration_revision",
@@ -225,47 +231,53 @@ def require_ref_mac_01_context(manifest: dict[str, Any]) -> None:
     """Reject a qualification label unless all hardware, toolchain, and control facts are exact."""
 
     # Qualification is conjunctive: unknown, approximate, or free-form conditions remain smoke.
-    require(
+    require_evidence_condition(
         str(manifest.get("operating_system", "")).startswith("macOS-15."),
         "qualification operating_system must identify macOS 15",
     )
-    require(manifest.get("host_model") == "MacBookPro18,2", "qualification host_model mismatch")
-    require(manifest.get("machine") == "arm64", "qualification machine must equal arm64")
-    require(manifest.get("cpu_model") == "Apple M1 Max", "qualification cpu_model mismatch")
-    require(
+    require_evidence_condition(
+        manifest.get("host_model") == "MacBookPro18,2", "qualification host_model mismatch"
+    )
+    require_evidence_condition(
+        manifest.get("machine") == "arm64", "qualification machine must equal arm64"
+    )
+    require_evidence_condition(
+        manifest.get("cpu_model") == "Apple M1 Max", "qualification cpu_model mismatch"
+    )
+    require_evidence_condition(
         manifest.get("total_memory_bytes") == 32 * 1024 * 1024 * 1024,
         "qualification memory must equal 32 GiB",
     )
-    require(
+    require_evidence_condition(
         manifest.get("logical_core_count") == 10,
         "qualification logical_core_count must equal 10",
     )
-    require(
+    require_evidence_condition(
         manifest.get("physical_core_count") == 10,
         "qualification physical_core_count must equal 10",
     )
-    require(
+    require_evidence_condition(
         str(manifest.get("compiler", "")).startswith("Apple clang version 16."),
         "qualification compiler must identify AppleClang 16",
     )
-    require(
+    require_evidence_condition(
         manifest.get("power_mode") == CONTROLLED_POWER_MODE,
         f"qualification power_mode must equal {CONTROLLED_POWER_MODE}",
     )
-    require(
+    require_evidence_condition(
         manifest.get("host_isolation") == CONTROLLED_HOST_ISOLATION,
         f"qualification host_isolation must equal {CONTROLLED_HOST_ISOLATION}",
     )
-    require(
+    require_evidence_condition(
         manifest.get("thermal_state") == CONTROLLED_THERMAL_STATE,
         f"qualification thermal_state must equal {CONTROLLED_THERMAL_STATE}",
     )
 
 
 # --------------------------------------------------------
-# Defines the M0/M2/M3 suite selector and repository-relative result default.
-def parse_arguments() -> argparse.Namespace:
-    """Select M0 by default or one explicit suite and repository-relative evidence directory."""
+# Parse the M0/M2/M3 CLI selector and result default, or exit for invalid input.
+def parse_cli_arguments_or_exit() -> argparse.Namespace:
+    """Select M0 by default or one explicit suite and results directory; exit for invalid input."""
 
     repository = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
@@ -284,19 +296,27 @@ def parse_arguments() -> argparse.Namespace:
 
 
 # --------------------------------------------------------
-# Validates the build, host, hash, and raw-producer fields shared by every suite.
-def validate_common_bundle(
+# Validate shared build, host, hash, and producer fields or raise for inconsistent evidence.
+def validate_common_bundle_or_raise(
     raw: dict[str, Any], manifest: dict[str, Any], raw_path: Path
 ) -> tuple[Path, list[str]]:
-    """Validate common manifest context and return its resolved executable and benchmark command."""
+    """Return the resolved executable and benchmark command, or raise for invalid common context."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Require one optimized Ninja build and an explicit dirty-state observation.
-    require(manifest.get("schema_version") == 1, "schema_version must equal 1")
-    require(manifest.get("build_preset") == "release", "build_preset must equal release")
-    require(manifest.get("build_type") == "Release", "build_type must equal Release")
-    require(manifest.get("build_system") == "Ninja", "build_system must equal Ninja")
-    require(type(manifest.get("git_worktree_dirty")) is bool, "git_worktree_dirty must be boolean")
+    require_evidence_condition(manifest.get("schema_version") == 1, "schema_version must equal 1")
+    require_evidence_condition(
+        manifest.get("build_preset") == "release", "build_preset must equal release"
+    )
+    require_evidence_condition(
+        manifest.get("build_type") == "Release", "build_type must equal Release"
+    )
+    require_evidence_condition(
+        manifest.get("build_system") == "Ninja", "build_system must equal Ninja"
+    )
+    require_evidence_condition(
+        type(manifest.get("git_worktree_dirty")) is bool, "git_worktree_dirty must be boolean"
+    )
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Verify required descriptive fields together with numeric host topology and memory.
@@ -325,38 +345,47 @@ def validate_common_bundle(
         require_nonempty_string(manifest, key)
     for key in ("logical_core_count", "total_memory_bytes"):
         value = manifest.get(key)
-        require(type(value) is int and value > 0, f"{key} must be a positive integer")
+        require_evidence_condition(
+            type(value) is int and value > 0, f"{key} must be a positive integer"
+        )
     physical_cores = manifest.get("physical_core_count")
-    require(
+    require_evidence_condition(
         physical_cores is None or (type(physical_cores) is int and physical_cores > 0),
         "physical_core_count must be null or a positive integer",
     )
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Cross-check the raw file, recorded commands, and executable against recorded hashes.
-    require(manifest["benchmark_result"] == raw_path.name, "benchmark_result names the wrong file")
-    require(manifest["benchmark_result_sha256"] == sha256(raw_path), "raw result SHA-256 mismatch")
+    require_evidence_condition(
+        manifest["benchmark_result"] == raw_path.name, "benchmark_result names the wrong file"
+    )
+    require_evidence_condition(
+        manifest["benchmark_result_sha256"] == calculate_file_sha256(raw_path),
+        "raw result SHA-256 mismatch",
+    )
     executable = Path(manifest["benchmark_executable"]).resolve()
-    require(executable.is_file(), f"benchmark executable is missing: {executable}")
-    require(
-        manifest["benchmark_executable_sha256"] == sha256(executable),
+    require_evidence_condition(
+        executable.is_file(), f"benchmark executable is missing: {executable}"
+    )
+    require_evidence_condition(
+        manifest["benchmark_executable_sha256"] == calculate_file_sha256(executable),
         "benchmark executable SHA-256 mismatch",
     )
     build_command = require_string_list(manifest, "build_command")
     benchmark_command = require_string_list(manifest, "benchmark_command")
-    require(
+    require_evidence_condition(
         build_command[1:] == ["--build", "--preset", "release", "--target", "aegis_benchmarks"],
         "build_command does not rebuild the release benchmark target",
     )
-    require(
+    require_evidence_condition(
         Path(benchmark_command[0]).resolve() == executable,
         "benchmark_command uses another executable",
     )
-    require(
+    require_evidence_condition(
         f"--benchmark_out={raw_path}" in benchmark_command,
         "benchmark_command writes to another result file",
     )
-    require(
+    require_evidence_condition(
         "--benchmark_out_format=json" in benchmark_command,
         "benchmark_command does not request JSON output",
     )
@@ -364,18 +393,20 @@ def validate_common_bundle(
     # ++++++++++++++++++++++++++++++++++++++++
     # Inspect producer context so manifest claims cannot drift from the raw benchmark output.
     raw_context = raw.get("context")
-    require(isinstance(raw_context, dict), "raw benchmark context must be an object")
+    require_evidence_condition(
+        isinstance(raw_context, dict), "raw benchmark context must be an object"
+    )
     assert isinstance(raw_context, dict)
     library_build_type = raw_context.get("library_build_type")
-    require(
+    require_evidence_condition(
         isinstance(library_build_type, str) and library_build_type.lower() == "release",
         "raw library build is not release",
     )
-    require(
+    require_evidence_condition(
         raw_context.get("library_version") == manifest["google_benchmark_library_version"],
         "Google Benchmark library version mismatch",
     )
-    require(
+    require_evidence_condition(
         Path(str(raw_context.get("executable"))).resolve() == executable,
         "raw result names another executable",
     )
@@ -385,16 +416,18 @@ def validate_common_bundle(
 
 
 # --------------------------------------------------------
-# Preserves the established M0 aggregate and command contract while accepting its new exact filter.
-def validate_m0(
+# Validate the established M0 aggregate and command contract or raise for incompatible evidence.
+def validate_m0_or_raise(
     raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]
 ) -> None:
-    """Validate the M0 calibration identity, repetitions, aggregates, and optional legacy filter."""
+    """Accept the valid M0 identity, repetitions, aggregates, and filter, or raise on mismatch."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Retain every original schema-one M0 identity and sample requirement.
-    require(manifest.get("workload_id") == M0_WORKLOAD_ID, "unexpected workload_id")
-    require(manifest.get("sample_count") == 3, "sample_count must equal 3")
+    require_evidence_condition(
+        manifest.get("workload_id") == M0_WORKLOAD_ID, "unexpected workload_id"
+    )
+    require_evidence_condition(manifest.get("sample_count") == 3, "sample_count must equal 3")
 
     # ++++++++++++++++++++++++++++++++++++++++
     # New runs must carry the exact anchored M0 filter; an absent filter remains accepted so the
@@ -402,7 +435,7 @@ def validate_m0(
     filters = [
         argument for argument in benchmark_command if argument.startswith("--benchmark_filter=")
     ]
-    require(
+    require_evidence_condition(
         filters in ([], [f"--benchmark_filter={M0_BENCHMARK_FILTER}"]),
         "M0 benchmark_command has a wrong or ambiguous filter",
     )
@@ -410,50 +443,64 @@ def validate_m0(
     # ++++++++++++++++++++++++++++++++++++++++
     # Require every raw record to remain an aggregate of the sole calibration workload.
     benchmarks = raw.get("benchmarks")
-    require(isinstance(benchmarks, list) and bool(benchmarks), "raw benchmarks must be nonempty")
+    require_evidence_condition(
+        isinstance(benchmarks, list) and bool(benchmarks), "raw benchmarks must be nonempty"
+    )
     assert isinstance(benchmarks, list)
     aggregates: set[str] = set()
     for index, benchmark in enumerate(benchmarks):
-        require(isinstance(benchmark, dict), f"benchmark record {index} must be an object")
+        require_evidence_condition(
+            isinstance(benchmark, dict), f"benchmark record {index} must be an object"
+        )
         assert isinstance(benchmark, dict)
-        require(
+        require_evidence_condition(
             benchmark.get("run_name") == M0_RUN_NAME,
             f"benchmark record {index} has wrong run_name",
         )
-        require(
+        require_evidence_condition(
             benchmark.get("repetitions") == 3,
             f"benchmark record {index} has wrong repetitions",
         )
         name = benchmark.get("name")
-        require(
+        require_evidence_condition(
             isinstance(name, str) and name.startswith(f"{M0_RUN_NAME}_"),
             f"benchmark record {index} has wrong name",
         )
         aggregate = benchmark.get("aggregate_name")
-        require(isinstance(aggregate, str), f"benchmark record {index} has no aggregate_name")
+        require_evidence_condition(
+            isinstance(aggregate, str), f"benchmark record {index} has no aggregate_name"
+        )
         aggregates.add(aggregate)
-    require(EXPECTED_AGGREGATES <= aggregates, "raw result is missing required aggregates")
+    require_evidence_condition(
+        EXPECTED_AGGREGATES <= aggregates, "raw result is missing required aggregates"
+    )
 
     # ++++++++++++++++++++++++++++++++++++++++
 
 
 # --------------------------------------------------------
-# Validates exact M2 identities, metrics, attribution, and controlled-host threshold eligibility.
-def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]) -> str:
-    """Validate all three fixed M2 workloads and return their evidence classification."""
+# Validate exact M2 identities, metrics, attribution, and threshold eligibility or raise.
+def validate_m2_or_raise(
+    raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]
+) -> str:
+    """Return the classification for all three valid M2 workloads, or raise for invalid evidence."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Require one exact suite identity, ordered workload list, and fixed sample count per workload.
-    require(manifest.get("benchmark_suite") == "m2", "benchmark_suite must equal m2")
-    require(manifest.get("workload_ids") == list(M2_WORKLOAD_IDS), "unexpected M2 workload_ids")
-    require(
+    require_evidence_condition(
+        manifest.get("benchmark_suite") == "m2", "benchmark_suite must equal m2"
+    )
+    require_evidence_condition(
+        manifest.get("workload_ids") == list(M2_WORKLOAD_IDS), "unexpected M2 workload_ids"
+    )
+    require_evidence_condition(
         manifest.get("sample_count") == M2_SAMPLE_COUNT,
         f"sample_count must equal {M2_SAMPLE_COUNT}",
     )
     filters = [
         argument for argument in benchmark_command if argument.startswith("--benchmark_filter=")
     ]
-    require(
+    require_evidence_condition(
         filters == [f"--benchmark_filter={M2_BENCHMARK_FILTER}"],
         "M2 benchmark_command must carry the exact anchored suite filter",
     )
@@ -461,7 +508,7 @@ def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     # ++++++++++++++++++++++++++++++++++++++++
     # Index exactly three non-aggregate raw records by their complete registered run identities.
     benchmarks = raw.get("benchmarks")
-    require(
+    require_evidence_condition(
         isinstance(benchmarks, list) and len(benchmarks) == len(M2_RUN_NAMES),
         "raw M2 benchmarks must contain exactly three records",
     )
@@ -470,25 +517,37 @@ def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     fingerprint_pairs: set[tuple[str, str]] = set()
     for index, record in enumerate(benchmarks):
         location = f"benchmark record {index}"
-        require(isinstance(record, dict), f"{location} must be an object")
+        require_evidence_condition(isinstance(record, dict), f"{location} must be an object")
         assert isinstance(record, dict)
         run_name = record.get("run_name")
-        require(run_name in M2_RECORD_CONTRACTS, f"{location} has an unexpected run_name")
+        require_evidence_condition(
+            run_name in M2_RECORD_CONTRACTS, f"{location} has an unexpected run_name"
+        )
         assert isinstance(run_name, str)
-        require(run_name not in records, f"{location} duplicates {run_name}")
-        require(record.get("name") == run_name, f"{location} name must equal run_name")
-        require(record.get("run_type") == "iteration", f"{location} must be an iteration record")
-        require(record.get("repetitions") == 1, f"{location} repetitions must equal 1")
+        require_evidence_condition(run_name not in records, f"{location} duplicates {run_name}")
+        require_evidence_condition(
+            record.get("name") == run_name, f"{location} name must equal run_name"
+        )
+        require_evidence_condition(
+            record.get("run_type") == "iteration", f"{location} must be an iteration record"
+        )
+        require_evidence_condition(
+            record.get("repetitions") == 1, f"{location} repetitions must equal 1"
+        )
         records[run_name] = record
-        fingerprint_pairs.add(m2_fingerprint_pair(record, location=location))
-    require(set(records) == set(M2_RUN_NAMES), "raw M2 records have wrong identities")
-    require(len(fingerprint_pairs) == 1, "M2 records do not share one fingerprint pair")
+        fingerprint_pairs.add(parse_m2_fingerprint_pair_or_raise(record, location=location))
+    require_evidence_condition(
+        set(records) == set(M2_RUN_NAMES), "raw M2 records have wrong identities"
+    )
+    require_evidence_condition(
+        len(fingerprint_pairs) == 1, "M2 records do not share one fingerprint pair"
+    )
     configuration_fingerprint, runtime_policy_fingerprint = next(iter(fingerprint_pairs))
-    require(
+    require_evidence_condition(
         manifest.get("configuration_fingerprint_sha256") == configuration_fingerprint,
         "configuration fingerprint does not match raw M2 labels",
     )
-    require(
+    require_evidence_condition(
         manifest.get("runtime_policy_fingerprint_sha256") == runtime_policy_fingerprint,
         "runtime-policy fingerprint does not match raw M2 labels",
     )
@@ -499,15 +558,19 @@ def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
         record = records[run_name]
         contract = M2_RECORD_CONTRACTS[run_name]
         location = run_name
-        require(
+        require_evidence_condition(
             record.get("iterations") == M2_SAMPLE_COUNT, f"{location} iterations must equal 10000"
         )
-        require(record.get("threads") == 1, f"{location} threads must equal 1")
-        require(record.get("time_unit") == contract["time_unit"], f"{location} has wrong time_unit")
+        require_evidence_condition(record.get("threads") == 1, f"{location} threads must equal 1")
+        require_evidence_condition(
+            record.get("time_unit") == contract["time_unit"], f"{location} has wrong time_unit"
+        )
         require_nonnegative_number(record, "real_time", location=location)
         require_nonnegative_number(record, "cpu_time", location=location)
         sample_count = require_nonnegative_number(record, "sample_count", location=location)
-        require(sample_count == M2_SAMPLE_COUNT, f"{location} sample_count must equal 10000")
+        require_evidence_condition(
+            sample_count == M2_SAMPLE_COUNT, f"{location} sample_count must equal 10000"
+        )
         for counter in contract["counters"]:
             assert isinstance(counter, str)
             require_nonnegative_number(record, counter, location=location)
@@ -522,37 +585,43 @@ def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
         p50 = require_nonnegative_number(record, "p50_us", location=run_name)
         p99 = require_nonnegative_number(record, "p99_us", location=run_name)
         p99_9 = require_nonnegative_number(record, "p99_9_us", location=run_name)
-        require(p50 <= p99 <= p99_9, f"{run_name} percentile counters are not monotonic")
+        require_evidence_condition(
+            p50 <= p99 <= p99_9, f"{run_name} percentile counters are not monotonic"
+        )
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Smoke evidence must contain no threshold claim. Only exact controlled REF-MAC-01 facts may
     # authorize the published M2 callback p99 qualification and cause its threshold to be tested.
     classification = manifest.get("evidence_classification")
-    require(classification in ("smoke", "qualification"), "invalid evidence_classification")
+    require_evidence_condition(
+        classification in ("smoke", "qualification"), "invalid evidence_classification"
+    )
     callback_p99 = require_nonnegative_number(
         records[M2_RUN_NAMES[1]], "p99_us", location=M2_RUN_NAMES[1]
     )
     if classification == "smoke":
-        require(
+        require_evidence_condition(
             "qualification_reference" not in manifest and "threshold_claims" not in manifest,
             "smoke evidence must not contain a threshold claim",
         )
         return "smoke"
 
     require_ref_mac_01_context(manifest)
-    require(
+    require_evidence_condition(
         manifest.get("qualification_reference") == "REF-MAC-01",
         "qualification_reference must equal REF-MAC-01",
     )
     claims = manifest.get("threshold_claims")
-    require(
+    require_evidence_condition(
         isinstance(claims, list) and len(claims) == 1, "qualification needs one threshold claim"
     )
     assert isinstance(claims, list)
-    require(isinstance(claims[0], dict), "qualification threshold claim must be an object")
+    require_evidence_condition(
+        isinstance(claims[0], dict), "qualification threshold claim must be an object"
+    )
     assert isinstance(claims[0], dict)
     claim = claims[0]
-    require(
+    require_evidence_condition(
         claim.get("workload_id") == M2_WORKLOAD_IDS[1]
         and claim.get("metric") == "p99_us"
         and claim.get("operator") == "<="
@@ -562,29 +631,37 @@ def validate_m2(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
         and claim.get("passed") == (callback_p99 <= 100.0),
         "callback qualification claim does not match the raw p99 observation",
     )
-    require(callback_p99 <= 100.0, "BENCH-M2-CALLBACK-001 p99 exceeds 100 microseconds")
+    require_evidence_condition(
+        callback_p99 <= 100.0, "BENCH-M2-CALLBACK-001 p99 exceeds 100 microseconds"
+    )
     return "qualification"
 
     # ++++++++++++++++++++++++++++++++++++++++
 
 
 # --------------------------------------------------------
-# Validates exact M3 identities, metrics, provenance, and two-claim qualification policy.
-def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]) -> str:
-    """Validate both fixed M3 submit workloads and return their evidence classification."""
+# Validate exact M3 identities, metrics, provenance, and two-claim policy or raise.
+def validate_m3_or_raise(
+    raw: dict[str, Any], manifest: dict[str, Any], benchmark_command: list[str]
+) -> str:
+    """Return the classification for both valid M3 workloads, or raise for invalid evidence."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Require the exact suite identity, workload order, sample count, and anchored binary filter.
-    require(manifest.get("benchmark_suite") == "m3", "benchmark_suite must equal m3")
-    require(manifest.get("workload_ids") == list(M3_WORKLOAD_IDS), "unexpected M3 workload_ids")
-    require(
+    require_evidence_condition(
+        manifest.get("benchmark_suite") == "m3", "benchmark_suite must equal m3"
+    )
+    require_evidence_condition(
+        manifest.get("workload_ids") == list(M3_WORKLOAD_IDS), "unexpected M3 workload_ids"
+    )
+    require_evidence_condition(
         manifest.get("sample_count") == M3_SAMPLE_COUNT,
         f"sample_count must equal {M3_SAMPLE_COUNT}",
     )
     filters = [
         argument for argument in benchmark_command if argument.startswith("--benchmark_filter=")
     ]
-    require(
+    require_evidence_condition(
         filters == [f"--benchmark_filter={M3_BENCHMARK_FILTER}"],
         "M3 benchmark_command must carry the exact anchored suite filter",
     )
@@ -592,7 +669,7 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     # ++++++++++++++++++++++++++++++++++++++++
     # Index exactly two nonaggregate records and parse each workload's immutable fixture identity.
     benchmarks = raw.get("benchmarks")
-    require(
+    require_evidence_condition(
         isinstance(benchmarks, list) and len(benchmarks) == len(M3_RUN_NAMES),
         "raw M3 benchmarks must contain exactly two records",
     )
@@ -601,41 +678,51 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     provenance_by_run: dict[str, dict[str, object]] = {}
     for index, record in enumerate(benchmarks):
         location = f"benchmark record {index}"
-        require(isinstance(record, dict), f"{location} must be an object")
+        require_evidence_condition(isinstance(record, dict), f"{location} must be an object")
         assert isinstance(record, dict)
         run_name = record.get("run_name")
-        require(run_name in M3_RECORD_CONTRACTS, f"{location} has an unexpected run_name")
+        require_evidence_condition(
+            run_name in M3_RECORD_CONTRACTS, f"{location} has an unexpected run_name"
+        )
         assert isinstance(run_name, str)
-        require(run_name not in records, f"{location} duplicates {run_name}")
-        require(record.get("name") == run_name, f"{location} name must equal run_name")
-        require(record.get("run_type") == "iteration", f"{location} must be an iteration record")
-        require(record.get("repetitions") == 1, f"{location} repetitions must equal 1")
+        require_evidence_condition(run_name not in records, f"{location} duplicates {run_name}")
+        require_evidence_condition(
+            record.get("name") == run_name, f"{location} name must equal run_name"
+        )
+        require_evidence_condition(
+            record.get("run_type") == "iteration", f"{location} must be an iteration record"
+        )
+        require_evidence_condition(
+            record.get("repetitions") == 1, f"{location} repetitions must equal 1"
+        )
         # Google Benchmark can attach failure or skip status to otherwise complete-looking metrics.
         for status_key in ("error_occurred", "skipped"):
             if status_key in record:
-                require(
+                require_evidence_condition(
                     record.get(status_key) is False,
                     f"{location} {status_key} must be false when present",
                 )
         for message_key in ("error_message", "skip_message"):
             if message_key in record:
-                require(
+                require_evidence_condition(
                     record.get(message_key) == "",
                     f"{location} {message_key} must be empty when present",
                 )
         records[run_name] = record
-        provenance_by_run[run_name] = m3_provenance(record, location=location)
-    require(set(records) == set(M3_RUN_NAMES), "raw M3 records have wrong identities")
+        provenance_by_run[run_name] = parse_m3_provenance_or_raise(record, location=location)
+    require_evidence_condition(
+        set(records) == set(M3_RUN_NAMES), "raw M3 records have wrong identities"
+    )
 
     # ++++++++++++++++++++++++++++++++++++++++
     # The manifest repeats the ordered raw labels exactly, preventing attribution substitution.
     ordered_provenance = [provenance_by_run[run_name] for run_name in M3_RUN_NAMES]
-    require(
+    require_evidence_condition(
         manifest.get("workload_provenance") == ordered_provenance,
         "workload_provenance does not match ordered raw M3 labels",
     )
     for index, expected_workload in enumerate(M3_WORKLOAD_IDS):
-        require(
+        require_evidence_condition(
             ordered_provenance[index].get("workload_id") == expected_workload,
             f"M3 provenance row {index} names another workload",
         )
@@ -651,12 +738,14 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     }
     for key in M3_PROVENANCE_KEYS:
         if key not in differing_keys:
-            require(left.get(key) == right.get(key), f"M3 shared provenance differs at {key}")
-    require(
+            require_evidence_condition(
+                left.get(key) == right.get(key), f"M3 shared provenance differs at {key}"
+            )
+    require_evidence_condition(
         left.get("risk_policy_fingerprint_sha256") != right.get("risk_policy_fingerprint_sha256"),
         "M3 workload risk-policy fingerprints must differ",
     )
-    require(
+    require_evidence_condition(
         left.get("submission_policy_fingerprint_sha256")
         != right.get("submission_policy_fingerprint_sha256"),
         "M3 workload submission-policy fingerprints must differ",
@@ -669,20 +758,26 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     for run_name, workload_id in zip(M3_RUN_NAMES, M3_WORKLOAD_IDS, strict=True):
         record = records[run_name]
         contract = M3_RECORD_CONTRACTS[run_name]
-        require(
+        require_evidence_condition(
             record.get("iterations") == M3_SAMPLE_COUNT,
             f"{run_name} iterations must equal {M3_SAMPLE_COUNT}",
         )
-        require(record.get("threads") == 1, f"{run_name} threads must equal 1")
-        require(record.get("time_unit") == "us", f"{run_name} time_unit must equal us")
+        require_evidence_condition(record.get("threads") == 1, f"{run_name} threads must equal 1")
+        require_evidence_condition(
+            record.get("time_unit") == "us", f"{run_name} time_unit must equal us"
+        )
         require_nonnegative_number(record, "real_time", location=run_name)
         require_nonnegative_number(record, "cpu_time", location=run_name)
         sample_count = require_nonnegative_number(record, "sample_count", location=run_name)
-        require(sample_count == M3_SAMPLE_COUNT, f"{run_name} sample_count must equal 10000")
+        require_evidence_condition(
+            sample_count == M3_SAMPLE_COUNT, f"{run_name} sample_count must equal 10000"
+        )
         p50 = require_nonnegative_number(record, "p50_us", location=run_name)
         p99 = require_nonnegative_number(record, "p99_us", location=run_name)
         p99_9 = require_nonnegative_number(record, "p99_9_us", location=run_name)
-        require(p50 <= p99 <= p99_9, f"{run_name} percentile counters are not monotonic")
+        require_evidence_condition(
+            p50 <= p99 <= p99_9, f"{run_name} percentile counters are not monotonic"
+        )
         rate_counter = contract["rate_counter"]
         allocation_counter = contract["allocation_counter"]
         assert isinstance(rate_counter, str) and isinstance(allocation_counter, str)
@@ -694,21 +789,23 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     # Smoke runs make no threshold statement. Qualification requires exactly the two ordered,
     # raw-bound REF-MAC-01 claims and both provisional p99 limits must pass.
     classification = manifest.get("evidence_classification")
-    require(classification in ("smoke", "qualification"), "invalid evidence_classification")
+    require_evidence_condition(
+        classification in ("smoke", "qualification"), "invalid evidence_classification"
+    )
     if classification == "smoke":
-        require(
+        require_evidence_condition(
             "qualification_reference" not in manifest and "threshold_claims" not in manifest,
             "smoke evidence must not contain threshold claims",
         )
         return "smoke"
 
     require_ref_mac_01_context(manifest)
-    require(
+    require_evidence_condition(
         manifest.get("qualification_reference") == "REF-MAC-01",
         "qualification_reference must equal REF-MAC-01",
     )
     claims = manifest.get("threshold_claims")
-    require(
+    require_evidence_condition(
         isinstance(claims, list) and len(claims) == 2,
         "M3 qualification needs exactly two threshold claims",
     )
@@ -716,10 +813,12 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
     limits = (50.0, 25.0)
     for index, (workload_id, limit) in enumerate(zip(M3_WORKLOAD_IDS, limits, strict=True)):
         claim = claims[index]
-        require(isinstance(claim, dict), f"M3 threshold claim {index} must be an object")
+        require_evidence_condition(
+            isinstance(claim, dict), f"M3 threshold claim {index} must be an object"
+        )
         assert isinstance(claim, dict)
         observed = p99_by_workload[workload_id]
-        require(
+        require_evidence_condition(
             claim.get("workload_id") == workload_id
             and claim.get("metric") == "p99_us"
             and claim.get("operator") == "<="
@@ -729,46 +828,52 @@ def validate_m3(raw: dict[str, Any], manifest: dict[str, Any], benchmark_command
             and claim.get("passed") == (observed <= limit),
             f"M3 threshold claim {index} does not match its raw p99 observation",
         )
-        require(observed <= limit, f"{workload_id} p99 exceeds {limit} microseconds")
+        require_evidence_condition(
+            observed <= limit, f"{workload_id} p99 exceeds {limit} microseconds"
+        )
     return "qualification"
 
     # ++++++++++++++++++++++++++++++++++++++++
 
 
 # --------------------------------------------------------
-# Proves that a manifest still describes the exact checkout being validated.
-def validate_repository_provenance(manifest: dict[str, Any], repository: Path) -> None:
-    """Cross-check Git revision, tree, dirty state, and byte-exact worktree fingerprint."""
+# Validate that a manifest still describes the exact checkout or raise for provenance drift.
+def validate_repository_provenance_or_raise(manifest: dict[str, Any], repository: Path) -> None:
+    """Cross-check Git revision, tree, dirty state, and fingerprint; raise for any mismatch."""
 
     # A committed revision alone is insufficient because benchmarkable source may be dirty.
-    require(
-        manifest["git_revision"] == command_output(["git", "rev-parse", "HEAD"], cwd=repository),
+    require_evidence_condition(
+        manifest["git_revision"]
+        == execute_command_for_output_or_raise(["git", "rev-parse", "HEAD"], cwd=repository),
         "git_revision does not match the current checkout",
     )
-    require(
+    require_evidence_condition(
         manifest["git_head_tree"]
-        == command_output(["git", "rev-parse", "HEAD^{tree}"], cwd=repository),
+        == execute_command_for_output_or_raise(["git", "rev-parse", "HEAD^{tree}"], cwd=repository),
         "git_head_tree does not match the current checkout",
     )
-    dirty = bool(command_output(["git", "status", "--porcelain"], cwd=repository))
-    require(
+    dirty = bool(
+        execute_command_for_output_or_raise(["git", "status", "--porcelain"], cwd=repository)
+    )
+    require_evidence_condition(
         manifest["git_worktree_dirty"] == dirty,
         "git_worktree_dirty no longer matches checkout",
     )
-    require(
-        manifest["git_worktree_fingerprint_sha256"] == worktree_fingerprint(repository),
+    require_evidence_condition(
+        manifest["git_worktree_fingerprint_sha256"]
+        == calculate_worktree_fingerprint_sha256_or_raise(repository),
         "git_worktree_fingerprint_sha256 no longer matches checkout",
     )
 
 
 # --------------------------------------------------------
-# Validates the selected complete benchmark bundle and its current repository provenance.
-def main() -> int:
-    """Validate schema, hashes, workload metrics, qualification policy, and Git provenance."""
+# Validate the selected benchmark bundle and repository provenance or raise for invalid evidence.
+def validate_benchmark_evidence_or_raise() -> int:
+    """Validate schema, hashes, metrics, policy, and Git provenance, or raise for a mismatch."""
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Resolve suite-specific bundle names from the same default used by the runner.
-    arguments = parse_arguments()
+    arguments = parse_cli_arguments_or_exit()
     suite = arguments.suite
     repository = Path(__file__).resolve().parents[1]
     results_dir = arguments.results_dir.resolve()
@@ -780,22 +885,22 @@ def main() -> int:
         raw_name, manifest_name = "m3-submission.json", "m3-context.json"
     raw_path = results_dir / raw_name
     manifest_path = results_dir / manifest_name
-    raw = read_json_object(raw_path)
-    manifest = read_json_object(manifest_path)
+    raw = parse_json_object_file_or_raise(raw_path)
+    manifest = parse_json_object_file_or_raise(manifest_path)
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Validate common evidence first, then apply only the selected milestone's record contract.
-    _, benchmark_command = validate_common_bundle(raw, manifest, raw_path)
+    _, benchmark_command = validate_common_bundle_or_raise(raw, manifest, raw_path)
     if suite == "m0":
-        validate_m0(raw, manifest, benchmark_command)
+        validate_m0_or_raise(raw, manifest, benchmark_command)
         summary = M0_WORKLOAD_ID
     elif suite == "m2":
-        classification = validate_m2(raw, manifest, benchmark_command)
+        classification = validate_m2_or_raise(raw, manifest, benchmark_command)
         summary = f"M2 runtime {classification}"
     else:
-        classification = validate_m3(raw, manifest, benchmark_command)
+        classification = validate_m3_or_raise(raw, manifest, benchmark_command)
         summary = f"M3 submission {classification}"
-    validate_repository_provenance(manifest, repository)
+    validate_repository_provenance_or_raise(manifest, repository)
 
     # ++++++++++++++++++++++++++++++++++++++++
     # Report a smoke classification without asserting that its observed p99 meets a host threshold.
@@ -807,6 +912,6 @@ def main() -> int:
 
 # --------------------------------------------------------
 
-# Interesting syntax: raising SystemExit forwards main's status code to shells and CI runners.
+# Interesting syntax: SystemExit forwards the validator's success status to shells and CI runners.
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(validate_benchmark_evidence_or_raise())

@@ -82,13 +82,14 @@ create_route_catalog(const configuration::StartupConfiguration& configuration) {
     const auto* const metadata =
         configuration.find_instrument_metadata(route.venue_id, route.instrument_id);
     if (attribution == nullptr || metadata == nullptr) {
-      return model::Result<OwnerLocalRouteCatalog>::failure(model::DomainError::at_field(
-          model::DomainErrorCode::InvalidRelationship, "submission_coordinator.routes"));
+      return model::Result<OwnerLocalRouteCatalog>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::InvalidRelationship,
+                                              "submission_coordinator.routes"));
     }
     inputs.push_back(SubmissionRouteInput{route, *attribution, *metadata});
   }
   const auto& provenance = configuration.provenance();
-  return OwnerLocalRouteCatalog::create(
+  return OwnerLocalRouteCatalog::create_owner_local_route_catalog(
       configuration.fingerprint(), provenance.configuration_revision(),
       provenance.organization_revision(), provenance.route_revision(), std::move(inputs));
 }
@@ -97,7 +98,7 @@ create_route_catalog(const configuration::StartupConfiguration& configuration) {
 // Calculate the exact longest positional AEGISFOE record without creating an order or calling the
 // encoder; every identifier contributes its two-byte length prefix plus accepted ASCII bytes.
 [[nodiscard]] model::Result<std::uint64_t>
-required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
+calculate_required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
   constexpr std::uint64_t fixed_bytes = 8U + 2U + model::OrderId::byte_size + (9U * 2U) + 3U +
                                         (2U * 9U) + (4U * model::sha256_digest_size) +
                                         (5U * sizeof(std::uint64_t));
@@ -120,9 +121,9 @@ required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
     for (const auto identifier : identifiers) {
       if (identifier.size() > std::numeric_limits<std::uint16_t>::max() ||
           identifier.size() > std::numeric_limits<std::uint64_t>::max() - candidate) {
-        return model::Result<std::uint64_t>::failure(
-            model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                         "submission_policy.required_encoded_order_bytes"));
+        return model::Result<std::uint64_t>::create_failure(
+            model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                                "submission_policy.required_encoded_order_bytes"));
       }
       candidate += static_cast<std::uint64_t>(identifier.size());
     }
@@ -130,14 +131,14 @@ required_encoded_order_bytes(const OwnerLocalRouteCatalog& routes) {
       maximum = candidate;
     }
   }
-  return model::Result<std::uint64_t>::success(maximum);
+  return model::Result<std::uint64_t>::create_success(maximum);
 }
 
 // --------------------------------------------------------
 // Subtract only available ordered readings so regression and unsigned wrap remain unrepresentable.
 [[nodiscard]] std::optional<std::uint64_t>
-local_duration(std::optional<std::uint64_t> started,
-               std::optional<std::uint64_t> finished) noexcept {
+calculate_local_duration(std::optional<std::uint64_t> started,
+                         std::optional<std::uint64_t> finished) noexcept {
   if (!started || !finished || *finished < *started) {
     return std::nullopt;
   }
@@ -147,7 +148,7 @@ local_duration(std::optional<std::uint64_t> started,
 // --------------------------------------------------------
 // Copy the exact installed route projection into canonical submission evidence.
 [[nodiscard]] trace::AuthorizedSubmissionProjection
-authorized_projection(const InstalledSubmissionRoute& route) {
+authorized_submission_projection_from_installed_route(const InstalledSubmissionRoute& route) {
   return trace::AuthorizedSubmissionProjection{
       route.route().id,
       route.route().venue_id,
@@ -161,7 +162,7 @@ authorized_projection(const InstalledSubmissionRoute& route) {
 // --------------------------------------------------------
 // Initialize every optional causal group explicitly so strict missing-field warnings remain useful.
 [[nodiscard]] trace::SubmissionTraceFields
-empty_trace_fields(const trace::SubmissionTraceContext& context) {
+submission_trace_fields_from_context(const trace::SubmissionTraceContext& context) {
   return trace::SubmissionTraceFields{
       context,      std::nullopt,
       std::nullopt, std::nullopt,
@@ -175,10 +176,10 @@ empty_trace_fields(const trace::SubmissionTraceContext& context) {
 // --------------------------------------------------------
 // Bind one admitted order to every immutable startup and policy identity used by the decision.
 [[nodiscard]] oms::OutboundOrderProvenance
-outbound_provenance(const InstalledSubmissionRoute& installed,
-                    const risk::RiskPolicySnapshot& risk_policy,
-                    const SubmissionPolicy& submission_policy,
-                    const model::Sha256Digest& runtime_policy_fingerprint) {
+create_outbound_order_provenance(const InstalledSubmissionRoute& installed,
+                                 const risk::RiskPolicySnapshot& risk_policy,
+                                 const SubmissionPolicy& submission_policy,
+                                 const model::Sha256Digest& runtime_policy_fingerprint) {
   const auto& route = installed.route();
   const auto& attribution = installed.attribution();
   return oms::OutboundOrderProvenance{
@@ -212,38 +213,41 @@ outbound_provenance(const InstalledSubmissionRoute& installed,
 // Interesting syntax: the function-try-block translates allocation failures from every construction
 // phase, including the final coordinator member initialization, through one stable policy error.
 model::Result<std::unique_ptr<SubmissionCoordinator>>
-SubmissionCoordinator::create(const configuration::StartupConfiguration& configuration,
-                              const RuntimePolicy& runtime_policy,
-                              FakeSubmissionRuntimeParams params) try {
+SubmissionCoordinator::create_submission_coordinator(
+    const configuration::StartupConfiguration& configuration, const RuntimePolicy& runtime_policy,
+    FakeSubmissionRuntimeParams params) try {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject absent direct-path authorities and any M2 policy from another sealed configuration.
   if (!params.measurement_clock ||
       runtime_policy.configuration_fingerprint() != configuration.fingerprint()) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidRelationship,
-                                     "submission_coordinator.provenance"));
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidRelationship,
+                                            "submission_coordinator.provenance"));
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Install routes first because risk completeness and encoded byte capacity depend on them.
   auto route_catalog = create_route_catalog(configuration);
   if (!route_catalog) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(route_catalog.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
+        route_catalog.error());
   }
-  auto required_bytes = required_encoded_order_bytes(route_catalog.value());
+  auto required_bytes = calculate_required_encoded_order_bytes(route_catalog.value());
   if (!required_bytes) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(required_bytes.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
+        required_bytes.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Seal fixed risk against the same route/configuration authority, then bind AEGISSUP to its hash.
-  auto risk_policy = risk::RiskPolicySnapshot::create(std::move(params.risk_policy), configuration,
-                                                      route_catalog.value());
+  auto risk_policy = risk::RiskPolicySnapshot::create_risk_policy_snapshot(
+      std::move(params.risk_policy), configuration, route_catalog.value());
   if (!risk_policy) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(risk_policy.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
+        risk_policy.error());
   }
-  auto submission_policy = SubmissionPolicy::create(SubmissionPolicyParams{
+  auto submission_policy = SubmissionPolicy::create_submission_policy(SubmissionPolicyParams{
       SubmissionCapability::DeterministicFakeOnly,
       configuration.fingerprint().bytes(),
       runtime_policy.fingerprint().bytes(),
@@ -255,31 +259,31 @@ SubmissionCoordinator::create(const configuration::StartupConfiguration& configu
       std::move(params.initiator_script),
   });
   if (!submission_policy) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
         submission_policy.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Allocate the ledger, OMS, and two final offline fakes from the single accepted capacity set.
   const auto capacities = submission_policy.value().capacities();
-  auto ledger = risk::ReservationLedger::create(std::move(risk_policy).value(),
-                                                capacities.reservation_capacity);
-  auto outbound = oms::OutboundOms::create(capacities.oms_order_capacity);
-  auto encoder = DeterministicFakeOrderEncoder::create(submission_policy.value().encoder_script(),
-                                                       capacities.encoded_byte_capacity);
-  auto initiator = DeterministicFakeWriteInitiator::create(
+  auto ledger = risk::ReservationLedger::create_reservation_ledger(std::move(risk_policy).value(),
+                                                                   capacities.reservation_capacity);
+  auto outbound = oms::OutboundOms::create_outbound_oms(capacities.oms_order_capacity);
+  auto encoder = DeterministicFakeOrderEncoder::create_deterministic_fake_order_encoder(
+      submission_policy.value().encoder_script(), capacities.encoded_byte_capacity);
+  auto initiator = DeterministicFakeWriteInitiator::create_deterministic_fake_write_initiator(
       submission_policy.value().initiator_script(), capacities.accepted_write_capacity);
   if (!ledger) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(ledger.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(ledger.error());
   }
   if (!outbound) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(outbound.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(outbound.error());
   }
   if (!encoder) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(encoder.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(encoder.error());
   }
   if (!initiator) {
-    return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(initiator.error());
+    return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(initiator.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -300,17 +304,18 @@ SubmissionCoordinator::create(const configuration::StartupConfiguration& configu
       std::move(submission_policy).value(), std::move(outbound).value(), std::move(encoder).value(),
       std::move(initiator).value(), std::move(params.measurement_clock),
       std::move(params.order_ids), trace_provenance, diagnostic_provenance}};
-  return model::Result<std::unique_ptr<SubmissionCoordinator>>::success(std::move(coordinator));
+  return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_success(
+      std::move(coordinator));
 
   // ++++++++++++++++++++++++++++++++++++++++
 } catch (const std::bad_alloc&) {
-  return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(
-      model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                   "submission_policy.capacity_allocation"));
+  return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                          "submission_policy.capacity_allocation"));
 } catch (const std::length_error&) {
-  return model::Result<std::unique_ptr<SubmissionCoordinator>>::failure(
-      model::DomainError::at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
-                                   "submission_policy.capacity_allocation"));
+  return model::Result<std::unique_ptr<SubmissionCoordinator>>::create_failure(
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidSubmissionPolicy,
+                                          "submission_policy.capacity_allocation"));
 }
 
 // --------------------------------------------------------
@@ -348,11 +353,11 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
       attempts_consumed_ != 0U || reentry_traced_ || runtime_faulted_ ||
       terminal_error_.has_value() || active_trace_context_.has_value() ||
       reentry_probe_.has_value() || trace_append_fault_for_test_.has_value() ||
-      outbound_oms_.size() != 0U || ledger_.held_reservation_count() != 0U ||
+      outbound_oms_.order_count() != 0U || ledger_.held_reservation_count() != 0U ||
       encoder_.invocations_consumed() != 0U || initiator_.invocations_consumed() != 0U ||
-      trace_sink_.size() != 0U || diagnostics_.size() != 0U ||
+      trace_sink_.record_count() != 0U || diagnostics_.diagnostic_count() != 0U ||
       diagnostics_.accepted_count() != 0U || diagnostics_.dropped_count() != 0U) {
-    return model::Result<void>::failure(model::DomainError::at_field(
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
         model::DomainErrorCode::InvalidM4Policy, "private_order_reconciler.install_state"));
   }
 
@@ -362,7 +367,7 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
   auto prepared = PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
       *this, configuration, policy, recovery_bootstrap);
   if (!prepared) {
-    return model::Result<void>::failure(std::move(prepared).error());
+    return model::Result<void>::create_failure(std::move(prepared).error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -388,7 +393,7 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
   recovery_identity_lease_ = std::move(identity_authority.recovery_identity_lease);
   order_ids_ = model::DeterministicOrderIdSource{std::move(identity_authority.order_ids)};
   private_order_reconciler_ = std::move(prepared_reconciler.reconciler);
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -437,33 +442,34 @@ SubmissionCoordinator::ReservationRollbackGuard::ReservationRollbackGuard(
 // Contain any structurally missed post-reservation return as an internal fault and exact-once
 // rollback; every ordinary and accepted path disarms before reaching this fallback.
 SubmissionCoordinator::ReservationRollbackGuard::~ReservationRollbackGuard() noexcept {
-  if (state_ != State::Armed) {
+  if (state_ != RollbackState::Armed) {
     return;
   }
   coordinator_->latch_runtime_fault(
-      model::DomainError::at_field(model::DomainErrorCode::SubmissionEvidenceExhausted,
-                                   "submission_coordinator.rollback_guard"));
-  static_cast<void>(release(SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted));
+      model::DomainError::create_at_field(model::DomainErrorCode::SubmissionEvidenceExhausted,
+                                          "submission_coordinator.rollback_guard"));
+  static_cast<void>(
+      release_reservation(SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted));
 }
 
 // --------------------------------------------------------
 // Consume the rollback right before calling the ledger so even a lower-layer invariant failure
 // cannot cause a destructor or later branch to retry the release.
-bool SubmissionCoordinator::ReservationRollbackGuard::release(SubmissionStage stage,
-                                                              SubmissionReason reason) noexcept {
-  if (state_ != State::Armed) {
+bool SubmissionCoordinator::ReservationRollbackGuard::release_reservation(
+    SubmissionStage stage, SubmissionReason reason) noexcept {
+  if (state_ != RollbackState::Armed) {
     coordinator_->latch_runtime_fault(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidRiskReservationState,
-                                     "submission_coordinator.rollback_guard_reused"));
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidRiskReservationState,
+                                            "submission_coordinator.rollback_guard_reused"));
     return false;
   }
-  state_ = State::FaultedConsumed;
-  auto released = coordinator_->ledger_.release(reservation_id_);
+  state_ = RollbackState::FaultedConsumed;
+  auto released = coordinator_->ledger_.release_reservation(reservation_id_);
   if (!released) {
     coordinator_->latch_runtime_fault(std::move(released).error());
     return false;
   }
-  state_ = State::Released;
+  state_ = RollbackState::Released;
 
   runtime::SubmissionDiagnosticFields diagnostic;
   diagnostic.attempt_id = model::SubmissionAttemptId::from_value(reservation_id_.value()).value();
@@ -473,7 +479,7 @@ bool SubmissionCoordinator::ReservationRollbackGuard::release(SubmissionStage st
   diagnostic.reservation_id = reservation_id_;
   diagnostic.stage = stage;
   diagnostic.reason = reason;
-  auto appended = coordinator_->diagnostics_.append(
+  auto appended = coordinator_->diagnostics_.append_diagnostic(
       runtime::SubmissionDiagnosticKind::ReservationReleased, std::move(diagnostic));
   if (!appended) {
     coordinator_->latch_runtime_fault(std::move(appended).error());
@@ -487,13 +493,13 @@ bool SubmissionCoordinator::ReservationRollbackGuard::release(SubmissionStage st
 // boundary.
 bool SubmissionCoordinator::ReservationRollbackGuard::retain_after_acceptance(
     const execution::FakeInitiationResult& initiation) noexcept {
-  if (state_ != State::Armed || !initiation.accepted()) {
+  if (state_ != RollbackState::Armed || !initiation.is_accepted()) {
     coordinator_->latch_runtime_fault(
-        model::DomainError::at_field(model::DomainErrorCode::InvalidRiskReservationState,
-                                     "submission_coordinator.rollback_guard_retain"));
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidRiskReservationState,
+                                            "submission_coordinator.rollback_guard_retain"));
     return false;
   }
-  state_ = State::Retained;
+  state_ = RollbackState::Retained;
   return true;
 }
 
@@ -543,10 +549,10 @@ bool SubmissionCoordinator::consume_trace_append_fault_for_test(
 bool SubmissionCoordinator::append_trace(trace::SubmissionTraceEventKind kind,
                                          const trace::SubmissionTraceFields& fields) noexcept {
   auto appended = consume_trace_append_fault_for_test(kind, fields)
-                      ? model::Result<void>::failure(model::DomainError::at_field(
+                      ? model::Result<void>::create_failure(model::DomainError::create_at_field(
                             model::DomainErrorCode::SubmissionEvidenceExhausted,
                             "submission_trace.injected_append_failure"))
-                      : trace_sink_.append(kind, fields);
+                      : trace_sink_.append_trace_record(kind, fields);
   if (appended) {
     return true;
   }
@@ -559,8 +565,8 @@ bool SubmissionCoordinator::append_trace(trace::SubmissionTraceEventKind kind,
   diagnostic.reservation_id = fields.reservation_id;
   diagnostic.stage = SubmissionStage::Internal;
   diagnostic.reason = SubmissionReason::SubmissionRuntimeFaulted;
-  static_cast<void>(diagnostics_.append(runtime::SubmissionDiagnosticKind::InternalInvariantFailure,
-                                        std::move(diagnostic)));
+  static_cast<void>(diagnostics_.append_diagnostic(
+      runtime::SubmissionDiagnosticKind::InternalInvariantFailure, std::move(diagnostic)));
   return false;
 }
 
@@ -571,7 +577,7 @@ std::optional<std::uint64_t> SubmissionCoordinator::finish_measurement(
     std::optional<std::uint64_t> entry_started, std::optional<std::uint64_t> measurement_finished,
     const trace::SubmissionTraceFields& fields, const CallbackBinding& binding,
     SubmissionStage stage, SubmissionReason reason) noexcept {
-  const auto duration = local_duration(entry_started, measurement_finished);
+  const auto duration = calculate_local_duration(entry_started, measurement_finished);
   if (duration) {
     return duration;
   }
@@ -583,8 +589,8 @@ std::optional<std::uint64_t> SubmissionCoordinator::finish_measurement(
   diagnostic.reservation_id = fields.reservation_id;
   diagnostic.stage = stage;
   diagnostic.reason = reason;
-  auto appended = diagnostics_.append(runtime::SubmissionDiagnosticKind::MeasurementUnavailable,
-                                      std::move(diagnostic));
+  auto appended = diagnostics_.append_diagnostic(
+      runtime::SubmissionDiagnosticKind::MeasurementUnavailable, std::move(diagnostic));
   if (!appended) {
     latch_runtime_fault(std::move(appended).error());
   }
@@ -597,22 +603,23 @@ SubmitResult SubmissionCoordinator::complete_rejection(
     trace::SubmissionTraceFields& fields, SubmissionStage stage, SubmissionReason reason,
     std::optional<model::OrderId> order_id, std::optional<RiskLimitEvidence> risk_evidence,
     const CallbackBinding& binding, std::optional<std::uint64_t> entry_started) noexcept {
-  auto canonical = SubmitResult::locally_rejected(stage, reason, fields.context.attempt_id,
-                                                  order_id, risk_evidence);
+  auto canonical = SubmitResult::create_locally_rejected_result(
+      stage, reason, fields.context.attempt_id, order_id, risk_evidence);
   fields.final_result = trace::SubmissionFinalResult::from_submit_result(canonical);
   if (!append_trace(trace::SubmissionTraceEventKind::SubmissionCompleted, fields)) {
-    const auto measurement_finished = measurement_now();
+    const auto measurement_finished = take_measurement_nanosecond_reading();
     const auto duration =
         finish_measurement(entry_started, measurement_finished, fields, binding,
                            SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted);
-    return SubmitResult::locally_rejected(
+    return SubmitResult::create_locally_rejected_result(
         SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted,
         fields.context.attempt_id, std::move(order_id), std::nullopt, duration);
   }
-  const auto duration =
-      finish_measurement(entry_started, measurement_now(), fields, binding, stage, reason);
-  return SubmitResult::locally_rejected(stage, reason, fields.context.attempt_id,
-                                        std::move(order_id), std::move(risk_evidence), duration);
+  const auto duration = finish_measurement(entry_started, take_measurement_nanosecond_reading(),
+                                           fields, binding, stage, reason);
+  return SubmitResult::create_locally_rejected_result(stage, reason, fields.context.attempt_id,
+                                                      std::move(order_id), std::move(risk_evidence),
+                                                      duration);
 }
 
 // --------------------------------------------------------
@@ -627,8 +634,8 @@ SubmitResult SubmissionCoordinator::fail_internal(
                                                   : std::optional{rollback->reservation_id()};
   if (!terminal_error_) {
     latch_runtime_fault(
-        model::DomainError::at_field(model::DomainErrorCode::SubmissionEvidenceExhausted,
-                                     "submission_coordinator.internal_invariant"));
+        model::DomainError::create_at_field(model::DomainErrorCode::SubmissionEvidenceExhausted,
+                                            "submission_coordinator.internal_invariant"));
   }
   runtime::SubmissionDiagnosticFields diagnostic;
   diagnostic.attempt_id = fields.context.attempt_id;
@@ -638,21 +645,21 @@ SubmitResult SubmissionCoordinator::fail_internal(
   diagnostic.reservation_id = reservation_id;
   diagnostic.stage = SubmissionStage::Internal;
   diagnostic.reason = SubmissionReason::SubmissionRuntimeFaulted;
-  static_cast<void>(diagnostics_.append(runtime::SubmissionDiagnosticKind::InternalInvariantFailure,
-                                        std::move(diagnostic)));
+  static_cast<void>(diagnostics_.append_diagnostic(
+      runtime::SubmissionDiagnosticKind::InternalInvariantFailure, std::move(diagnostic)));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // A Retained guard is the sole proof of accepted-slot uncertainty; never release its exposure or
   // reclassify the result as definite. A failed canonical append permits no invented later record.
-  if (rollback != nullptr && rollback->state() == ReservationRollbackGuard::State::Retained &&
-      order_id) {
-    const auto* retained_order = outbound_oms_.find(*order_id);
+  if (rollback != nullptr &&
+      rollback->rollback_state() == ReservationRollbackGuard::RollbackState::Retained && order_id) {
+    const auto* retained_order = outbound_oms_.find_order(*order_id);
     bool unknown_state_established = false;
-    model::Result<void> marked = model::Result<void>::success();
+    model::Result<void> marked = model::Result<void>::create_success();
     if (retained_order == nullptr) {
-      marked = model::Result<void>::failure(
-          model::DomainError::at_field(model::DomainErrorCode::InvalidOmsState,
-                                       "submission_coordinator.accepted_order_missing"));
+      marked = model::Result<void>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::InvalidOmsState,
+                                              "submission_coordinator.accepted_order_missing"));
     } else if (retained_order->state() == oms::OutboundOrderState::PendingInitiation) {
       marked = outbound_oms_.mark_submission_unknown(*order_id);
       unknown_state_established = marked.has_value();
@@ -662,7 +669,7 @@ SubmitResult SubmissionCoordinator::fail_internal(
     } else if (retained_order->state() == oms::OutboundOrderState::SubmissionUnknown) {
       unknown_state_established = true;
     } else {
-      marked = model::Result<void>::failure(model::DomainError::at_field(
+      marked = model::Result<void>::create_failure(model::DomainError::create_at_field(
           model::DomainErrorCode::InvalidOmsState, "submission_coordinator.accepted_order_state"));
     }
     if (!marked) {
@@ -671,12 +678,12 @@ SubmitResult SubmissionCoordinator::fail_internal(
     }
 
     if (unknown_state_established) {
-      retained_order = outbound_oms_.find(*order_id);
+      retained_order = outbound_oms_.find_order(*order_id);
       if (retained_order == nullptr ||
           retained_order->state() != oms::OutboundOrderState::SubmissionUnknown) {
-        latch_runtime_fault(
-            model::DomainError::at_field(model::DomainErrorCode::InvalidOmsState,
-                                         "submission_coordinator.accepted_order_containment"));
+        latch_runtime_fault(model::DomainError::create_at_field(
+            model::DomainErrorCode::InvalidOmsState,
+            "submission_coordinator.accepted_order_containment"));
         canonical_append_failed = true;
         unknown_state_established = false;
       }
@@ -698,7 +705,8 @@ SubmitResult SubmissionCoordinator::fail_internal(
       }
     }
 
-    auto unknown = SubmitResult::submission_unknown(fields.context.attempt_id, *order_id);
+    auto unknown =
+        SubmitResult::create_submission_unknown_result(fields.context.attempt_id, *order_id);
     if (!canonical_append_failed && unknown_state_established) {
       const auto records = trace_sink_.records();
       if (!records.empty() &&
@@ -710,22 +718,25 @@ SubmitResult SubmissionCoordinator::fail_internal(
       }
     }
     const auto measurement_finished = captured_measurement_finished == nullptr
-                                          ? measurement_now()
+                                          ? take_measurement_nanosecond_reading()
                                           : *captured_measurement_finished;
     const auto duration =
         finish_measurement(entry_started, measurement_finished, fields, binding,
                            SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted);
-    return SubmitResult::submission_unknown(fields.context.attempt_id, *order_id, duration);
+    return SubmitResult::create_submission_unknown_result(fields.context.attempt_id, *order_id,
+                                                          duration);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Before acceptance, consume an Armed rollback exactly once. A successful ledger transition is
   // canonically observable even when its noncanonical diagnostic append subsequently faults.
-  if (rollback != nullptr && rollback->state() == ReservationRollbackGuard::State::Armed) {
-    static_cast<void>(
-        rollback->release(SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted));
+  if (rollback != nullptr &&
+      rollback->rollback_state() == ReservationRollbackGuard::RollbackState::Armed) {
+    static_cast<void>(rollback->release_reservation(SubmissionStage::Internal,
+                                                    SubmissionReason::SubmissionRuntimeFaulted));
   }
-  if (rollback != nullptr && rollback->state() == ReservationRollbackGuard::State::Released) {
+  if (rollback != nullptr &&
+      rollback->rollback_state() == ReservationRollbackGuard::RollbackState::Released) {
     fields.release_transition = trace::SubmissionReleaseTransition::Released;
     if (!canonical_append_failed) {
       const auto records = trace_sink_.records();
@@ -738,9 +749,9 @@ SubmitResult SubmissionCoordinator::fail_internal(
   }
   if (canonical_append_failed) {
     const auto duration =
-        finish_measurement(entry_started, measurement_now(), fields, binding,
+        finish_measurement(entry_started, take_measurement_nanosecond_reading(), fields, binding,
                            SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted);
-    return SubmitResult::locally_rejected(
+    return SubmitResult::create_locally_rejected_result(
         SubmissionStage::Internal, SubmissionReason::SubmissionRuntimeFaulted,
         fields.context.attempt_id, std::move(order_id), std::nullopt, duration);
   }
@@ -754,19 +765,19 @@ SubmitResult SubmissionCoordinator::fail_internal(
 // --------------------------------------------------------
 // Execute one exact direct-path attempt with stable first-failure precedence and no asynchronous
 // handoff; every fallible stage completes before the next stage mutates owner-local state.
-SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
-                                           const OrderRequest& request,
-                                           std::optional<std::uint64_t> entry_started) noexcept {
+SubmitResult
+SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderRequest& request,
+                                    std::optional<std::uint64_t> entry_started) noexcept {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Later work fails without identity or evidence once an impossible owner-local invariant latched.
   if (runtime_faulted_) {
-    return SubmitResult::locally_rejected(SubmissionStage::Internal,
-                                          SubmissionReason::SubmissionRuntimeFaulted);
+    return SubmitResult::create_locally_rejected_result(SubmissionStage::Internal,
+                                                        SubmissionReason::SubmissionRuntimeFaulted);
   }
   if (binding.context == nullptr || binding.attribution == nullptr) {
-    return SubmitResult::locally_rejected(SubmissionStage::Context,
-                                          SubmissionReason::ContextInactive);
+    return SubmitResult::create_locally_rejected_result(SubmissionStage::Context,
+                                                        SubmissionReason::ContextInactive);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -775,11 +786,11 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     const auto active_attempt =
         active_trace_context_ ? std::optional{active_trace_context_->attempt_id} : std::nullopt;
     if (active_trace_context_) {
-      auto nested = empty_trace_fields(*active_trace_context_);
+      auto nested = submission_trace_fields_from_context(*active_trace_context_);
       nested.context.request = request;
-      auto result = SubmitResult::locally_rejected(SubmissionStage::Context,
-                                                   SubmissionReason::SubmissionReentry,
-                                                   active_trace_context_->attempt_id);
+      auto result = SubmitResult::create_locally_rejected_result(
+          SubmissionStage::Context, SubmissionReason::SubmissionReentry,
+          active_trace_context_->attempt_id);
       nested.final_result = trace::SubmissionFinalResult::from_submit_result(result);
       if (!reentry_traced_) {
         reentry_traced_ = append_trace(trace::SubmissionTraceEventKind::ReentryRejected, nested);
@@ -790,17 +801,17 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
       diagnostic.callback_ordinal = active_trace_context_->callback_ordinal;
       diagnostic.stage = SubmissionStage::Context;
       diagnostic.reason = SubmissionReason::SubmissionReentry;
-      static_cast<void>(diagnostics_.append(runtime::SubmissionDiagnosticKind::ReentryDetected,
-                                            std::move(diagnostic)));
+      static_cast<void>(diagnostics_.append_diagnostic(
+          runtime::SubmissionDiagnosticKind::ReentryDetected, std::move(diagnostic)));
       const auto duration =
-          finish_measurement(entry_started, measurement_now(), nested, binding,
+          finish_measurement(entry_started, take_measurement_nanosecond_reading(), nested, binding,
                              SubmissionStage::Context, SubmissionReason::SubmissionReentry);
-      return SubmitResult::locally_rejected(SubmissionStage::Context,
-                                            SubmissionReason::SubmissionReentry, active_attempt,
-                                            std::nullopt, std::nullopt, duration);
+      return SubmitResult::create_locally_rejected_result(
+          SubmissionStage::Context, SubmissionReason::SubmissionReentry, active_attempt,
+          std::nullopt, std::nullopt, duration);
     }
-    return SubmitResult::locally_rejected(SubmissionStage::Context,
-                                          SubmissionReason::SubmissionReentry, active_attempt);
+    return SubmitResult::create_locally_rejected_result(
+        SubmissionStage::Context, SubmissionReason::SubmissionReentry, active_attempt);
   }
   SubmissionActiveGuard active_guard{submit_active_, active_trace_context_};
   reentry_traced_ = false;
@@ -808,15 +819,15 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
   // ++++++++++++++++++++++++++++++++++++++++
   // Issue one bounded attempt before canonical evidence preflight; exhaustion touches no sink.
   if (attempts_consumed_ == policy_.capacities().maximum_submission_attempts) {
-    return SubmitResult::locally_rejected(SubmissionStage::Evidence,
-                                          SubmissionReason::SubmissionAttemptExhausted);
+    return SubmitResult::create_locally_rejected_result(
+        SubmissionStage::Evidence, SubmissionReason::SubmissionAttemptExhausted);
   }
   ++attempts_consumed_;
   auto attempt_id = model::SubmissionAttemptId::from_value(attempts_consumed_);
   if (!attempt_id) {
     latch_runtime_fault(std::move(attempt_id).error());
-    return SubmitResult::locally_rejected(SubmissionStage::Internal,
-                                          SubmissionReason::SubmissionRuntimeFaulted);
+    return SubmitResult::create_locally_rejected_result(SubmissionStage::Internal,
+                                                        SubmissionReason::SubmissionRuntimeFaulted);
   }
   active_trace_context_ = trace::SubmissionTraceContext{
       attempt_id.value(),
@@ -828,7 +839,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
                                         binding.attribution->strategy_id},
       request,
   };
-  auto preflight = trace_sink_.preflight(trace::maximum_submission_trace_records_per_attempt);
+  auto preflight =
+      trace_sink_.preflight_trace_append(trace::maximum_submission_trace_records_per_attempt);
   if (!preflight) {
     runtime::SubmissionDiagnosticFields diagnostic;
     diagnostic.attempt_id = attempt_id.value();
@@ -836,26 +848,26 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     diagnostic.callback_ordinal = binding.callback_ordinal;
     diagnostic.stage = SubmissionStage::Evidence;
     diagnostic.reason = SubmissionReason::EvidenceCapacityExceeded;
-    static_cast<void>(diagnostics_.append(
+    static_cast<void>(diagnostics_.append_diagnostic(
         runtime::SubmissionDiagnosticKind::EvidenceCapacityExceeded, std::move(diagnostic)));
-    return SubmitResult::locally_rejected(
+    return SubmitResult::create_locally_rejected_result(
         SubmissionStage::Evidence, SubmissionReason::EvidenceCapacityExceeded, attempt_id.value());
   }
 
-  auto fields = empty_trace_fields(*active_trace_context_);
+  auto fields = submission_trace_fields_from_context(*active_trace_context_);
   if (!append_trace(trace::SubmissionTraceEventKind::Attempt, fields)) {
     return fail_internal(fields, nullptr, std::nullopt, binding, entry_started, true);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve the explicit configured route under context-derived attribution before economics.
-  const auto authorization = routes_.authorize(*binding.attribution, request);
-  if (!authorization.authorized()) {
+  const auto authorization = routes_.evaluate_route_authorization(*binding.attribution, request);
+  if (!authorization.is_authorized()) {
     return complete_rejection(fields, SubmissionStage::Route, authorization.reason, std::nullopt,
                               std::nullopt, binding, entry_started);
   }
   const auto& installed = *authorization.installed_route;
-  fields.authorized_projection = authorized_projection(installed);
+  fields.authorized_projection = authorized_submission_projection_from_installed_route(installed);
   if (!append_trace(trace::SubmissionTraceEventKind::RouteAuthorized, fields)) {
     return fail_internal(fields, nullptr, std::nullopt, binding, entry_started, true);
   }
@@ -863,7 +875,7 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate the closed limit/GTC economics and preserve the exact canonical decimal values.
   const auto validation = validate_canonical_order(request, installed.metadata());
-  if (!validation.accepted()) {
+  if (!validation.is_accepted()) {
     return complete_rejection(fields, SubmissionStage::CanonicalValidation, validation.reason,
                               std::nullopt, std::nullopt, binding, entry_started);
   }
@@ -879,7 +891,7 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     auto& probe = *reentry_probe_;
     probe.armed = false;
     for (std::uint32_t attempt = 0U; attempt < probe.requested_attempts; ++attempt) {
-      static_cast<void>(binding.context->submit(probe.request));
+      static_cast<void>(binding.context->submit_order(probe.request));
     }
   }
   if (runtime_faulted_) {
@@ -888,7 +900,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Consume one collision-safe local identity only after all canonical economics are accepted.
-  auto generated_order = std::visit([](auto& source) { return source.next(); }, order_ids_);
+  auto generated_order =
+      std::visit([](auto& source) { return source.generate_next_order_id(); }, order_ids_);
   if (!generated_order) {
     return complete_rejection(fields, SubmissionStage::Identity,
                               SubmissionReason::OrderIdentityExhausted, std::nullopt, std::nullopt,
@@ -902,7 +915,7 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
   // ++++++++++++++++++++++++++++++++++++++++
   // Compute, check, and atomically reserve every fixed scope or record the first exact risk limit.
   const auto risk_decision = ledger_.check_and_reserve(attempt_id.value(), installed, economics);
-  if (!risk_decision.reserved()) {
+  if (!risk_decision.is_reserved()) {
     fields.risk_rejection = risk_decision.risk_evidence();
     if (!append_trace(trace::SubmissionTraceEventKind::RiskRejected, fields)) {
       return fail_internal(fields, nullptr, fields.order_id, binding, entry_started, true);
@@ -921,25 +934,25 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Admit the complete immutable projection; ordinary duplicate/capacity failure rolls risk back.
-  auto admitted = outbound_oms_.admit(oms::OutboundOrderAdmission{
+  auto admitted = outbound_oms_.admit_outbound_order(oms::OutboundOrderAdmission{
       attempt_id.value(),
       *fields.order_id,
       reservation_id,
       economics,
       *fields.approved_exposure,
-      outbound_provenance(installed, ledger_.policy(), policy_,
-                          policy_.runtime_policy_fingerprint()),
+      create_outbound_order_provenance(installed, ledger_.policy(), policy_,
+                                       policy_.runtime_policy_fingerprint()),
   });
   if (!admitted) {
     latch_runtime_fault(std::move(admitted).error());
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
   }
-  if (!admitted.value().admitted()) {
+  if (!admitted.value().is_admitted()) {
     const auto reason = *admitted.value().reason();
     if (!append_trace(trace::SubmissionTraceEventKind::OmsNonAdmission, fields)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true);
     }
-    if (!rollback.release(SubmissionStage::Oms, reason)) {
+    if (!rollback.release_reservation(SubmissionStage::Oms, reason)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
     }
     fields.release_transition = trace::SubmissionReleaseTransition::Released;
@@ -957,12 +970,12 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Encode only the admitted OMS record; a scripted failure terminalizes OMS before exact release.
-  auto encoded = encoder_.encode(*record);
+  auto encoded = encoder_.encode_order(*record);
   if (!encoded) {
     latch_runtime_fault(std::move(encoded).error());
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
   }
-  if (!encoded.value().encoded()) {
+  if (!encoded.value().is_encoded()) {
     auto marked = outbound_oms_.mark_encoding_failed(*fields.order_id);
     if (!marked) {
       latch_runtime_fault(std::move(marked).error());
@@ -972,7 +985,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     if (!append_trace(trace::SubmissionTraceEventKind::EncodingFailed, fields)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true);
     }
-    if (!rollback.release(SubmissionStage::Encoding, SubmissionReason::EncodingFailed)) {
+    if (!rollback.release_reservation(SubmissionStage::Encoding,
+                                      SubmissionReason::EncodingFailed)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
     }
     fields.release_transition = trace::SubmissionReleaseTransition::Released;
@@ -989,9 +1003,9 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
   }
   fields.oms_state = oms::OutboundOrderState::PendingInitiation;
-  fields.encoding = trace::SubmissionEncodingEvidence{encoded.value().invocation_ordinal(),
-                                                      encoded_order.byte_length(),
-                                                      model::sha256(encoded_order.bytes())};
+  fields.encoding = trace::SubmissionEncodingEvidence{
+      encoded.value().invocation_ordinal(), encoded_order.byte_length(),
+      model::calculate_sha256_digest(encoded_order.bytes())};
   if (!append_trace(trace::SubmissionTraceEventKind::Encoded, fields)) {
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true);
   }
@@ -1006,16 +1020,16 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
   }
   const auto initiation = initiated.value();
   const auto initiation_finished = initiation.accepted_slot_endpoint_nanoseconds();
-  if (initiation.accepted() && !rollback.retain_after_acceptance(initiation)) {
+  if (initiation.is_accepted() && !rollback.retain_after_acceptance(initiation)) {
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, false,
                          &initiation_finished);
   }
   const auto outcome_requires_acceptance =
       initiation.outcome() != FakeInitiationOutcome::DefiniteFailureBeforeAcceptance;
-  if (initiation.accepted() != outcome_requires_acceptance) {
-    latch_runtime_fault(model::DomainError::at_field(model::DomainErrorCode::InvalidFakeState,
-                                                     "submission_coordinator.initiation_evidence"));
-    return initiation.accepted()
+  if (initiation.is_accepted() != outcome_requires_acceptance) {
+    latch_runtime_fault(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidFakeState, "submission_coordinator.initiation_evidence"));
+    return initiation.is_accepted()
                ? fail_internal(fields, &rollback, fields.order_id, binding, entry_started, false,
                                &initiation_finished)
                : fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
@@ -1033,8 +1047,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     if (!append_trace(trace::SubmissionTraceEventKind::InitiationDefinitelyFailed, fields)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true);
     }
-    if (!rollback.release(SubmissionStage::Initiation,
-                          SubmissionReason::InitiationDefinitelyFailed)) {
+    if (!rollback.release_reservation(SubmissionStage::Initiation,
+                                      SubmissionReason::InitiationDefinitelyFailed)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started);
     }
     fields.release_transition = trace::SubmissionReleaseTransition::Released;
@@ -1069,9 +1083,10 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     diagnostic.reservation_id = reservation_id;
     diagnostic.stage = SubmissionStage::Initiation;
     diagnostic.reason = SubmissionReason::InitiationOutcomeUnknown;
-    static_cast<void>(diagnostics_.append(
+    static_cast<void>(diagnostics_.append_diagnostic(
         runtime::SubmissionDiagnosticKind::UnknownExposureRetained, std::move(diagnostic)));
-    auto canonical = SubmitResult::submission_unknown(attempt_id.value(), *fields.order_id);
+    auto canonical =
+        SubmitResult::create_submission_unknown_result(attempt_id.value(), *fields.order_id);
     fields.final_result = trace::SubmissionFinalResult::from_submit_result(canonical);
     if (!append_trace(trace::SubmissionTraceEventKind::SubmissionCompleted, fields)) {
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true,
@@ -1080,7 +1095,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     const auto duration =
         finish_measurement(entry_started, initiation_finished, fields, binding,
                            SubmissionStage::Initiation, SubmissionReason::InitiationOutcomeUnknown);
-    return SubmitResult::submission_unknown(attempt_id.value(), *fields.order_id, duration);
+    return SubmitResult::create_submission_unknown_result(attempt_id.value(), *fields.order_id,
+                                                          duration);
   }
 
   auto marked = outbound_oms_.mark_write_initiated(*fields.order_id);
@@ -1095,7 +1111,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true,
                          &initiation_finished);
   }
-  auto canonical = SubmitResult::write_initiated(attempt_id.value(), *fields.order_id);
+  auto canonical =
+      SubmitResult::create_write_initiated_result(attempt_id.value(), *fields.order_id);
   fields.final_result = trace::SubmissionFinalResult::from_submit_result(canonical);
   if (!append_trace(trace::SubmissionTraceEventKind::SubmissionCompleted, fields)) {
     return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, true,
@@ -1103,7 +1120,8 @@ SubmitResult SubmissionCoordinator::submit(const CallbackBinding& binding,
   }
   const auto duration = finish_measurement(entry_started, initiation_finished, fields, binding,
                                            SubmissionStage::Initiation, SubmissionReason::None);
-  return SubmitResult::write_initiated(attempt_id.value(), *fields.order_id, duration);
+  return SubmitResult::create_write_initiated_result(attempt_id.value(), *fields.order_id,
+                                                     duration);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

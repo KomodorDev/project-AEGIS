@@ -15,11 +15,12 @@ namespace aegis::execution {
 
 // ########################################################################
 // The submission entry may run on a non-owner thread, so every clock implementation must support
-// concurrent reads without granting access to any owner-local submission state.
+// concurrent sampling without granting access to any owner-local submission state.
 class SubmissionMeasurementClock {
 public:
 
   // --------------------------------------------------------
+  // Keep each clock at one stable address and destroy derived implementations through the base.
   SubmissionMeasurementClock(const SubmissionMeasurementClock&) = delete;
   SubmissionMeasurementClock& operator=(const SubmissionMeasurementClock&) = delete;
   SubmissionMeasurementClock(SubmissionMeasurementClock&&) = delete;
@@ -27,9 +28,10 @@ public:
   virtual ~SubmissionMeasurementClock() = default;
 
   // --------------------------------------------------------
-  // Return one process-local monotonic nanosecond reading, or absence when no valid reading exists.
-  [[nodiscard]] std::optional<std::uint64_t> now_nanoseconds() noexcept {
-    return read_now_nanoseconds();
+  // Take one process-local nanosecond reading, advancing implementation-visible sampling state when
+  // present; return absence when no valid reading exists.
+  [[nodiscard]] std::optional<std::uint64_t> take_nanosecond_reading() noexcept {
+    return claim_next_nanosecond_reading();
   }
 
   // --------------------------------------------------------
@@ -44,11 +46,12 @@ private:
   // ########################################################################
 
   // --------------------------------------------------------
+  // Permit construction only through the two trusted friend implementations.
   SubmissionMeasurementClock() = default;
 
   // --------------------------------------------------------
-  // Concrete clocks provide the thread-safe reading operation behind the fixed public contract.
-  [[nodiscard]] virtual std::optional<std::uint64_t> read_now_nanoseconds() noexcept = 0;
+  // Concrete clocks claim the next thread-safe source reading behind the fixed public contract.
+  [[nodiscard]] virtual std::optional<std::uint64_t> claim_next_nanosecond_reading() noexcept = 0;
 
   // --------------------------------------------------------
 };
@@ -67,8 +70,8 @@ public:
 private:
 
   // --------------------------------------------------------
-  // Convert the current nondecreasing steady-clock delta to the public checked unsigned domain.
-  [[nodiscard]] std::optional<std::uint64_t> read_now_nanoseconds() noexcept override;
+  // Take the current nondecreasing steady-clock delta in the public checked unsigned domain.
+  [[nodiscard]] std::optional<std::uint64_t> claim_next_nanosecond_reading() noexcept override;
 
   // --------------------------------------------------------
   std::chrono::steady_clock::time_point origin_;
@@ -88,6 +91,7 @@ public:
       : readings_{std::move(readings)}, fallback_{fallback} {}
 
   // --------------------------------------------------------
+  // Return how many scripted readings callers have claimed, capped only by the atomic counter.
   [[nodiscard]] std::size_t readings_consumed() const noexcept {
     return next_reading_.load(std::memory_order_relaxed);
   }
@@ -97,7 +101,7 @@ private:
 
   // --------------------------------------------------------
   // Claim at most one in-range immutable slot per caller; saturation never wraps the cursor.
-  [[nodiscard]] std::optional<std::uint64_t> read_now_nanoseconds() noexcept override;
+  [[nodiscard]] std::optional<std::uint64_t> claim_next_nanosecond_reading() noexcept override;
 
   // --------------------------------------------------------
   const std::vector<std::optional<std::uint64_t>> readings_;

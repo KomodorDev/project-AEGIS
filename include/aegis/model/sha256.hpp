@@ -29,11 +29,11 @@ public:
 
   // --------------------------------------------------------
   // Incorporate another byte range while retaining any incomplete trailing block.
-  void update(std::span<const std::byte> bytes) noexcept;
+  void append_bytes(std::span<const std::byte> bytes) noexcept;
 
   // --------------------------------------------------------
   // Finalization works on a copy, so callers may inspect a prefix and continue hashing.
-  [[nodiscard]] Sha256Digest finalize() const noexcept;
+  [[nodiscard]] Sha256Digest derive_digest() const noexcept;
 
   // --------------------------------------------------------
 private:
@@ -56,11 +56,11 @@ private:
 
 // --------------------------------------------------------
 // The one-shot helper uses the same streaming implementation, keeping a single hashing contract.
-[[nodiscard]] Sha256Digest sha256(std::span<const std::byte> bytes) noexcept;
+[[nodiscard]] Sha256Digest calculate_sha256_digest(std::span<const std::byte> bytes) noexcept;
 
 // --------------------------------------------------------
 // Return exactly 64 lowercase ASCII hexadecimal digits, without a terminator.
-[[nodiscard]] Sha256Hex sha256_hex(const Sha256Digest& digest) noexcept;
+[[nodiscard]] Sha256Hex sha256_hex_from_digest(const Sha256Digest& digest) noexcept;
 
 // --------------------------------------------------------
 } // namespace aegis::model

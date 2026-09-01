@@ -118,10 +118,11 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Validate the complete authored domain before converting it to the retained width.
     if (!std::in_range<std::uint64_t>(value) || value == 0) {
-      return model::Result<RecoveryActionOrdinal>::failure(model::DomainError::at_field(
-          model::DomainErrorCode::InvalidRecoveryPolicy, "recovery_action_ordinal"));
+      return model::Result<RecoveryActionOrdinal>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::InvalidRecoveryPolicy,
+                                              "recovery_action_ordinal"));
     }
-    return model::Result<RecoveryActionOrdinal>::success(
+    return model::Result<RecoveryActionOrdinal>::create_success(
         RecoveryActionOrdinal{static_cast<std::uint64_t>(value)});
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -317,8 +318,9 @@ public:
     // ++++++++++++++++++++++++++++++++++++++++
     // Reject zero, negative, or wider-than-u32 counts before any narrowing conversion.
     if (!std::in_range<std::uint32_t>(callback_count) || callback_count == 0) {
-      return model::Result<CallbackOrdinalRange>::failure(model::DomainError::at_field(
-          model::DomainErrorCode::InvalidPrivateEvent, "callback_ordinal_range.count"));
+      return model::Result<CallbackOrdinalRange>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                              "callback_ordinal_range.count"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -327,8 +329,9 @@ public:
     const auto additional_callbacks = static_cast<std::uint64_t>(validated_callback_count - 1U);
     if (first_callback_ordinal.value() >
         std::numeric_limits<std::uint64_t>::max() - additional_callbacks) {
-      return model::Result<CallbackOrdinalRange>::failure(model::DomainError::at_field(
-          model::DomainErrorCode::CallbackCounterExhausted, "callback_ordinal_range.last"));
+      return model::Result<CallbackOrdinalRange>::create_failure(
+          model::DomainError::create_at_field(model::DomainErrorCode::CallbackCounterExhausted,
+                                              "callback_ordinal_range.last"));
     }
 
     // ++++++++++++++++++++++++++++++++++++++++
@@ -336,9 +339,10 @@ public:
     auto last_callback_ordinal =
         model::CallbackOrdinal::from_value(first_callback_ordinal.value() + additional_callbacks);
     if (!last_callback_ordinal) {
-      return model::Result<CallbackOrdinalRange>::failure(std::move(last_callback_ordinal).error());
+      return model::Result<CallbackOrdinalRange>::create_failure(
+          std::move(last_callback_ordinal).error());
     }
-    return model::Result<CallbackOrdinalRange>::success(
+    return model::Result<CallbackOrdinalRange>::create_success(
         CallbackOrdinalRange{first_callback_ordinal, validated_callback_count,
                              std::move(last_callback_ordinal).value()});
 

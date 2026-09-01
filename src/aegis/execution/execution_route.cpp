@@ -26,33 +26,33 @@ template <typename Value>
   std::sort(values.begin(), values.end());
   for (std::size_t index = 1U; index < values.size(); ++index) {
     if (values[index - 1U] == values[index]) {
-      return model::Result<void>::failure(
-          DomainError::at_index(DomainErrorCode::DuplicateIdentifier, std::string{field}, index));
+      return model::Result<void>::create_failure(DomainError::create_at_index(
+          DomainErrorCode::DuplicateIdentifier, std::string{field}, index));
     }
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
 // Test membership in a dependency catalog that its caller has already canonicalized.
 template <typename Value>
-[[nodiscard]] bool contains(const std::vector<Value>& values, const Value& value) noexcept {
+[[nodiscard]] bool has_value(const std::vector<Value>& values, const Value& value) noexcept {
   return std::binary_search(values.begin(), values.end(), value);
 }
 
 // --------------------------------------------------------
 // Staged existence checks distinguish an unknown venue or instrument from a known but forbidden
 // venue/instrument relationship, preserving precise deterministic errors.
-[[nodiscard]] bool contains_venue(const std::vector<VenueInstrumentPair>& pairs,
-                                  const model::VenueId& venue_id) noexcept {
+[[nodiscard]] bool has_venue(const std::vector<VenueInstrumentPair>& pairs,
+                             const model::VenueId& venue_id) noexcept {
   return std::any_of(pairs.begin(), pairs.end(),
                      [&](const VenueInstrumentPair& pair) { return pair.first == venue_id; });
 }
 
 // --------------------------------------------------------
 // Check instrument existence independently of its venue pairing for precise failure reporting.
-[[nodiscard]] bool contains_instrument(const std::vector<VenueInstrumentPair>& pairs,
-                                       const model::InstrumentId& instrument_id) noexcept {
+[[nodiscard]] bool has_instrument(const std::vector<VenueInstrumentPair>& pairs,
+                                  const model::InstrumentId& instrument_id) noexcept {
   return std::any_of(pairs.begin(), pairs.end(),
                      [&](const VenueInstrumentPair& pair) { return pair.second == instrument_id; });
 }
@@ -68,11 +68,11 @@ sort_and_reject_duplicate_account_ids(std::vector<LogicalAccountVenueBinding>& b
   });
   for (std::size_t index = 1U; index < bindings.size(); ++index) {
     if (bindings[index - 1U].logical_account_id == bindings[index].logical_account_id) {
-      return model::Result<void>::failure(DomainError::at_index(
+      return model::Result<void>::create_failure(DomainError::create_at_index(
           DomainErrorCode::DuplicateIdentifier, "routes.known_account_bindings", index));
     }
   }
-  return model::Result<void>::success();
+  return model::Result<void>::create_success();
 }
 
 // --------------------------------------------------------
@@ -95,7 +95,8 @@ find_account(const std::vector<LogicalAccountVenueBinding>& bindings,
 
 // --------------------------------------------------------
 // Validate all route dependencies and publish an immutable, firm-scoped canonical grant set.
-model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
+model::Result<ExecutionRouteConfiguration>
+ExecutionRouteConfiguration::create_execution_route_configuration(
     model::RouteRevision revision, std::vector<ExecutionRoute> routes,
     const organization::Organization& organization,
     std::vector<VenueInstrumentPair> known_venue_instruments,
@@ -107,12 +108,14 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
   const auto venue_instrument_duplicates =
       sort_and_reject_duplicates(known_venue_instruments, "routes.known_venue_instruments");
   if (!venue_instrument_duplicates) {
-    return model::Result<ExecutionRouteConfiguration>::failure(venue_instrument_duplicates.error());
+    return model::Result<ExecutionRouteConfiguration>::create_failure(
+        venue_instrument_duplicates.error());
   }
   const auto account_binding_duplicates =
       sort_and_reject_duplicate_account_ids(known_account_bindings);
   if (!account_binding_duplicates) {
-    return model::Result<ExecutionRouteConfiguration>::failure(account_binding_duplicates.error());
+    return model::Result<ExecutionRouteConfiguration>::create_failure(
+        account_binding_duplicates.error());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -122,65 +125,72 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
 
   for (std::size_t index = 1U; index < routes.size(); ++index) {
     if (routes[index - 1U].id == routes[index].id) {
-      return model::Result<ExecutionRouteConfiguration>::failure(
-          DomainError::at_index(DomainErrorCode::DuplicateIdentifier, "routes.id", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::DuplicateIdentifier, "routes.id", index));
     }
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Validate every dependency and assigned state before rejecting duplicate authorization meaning.
-  using SemanticKey =
+  using ExecutionRouteAuthorizationKey =
       std::tuple<model::BotId, model::VenueId, model::LogicalAccountId, model::InstrumentId>;
-  std::set<SemanticKey> semantic_keys;
+  std::set<ExecutionRouteAuthorizationKey> semantic_keys;
   for (std::size_t index = 0U; index < routes.size(); ++index) {
     const ExecutionRoute& route = routes[index];
     const auto* const bot = organization.find_bot(route.bot_id);
     if (bot == nullptr) {
-      return model::Result<ExecutionRouteConfiguration>::failure(
-          DomainError::at_index(DomainErrorCode::DanglingReference, "routes.bot_id", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::DanglingReference, "routes.bot_id", index));
     }
-    if (!contains_venue(known_venue_instruments, route.venue_id)) {
-      return model::Result<ExecutionRouteConfiguration>::failure(
-          DomainError::at_index(DomainErrorCode::DanglingReference, "routes.venue_id", index));
+    if (!has_venue(known_venue_instruments, route.venue_id)) {
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::DanglingReference, "routes.venue_id",
+                                       index));
     }
     const auto* const account = find_account(known_account_bindings, route.logical_account_id);
     if (account == nullptr) {
-      return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
-          DomainErrorCode::DanglingReference, "routes.logical_account_id", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::DanglingReference,
+                                       "routes.logical_account_id", index));
     }
-    if (!contains_instrument(known_venue_instruments, route.instrument_id)) {
-      return model::Result<ExecutionRouteConfiguration>::failure(
-          DomainError::at_index(DomainErrorCode::DanglingReference, "routes.instrument_id", index));
+    if (!has_instrument(known_venue_instruments, route.instrument_id)) {
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::DanglingReference, "routes.instrument_id",
+                                       index));
     }
-    if (!contains(known_venue_instruments,
-                  VenueInstrumentPair{route.venue_id, route.instrument_id})) {
-      return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
-          DomainErrorCode::InvalidRelationship, "routes.venue_instrument", index));
+    if (!has_value(known_venue_instruments,
+                   VenueInstrumentPair{route.venue_id, route.instrument_id})) {
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::InvalidRelationship,
+                                       "routes.venue_instrument", index));
     }
     if (account->venue_id != route.venue_id) {
-      return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
-          DomainErrorCode::InvalidRelationship, "routes.account_venue", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::InvalidRelationship, "routes.account_venue",
+                                       index));
     }
     // Venue compatibility is insufficient: the bot and logical account must share one peer firm.
     if (account->firm_id != bot->firm_id) {
-      return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
-          DomainErrorCode::InvalidRelationship, "routes.account_firm", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::InvalidRelationship, "routes.account_firm",
+                                       index));
     }
     if (route.state != ExecutionRouteState::Disabled &&
         route.state != ExecutionRouteState::Enabled) {
-      return model::Result<ExecutionRouteConfiguration>::failure(
-          DomainError::at_index(DomainErrorCode::InvalidValue, "routes.state", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::InvalidValue, "routes.state", index));
     }
 
     if (!semantic_keys
              .emplace(route.bot_id, route.venue_id, route.logical_account_id, route.instrument_id)
              .second) {
-      return model::Result<ExecutionRouteConfiguration>::failure(DomainError::at_index(
-          DomainErrorCode::DuplicateIdentifier, "routes.semantic_key", index));
+      return model::Result<ExecutionRouteConfiguration>::create_failure(
+          DomainError::create_at_index(DomainErrorCode::DuplicateIdentifier, "routes.semantic_key",
+                                       index));
     }
   }
 
-  return model::Result<ExecutionRouteConfiguration>::success(
+  return model::Result<ExecutionRouteConfiguration>::create_success(
       ExecutionRouteConfiguration{revision, std::move(routes)});
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -188,7 +198,8 @@ model::Result<ExecutionRouteConfiguration> ExecutionRouteConfiguration::create(
 
 // --------------------------------------------------------
 // Factory canonicalization makes lower_bound sufficient without a mutable secondary index.
-const ExecutionRoute* ExecutionRouteConfiguration::find(const model::RouteId& id) const noexcept {
+const ExecutionRoute*
+ExecutionRouteConfiguration::find_route(const model::RouteId& id) const noexcept {
   const auto found = std::lower_bound(
       routes_.begin(), routes_.end(), id,
       [](const ExecutionRoute& route, const model::RouteId& target) { return route.id < target; });

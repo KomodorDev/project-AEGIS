@@ -23,7 +23,7 @@ concept HasRevisionFactory = requires(Value value) { ConfigurationRevision::from
 
 template <typename Value>
 concept HasClockAdvance =
-    requires(DeterministicClockProvider clock, Value value) { clock.advance(value); };
+    requires(DeterministicClockProvider clock, Value value) { clock.advance_nanoseconds(value); };
 
 template <typename Value>
 concept HasAdmissionOrdinalFactory = requires(Value value) { AdmissionOrdinal::from_value(value); };
@@ -34,9 +34,9 @@ template <typename Ordinal>
 void check_ordinal_exhaustion(DomainErrorCode code, std::string_view field) {
   const auto maximum = Ordinal::from_value(std::numeric_limits<std::uint64_t>::max());
   REQUIRE(maximum);
-  const auto exhausted = maximum.value().next();
+  const auto exhausted = maximum.value().derive_next_ordinal();
   REQUIRE_FALSE(exhausted);
-  CHECK(exhausted.error() == DomainError::at_field(code, std::string{field}));
+  CHECK(exhausted.error() == DomainError::create_at_field(code, std::string{field}));
 }
 
 // ########################################################################
@@ -82,9 +82,9 @@ static_assert(HasAdmissionOrdinalFactory<signed char>);
 TEST_CASE("a deterministic clock returns explicitly advanced monotonic values", "[model][time]") {
   DeterministicClockProvider clock{7U};
 
-  CHECK(clock.receive_now() == ReceiveTimestamp{7U});
-  REQUIRE(clock.advance(5U));
-  CHECK(clock.processing_now() == ProcessingTimestamp{12U});
+  CHECK(clock.receive_timestamp_now() == ReceiveTimestamp{7U});
+  REQUIRE(clock.advance_nanoseconds(5U));
+  CHECK(clock.processing_timestamp_now() == ProcessingTimestamp{12U});
 }
 
 // --------------------------------------------------------
@@ -96,7 +96,7 @@ TEST_CASE("a deterministic clock fails rather than wrapping", "[model][time]") {
   // Prove maximum-state overflow reports failure without wrapping the controlled clock.
   DeterministicClockProvider clock{std::numeric_limits<std::uint64_t>::max()};
 
-  const auto result = clock.advance(1U);
+  const auto result = clock.advance_nanoseconds(1U);
   REQUIRE_FALSE(result);
   CHECK(result.error().code == DomainErrorCode::ArithmeticOverflow);
   CHECK(result.error().context.field == "clock_nanoseconds");
@@ -104,10 +104,10 @@ TEST_CASE("a deterministic clock fails rather than wrapping", "[model][time]") {
   // ++++++++++++++++++++++++++++++++++++++++
   // Prove signed negative input reaches the same stable field-level failure boundary.
   DeterministicClockProvider ordinary_clock;
-  const auto negative = ordinary_clock.advance(-1);
+  const auto negative = ordinary_clock.advance_nanoseconds(-1);
   REQUIRE_FALSE(negative);
   CHECK(negative.error() ==
-        DomainError::at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
+        DomainError::create_at_field(DomainErrorCode::ArithmeticOverflow, "clock_nanoseconds"));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -119,13 +119,13 @@ TEST_CASE("processing delay is the only named receive-to-processing subtraction"
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Accept a forward interval and expose its exact elapsed duration.
-  const auto delay = processing_delay(ProcessingTimestamp{19U}, ReceiveTimestamp{11U});
+  const auto delay = calculate_processing_delay(ProcessingTimestamp{19U}, ReceiveTimestamp{11U});
   REQUIRE(delay);
   CHECK(delay.value() == ElapsedNanoseconds{8U});
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject reversed timestamps instead of permitting unsigned subtraction wraparound.
-  const auto reversed = processing_delay(ProcessingTimestamp{10U}, ReceiveTimestamp{11U});
+  const auto reversed = calculate_processing_delay(ProcessingTimestamp{10U}, ReceiveTimestamp{11U});
   REQUIRE_FALSE(reversed);
   CHECK(reversed.error().code == DomainErrorCode::InvalidTimestampOrder);
 
@@ -138,13 +138,14 @@ TEST_CASE("session and sequence increments are checked", "[model][time]") {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin ordinary advancement for one nominal counter type.
-  const auto next_epoch = SessionEpoch{4U}.next();
+  const auto next_epoch = SessionEpoch{4U}.derive_next_value();
   REQUIRE(next_epoch);
   CHECK(next_epoch.value().value() == 5U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin exhaustion for the other nominal counter type at the shared storage boundary.
-  const auto exhausted = SequenceNumber{std::numeric_limits<std::uint64_t>::max()}.next();
+  const auto exhausted =
+      SequenceNumber{std::numeric_limits<std::uint64_t>::max()}.derive_next_value();
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == DomainErrorCode::ArithmeticOverflow);
 
@@ -165,7 +166,7 @@ TEST_CASE("installed revisions reject zero and fail on increment overflow", "[mo
   const auto negative = ConfigurationRevision::from_value(-1);
   REQUIRE_FALSE(negative);
   CHECK(negative.error() ==
-        DomainError::at_field(DomainErrorCode::InvalidRevision, "configuration_revision"));
+        DomainError::create_at_field(DomainErrorCode::InvalidRevision, "configuration_revision"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Unsigned char must remain a usable numeric revision source after the portable concept filter.
@@ -173,13 +174,13 @@ TEST_CASE("installed revisions reject zero and fail on increment overflow", "[mo
   REQUIRE(narrow_revision);
   CHECK(narrow_revision.value().value() == 2U);
 
-  CHECK(OrganizationRevision::initial().value() == 1U);
+  CHECK(OrganizationRevision::create_initial().value() == 1U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject incrementing the final representable revision instead of wrapping to absence.
   const auto maximum = RouteRevision::from_value(std::numeric_limits<std::uint64_t>::max());
   REQUIRE(maximum);
-  const auto exhausted = maximum.value().next();
+  const auto exhausted = maximum.value().derive_next_revision();
   REQUIRE_FALSE(exhausted);
   CHECK(exhausted.error().code == DomainErrorCode::ArithmeticOverflow);
   CHECK(exhausted.error().context.field == "route_revision");
@@ -198,15 +199,16 @@ TEST_CASE("runtime and market ordinals are one based and checked", "[model][time
   const auto negative = AdmissionOrdinal::from_value(-1);
   REQUIRE_FALSE(zero);
   REQUIRE_FALSE(negative);
-  CHECK(zero.error() == DomainError::at_field(DomainErrorCode::InvalidValue, "admission_ordinal"));
+  CHECK(zero.error() ==
+        DomainError::create_at_field(DomainErrorCode::InvalidValue, "admission_ordinal"));
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Pin initial and ordinary advancement across independent runtime and market domains.
-  CHECK(ReceiveSequence::initial().value() == 1U);
+  CHECK(ReceiveSequence::create_initial().value() == 1U);
   REQUIRE(TurnOrdinal::from_value(8U));
-  CHECK(TurnOrdinal::from_value(8U).value().next().value().value() == 9U);
-  CHECK(BookGeneration::initial().value() == 1U);
-  CHECK(BookRevision::initial().value() == 1U);
+  CHECK(TurnOrdinal::from_value(8U).value().derive_next_ordinal().value().value() == 9U);
+  CHECK(BookGeneration::create_initial().value() == 1U);
+  CHECK(BookRevision::create_initial().value() == 1U);
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Exhaustion reports every owning domain and stable field while preserving the maximum ordinal.
