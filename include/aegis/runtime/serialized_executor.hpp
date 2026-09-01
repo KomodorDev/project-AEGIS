@@ -6,6 +6,7 @@
 #include "aegis/model/identifier.hpp"
 #include "aegis/model/result.hpp"
 #include "aegis/model/time.hpp"
+#include "aegis/runtime/private_order_admission.hpp"
 
 #include <array>
 #include <atomic>
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -24,36 +26,6 @@
 #include <vector>
 
 namespace aegis::runtime {
-
-// ########################################################################
-// Ordinary admission outcomes remain successful Result values so overload and shutdown cannot be
-// confused with terminal executor faults.
-enum class AdmissionOutcome : std::uint8_t {
-  Accepted = 1,
-  CapacityExceeded = 2,
-  Closed = 3,
-};
-
-// ########################################################################
-
-// ########################################################################
-// An accepted receipt binds one attempt to its distinct receive sequence, timestamp, and atomic
-// pending-queue observation.
-struct AdmissionReceipt {
-  model::AdmissionOrdinal attempt_ordinal;
-  model::ReceiveSequence receive_sequence;
-  model::ReceiveTimestamp received_at;
-  std::size_t pending_depth;
-  std::size_t pending_capacity;
-
-  // --------------------------------------------------------
-  // Structural equality pins the complete accepted-admission replay input.
-  friend bool operator==(const AdmissionReceipt&, const AdmissionReceipt&) = default;
-
-  // --------------------------------------------------------
-};
-
-// ########################################################################
 
 // ########################################################################
 // Every non-terminal attempt returns an ordinal and mutex-linearized queue depth/capacity; only
@@ -69,40 +41,6 @@ struct AdmissionDecision {
   // --------------------------------------------------------
   // Structural equality makes accepted, overloaded, and closed replay decisions exact.
   friend bool operator==(const AdmissionDecision&, const AdmissionDecision&) = default;
-
-  // --------------------------------------------------------
-};
-
-// ########################################################################
-
-// ########################################################################
-// AcceptedTurnContext is stack-scoped owner authority for one accepted command. Handlers must use
-// stable runtime handles in their copied command and must not retain this context reference.
-struct AcceptedTurnContext {
-  AdmissionReceipt receipt;
-  model::TurnOrdinal turn_ordinal;
-  model::ProcessingTimestamp processing_timestamp;
-  model::ElapsedNanoseconds queue_age;
-
-  // --------------------------------------------------------
-  // Structural equality pins every value available while one accepted command runs.
-  friend bool operator==(const AcceptedTurnContext&, const AcceptedTurnContext&) = default;
-
-  // --------------------------------------------------------
-};
-
-// ########################################################################
-
-// ########################################################################
-// ControlTurnContext gives a source-discontinuity handler only its owner-turn identity and
-// processing time; a fence has no receive sequence, timestamp, or queue age.
-struct ControlTurnContext {
-  model::TurnOrdinal turn_ordinal;
-  model::ProcessingTimestamp processing_timestamp;
-
-  // --------------------------------------------------------
-  // Structural equality pins the complete control-turn authority.
-  friend bool operator==(const ControlTurnContext&, const ControlTurnContext&) = default;
 
   // --------------------------------------------------------
 };
@@ -149,10 +87,13 @@ public:
 // ########################################################################
 
 // ########################################################################
-// A turn kind distinguishes accepted command work from a preallocated control fence.
+// Stable turn kinds distinguish public/private work and each attributable or reasonless fence.
 enum class TurnKind : std::uint8_t {
   Command = 1,
   SourceDiscontinuity = 2,
+  PrivateCommand = 3,
+  AccountSafetyFence = 4,
+  GlobalPrivateFence = 5,
 };
 
 // ########################################################################
@@ -177,6 +118,7 @@ struct TurnReport {
   std::size_t pending_fences_at_completion;
   std::size_t command_capacity;
   std::uint64_t completed_turns;
+  PrivateLaneSnapshot private_lane{};
 
   // --------------------------------------------------------
   // Structural equality pins ordering, timing, and bounded-state observations together.
@@ -188,8 +130,8 @@ struct TurnReport {
 // ########################################################################
 
 // ########################################################################
-// Bounded drive reports distinguish turns completed by this call from lifetime completion and
-// expose both forms of remaining runnable work.
+// A bounded execution report distinguishes turns completed by one call from lifetime completion
+// and appends the complete private-lane diagnostic alongside existing public/source counters.
 struct PendingTurnExecutionReport {
   std::size_t turns_executed;
   std::size_t pending_commands;
@@ -197,6 +139,7 @@ struct PendingTurnExecutionReport {
   std::size_t command_capacity;
   std::size_t maximum_drive_turns;
   std::uint64_t completed_turns;
+  PrivateLaneSnapshot private_lane{};
 
   // --------------------------------------------------------
   // Structural equality supports exact bounded-stop assertions.
@@ -209,8 +152,8 @@ struct PendingTurnExecutionReport {
 // ########################################################################
 
 // ########################################################################
-// A synchronized snapshot exposes bounded ingress and terminal lifecycle state without publishing
-// queue slots, fence storage, or owner-local commands.
+// A synchronized queue snapshot exposes bounded ingress and terminal lifecycle state without
+// publishing public/private slots, fence values, or owner-local commands.
 struct ExecutorQueueSnapshot {
   std::size_t pending_commands;
   std::size_t pending_fences;
@@ -223,6 +166,7 @@ struct ExecutorQueueSnapshot {
   bool faulted;
   bool owner_bound;
   bool turn_active;
+  PrivateLaneSnapshot private_lane{};
 
   // --------------------------------------------------------
   // Structural equality keeps diagnostic observations deterministic.
@@ -234,8 +178,8 @@ struct ExecutorQueueSnapshot {
 // ########################################################################
 
 // ########################################################################
-// A source-fence snapshot exposes loss folding and in-flight gating without publishing mutable
-// fence storage or permitting callers to clear an integrity interval.
+// A source-fence snapshot exposes loss folding and in-flight gating without publishing
+// mutable fence storage or permitting callers to clear an integrity interval.
 struct SourceFenceSnapshot {
   model::MarketSourceOrdinal source_ordinal;
   std::optional<model::AdmissionOrdinal> earliest_pending_attempt;
@@ -347,14 +291,35 @@ private:
 // ########################################################################
 
 // ########################################################################
-// SerializedExecutor owns one preallocated command ring and one preallocated fence per configured
-// source. Exactly one bound thread drains their merged global attempt order.
+// The construction-time lease serializes token inspection with executor invalidation. It grants no
+// admission authority and is never allocated or replaced on an owner turn.
+class PrivateAdmissionLease final {
+private:
+
+  // --------------------------------------------------------
+  // Only an executor may bind a lease to its non-relocatable address.
+  explicit PrivateAdmissionLease(SerializedExecutor& owner) noexcept : owner_{&owner} {}
+
+  // --------------------------------------------------------
+  // The lease mutex protects the nullable raw address through validation or destruction.
+  mutable std::mutex mutex_;
+  SerializedExecutor* owner_;
+
+  friend class SerializedExecutor;
+  friend class AdmittedPrivateOrderSlot;
+};
+
+// ########################################################################
+
+// ########################################################################
+// SerializedExecutor owns separate preallocated public/private reserves plus source, account, and
+// global fence stores. Exactly one bound thread drains their merged global attempt order.
 class SerializedExecutor final {
 public:
 
   // --------------------------------------------------------
-  // Construct an executor for unattributable work with no source-fence table and one hard drive
-  // bound; raw tests default to the widest representable bound.
+  // Construct an executor for unattributable work with no source-fence table and one hard turn
+  // execution bound; raw tests default to the widest representable bound.
   explicit SerializedExecutor(
       std::size_t command_capacity, model::ClockProvider& clock,
       std::size_t maximum_drive_turns = std::numeric_limits<std::size_t>::max(),
@@ -368,12 +333,30 @@ public:
                      ExecutorCounterSeed counter_seed = {});
 
   // --------------------------------------------------------
+  // Install sealed M4 private storage and borrow its sole owner while leaving public-source
+  // fencing disabled.
+  SerializedExecutor(std::size_t command_capacity, model::ClockProvider& clock,
+                     PrivateAdmissionConfiguration private_configuration,
+                     PrivateAdmissionOwner& private_owner,
+                     std::size_t maximum_drive_turns = std::numeric_limits<std::size_t>::max(),
+                     ExecutorCounterSeed counter_seed = {});
+
+  // --------------------------------------------------------
+  // Install public-source and sealed M4 private stores behind the same counters and owner turn.
+  SerializedExecutor(std::size_t command_capacity, std::size_t source_capacity,
+                     model::ClockProvider& clock, SourceDiscontinuityHandler& discontinuity_handler,
+                     PrivateAdmissionConfiguration private_configuration,
+                     PrivateAdmissionOwner& private_owner,
+                     std::size_t maximum_drive_turns = std::numeric_limits<std::size_t>::max(),
+                     ExecutorCounterSeed counter_seed = {});
+
+  // --------------------------------------------------------
   // The synchronization and ownership boundary cannot be copied or relocated.
   SerializedExecutor(const SerializedExecutor&) = delete;
   SerializedExecutor& operator=(const SerializedExecutor&) = delete;
   SerializedExecutor(SerializedExecutor&&) = delete;
   SerializedExecutor& operator=(SerializedExecutor&&) = delete;
-  ~SerializedExecutor() = default;
+  ~SerializedExecutor() noexcept;
 
   // --------------------------------------------------------
   // Decide one non-blocking attempt. Every configured attempt gated by pending/in-flight loss
@@ -381,6 +364,24 @@ public:
   [[nodiscard]] model::Result<AdmissionDecision>
   try_admit(InlineCommandWorkItem work,
             std::optional<model::MarketSourceOrdinal> source_ordinal = std::nullopt);
+
+  // --------------------------------------------------------
+  // Copy one trusted receive-time-free source fact into the private critical reserve, or retain
+  // producer ownership while atomically activating its account/global loss fence.
+  [[nodiscard]] model::Result<PrivateAdmissionDecision>
+  try_admit_private(const oms::PrivateOrderIngressAttempt& attempt);
+
+  // --------------------------------------------------------
+  // Interesting syntax: deleting the rvalue overload prevents a temporary source fact from being
+  // destroyed after a non-acceptance that deliberately leaves ownership with its producer.
+  [[nodiscard]] model::Result<PrivateAdmissionDecision>
+  try_admit_private(oms::PrivateOrderIngressAttempt&& attempt) = delete;
+
+  // --------------------------------------------------------
+  // Interesting syntax: const temporaries also cannot bind through the accepted const-reference
+  // overload and disappear after an ordinary non-acceptance.
+  [[nodiscard]] model::Result<PrivateAdmissionDecision>
+  try_admit_private(const oms::PrivateOrderIngressAttempt&& attempt) = delete;
 
   // --------------------------------------------------------
   // Permanently reject later work while preserving the already established command/fence prefix.
@@ -404,8 +405,8 @@ public:
   [[nodiscard]] model::Result<std::optional<TurnReport>> execute_next_turn();
 
   // --------------------------------------------------------
-  // Execute no more than max_turns through execute_next_turn, stopping early when both stores are
-  // empty.
+  // Execute no more than max_turns through execute_next_turn, stopping early when no store is
+  // runnable.
   [[nodiscard]] model::Result<PendingTurnExecutionReport>
   execute_pending_turns(std::size_t max_turns);
 
@@ -421,6 +422,22 @@ public:
   // Return one configured source's synchronized loss state, or nullopt when it is unconfigured.
   [[nodiscard]] std::optional<SourceFenceSnapshot>
   source_fence_snapshot(model::MarketSourceOrdinal source_ordinal) const noexcept;
+
+  // --------------------------------------------------------
+  // Resolve copied, retained, or append-only consumed state by the original shared attempt ordinal.
+  // The retained observation copies its string-owned DomainError and is intentionally not noexcept.
+  [[nodiscard]] std::optional<PrivateAdmissionObservation>
+  private_admission_observation(model::AdmissionOrdinal attempt_ordinal) const;
+
+  // --------------------------------------------------------
+  // Copy only bounded private-lane counts and gates under the executor synchronization boundary.
+  [[nodiscard]] PrivateLaneSnapshot private_lane_snapshot() const noexcept;
+
+  // --------------------------------------------------------
+  // Find one configured account/venue fence and copy only its bounded diagnostic summary.
+  [[nodiscard]] std::optional<AccountSafetyFenceSnapshot>
+  find_account_safety_fence_snapshot(model::LogicalAccountId logical_account_id,
+                                     model::VenueId venue_id) const noexcept;
 
   // --------------------------------------------------------
   // Copy the first stable terminal failure, if one has failed admission and progression closed.
@@ -450,19 +467,129 @@ private:
   // ########################################################################
 
   // ########################################################################
-  // Candidate selection names either the FIFO head or one source-fence slot.
+  // Loss folding reports only fixed internal failure classes so post-handler containment performs
+  // no string-owning DomainError construction or copy before the executor becomes terminal.
+  enum class PrivateLossFailure : std::uint8_t {
+    CountExhausted = 1,
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // One fixed pending private slot owns the immutable attempt/receipt pair until owner extraction.
+  struct PrivateSlot {
+    std::optional<oms::PrivateOrderIngressAttempt> attempt;
+    std::optional<AdmissionReceipt> receipt;
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // The sole active owner turn is detached from pending capacity while retaining exact token
+  // validation authority until its terminal completion is reconciled.
+  struct ActivePrivateTurnState {
+    oms::PrivateOrderIngressAttempt attempt;
+    AdmissionReceipt receipt;
+    model::TurnOrdinal turn_ordinal;
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // One typed interval preserves every unique reason's first complete occurrence in ordinal order;
+  // its invariant is reason_occurrence_count in [1, 19] whenever the interval occupies a fence
+  // slot.
+  struct PrivateFenceInterval {
+    std::uint64_t lost_attempt_count{0U};
+    std::array<std::optional<AccountSafetyReasonOccurrence>,
+               account_safety_reason_occurrence_capacity>
+        ordered_unique_reason_occurrences{};
+    std::size_t reason_occurrence_count{0U};
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // A configured account owns exactly one fixed pending interval. The owner extracts it onto its
+  // stack while a Boolean gate lets producer races refill the same sole slot with a successor.
+  struct AccountFenceState {
+    PrivateAdmissionAccountBinding binding;
+    std::optional<PrivateFenceInterval> pending;
+    bool in_flight{false};
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // Constructor-owned fixed errors let every executor-authored post-handler failure move separate
+  // retained observation, terminal, and returned values without allocating on an owner turn.
+  struct PrivateReservedErrors {
+    model::DomainError committed_observation;
+    model::DomainError committed_terminal;
+    model::DomainError committed_result;
+    model::DomainError retained_observation;
+    model::DomainError retained_terminal;
+    model::DomainError retained_result;
+    model::DomainError account_ingress_loss_terminal;
+    model::DomainError account_ingress_loss_result;
+    model::DomainError account_owner_loss_terminal;
+    model::DomainError account_owner_loss_result;
+    model::DomainError global_ingress_loss_terminal;
+    model::DomainError global_ingress_loss_result;
+    model::DomainError global_owner_loss_terminal;
+    model::DomainError global_owner_loss_result;
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // The reasonless global fence permanently keeps its first unattributable fact and becomes an
+  // owner-applied gate without inventing an account identity.
+  struct GlobalFenceState {
+    std::optional<oms::PrivateOrderIngressAttempt> first_attempt;
+    std::optional<model::AdmissionOrdinal> earliest_attempt_ordinal;
+    std::uint64_t lost_attempt_count{0U};
+    bool in_flight{false};
+    bool owner_applied{false};
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // Internal candidate sources distinguish physical stores while reports retain the stable turn
+  // vocabulary.
+  enum class RunnableSource : std::uint8_t {
+    Command = 1,
+    SourceFence = 2,
+    PrivateCommand = 3,
+    AccountFence = 4,
+    GlobalFence = 5,
+  };
+
+  // ########################################################################
+
+  // ########################################################################
+  // Candidate selection names one physical store and carries its already validated global attempt.
   struct RunnableTurnCandidate {
-    TurnKind kind;
-    std::size_t fence_index;
+    RunnableSource source;
+    std::size_t index;
+    model::AdmissionOrdinal attempt_ordinal;
   };
 
   // ########################################################################
 
   // --------------------------------------------------------
-  // Build both public constructors through one complete allocation phase.
+  // Build every legacy and M4 constructor through one complete allocation phase.
   SerializedExecutor(std::size_t command_capacity, std::size_t source_capacity,
                      model::ClockProvider& clock, SourceDiscontinuityHandler* discontinuity_handler,
-                     std::size_t maximum_drive_turns, ExecutorCounterSeed counter_seed);
+                     std::optional<PrivateAdmissionConfiguration> private_configuration,
+                     PrivateAdmissionOwner* private_owner, std::size_t maximum_drive_turns,
+                     ExecutorCounterSeed counter_seed);
+
+  // --------------------------------------------------------
+  // Allocate every fixed private error during construction, or preserve legacy zero-overhead state.
+  [[nodiscard]] static std::optional<PrivateReservedErrors>
+  create_private_reserved_errors(bool private_enabled);
 
   // --------------------------------------------------------
   // Block a dedicated owner until work, closure, a fault, or an explicit stop becomes visible.
@@ -517,30 +644,80 @@ private:
   record_source_loss_locked(SourceFenceState& fence, model::AdmissionOrdinal attempt_ordinal);
 
   // --------------------------------------------------------
+  // Resolve only an exact sealed root plus configured account/venue pair without a partial match.
+  [[nodiscard]] AccountFenceState*
+  find_configured_account_fence_locked(const oms::PrivateOrderIngressAttempt& attempt) noexcept;
+  [[nodiscard]] const AccountFenceState* find_configured_account_fence_locked(
+      const oms::PrivateOrderIngressAttempt& attempt) const noexcept;
+
+  // --------------------------------------------------------
+  // Fold a failed configured-account attempt into its one fixed canonical interval.
+  [[nodiscard]] std::optional<PrivateLossFailure> record_account_loss_locked(
+      AccountFenceState& fence, const oms::PrivateOrderIngressAttempt& attempt,
+      model::AdmissionOrdinal attempt_ordinal, risk::AccountSafetyReason reason) noexcept;
+
+  // --------------------------------------------------------
+  // Insert or replace one reason's earliest occurrence while preserving ascending ordinal order.
+  [[nodiscard]] static bool
+  record_earliest_account_reason_occurrence(PrivateFenceInterval& interval,
+                                            AccountSafetyReasonOccurrence occurrence) noexcept;
+
+  // --------------------------------------------------------
+  // Fold an unattributable attempt into the sole permanent reasonless global fence.
+  [[nodiscard]] std::optional<PrivateLossFailure>
+  record_global_loss_locked(const oms::PrivateOrderIngressAttempt& attempt,
+                            model::AdmissionOrdinal attempt_ordinal) noexcept;
+
+  // --------------------------------------------------------
+  // Validate a move-only capability against the exact active owner, admission generation, and turn.
+  [[nodiscard]] model::Result<void>
+  validate_admitted_private_order_slot(const AdmittedPrivateOrderSlot& admitted) const;
+
+  // --------------------------------------------------------
+  // Copy bounded private diagnostics while the caller already owns the synchronization mutex.
+  [[nodiscard]] PrivateLaneSnapshot private_lane_snapshot_locked() const noexcept;
+
+  // --------------------------------------------------------
   // Restore a failed in-flight fence ahead of any successor losses without unchecked addition.
   void restore_failed_fence_locked(std::size_t fence_index,
                                    const SourceDiscontinuity& discontinuity) noexcept;
 
   // --------------------------------------------------------
-  // Find the globally oldest runnable queue head or source fence.
-  [[nodiscard]] std::optional<RunnableTurnCandidate> oldest_runnable_locked() const noexcept;
+  // Restore a failed account-fence turn ahead of any successor interval in its sole fixed slot.
+  [[nodiscard]] std::optional<PrivateLossFailure>
+  restore_failed_account_fence_locked(AccountFenceState& fence,
+                                      AccountSafetyFenceTurn failed) noexcept;
 
   // --------------------------------------------------------
-  // Return whether either construction-time store currently contains an owner turn.
+  // Find the globally oldest runnable public/private value or source/account/global fence.
+  [[nodiscard]] std::optional<RunnableTurnCandidate>
+  find_oldest_runnable_turn_locked() const noexcept;
+
+  // --------------------------------------------------------
+  // Return whether any construction-time store currently contains an owner turn.
   [[nodiscard]] bool has_runnable_locked() const noexcept;
 
   // --------------------------------------------------------
   model::ClockProvider& clock_;
   SourceDiscontinuityHandler* discontinuity_handler_;
+  std::optional<PrivateAdmissionConfiguration> private_configuration_;
+  PrivateAdmissionOwner* private_owner_;
+  std::optional<PrivateReservedErrors> private_reserved_errors_;
   mutable std::mutex mutex_;
   std::condition_variable work_available_;
   std::vector<QueuedWorkEntry> queue_;
   std::vector<SourceFenceState> fences_;
+  std::vector<PrivateSlot> private_slots_;
+  std::vector<AccountFenceState> account_fences_;
+  GlobalFenceState global_fence_;
   std::size_t head_{0U};
   std::size_t tail_{0U};
   std::size_t pending_commands_{0U};
   std::size_t pending_fences_{0U};
   std::size_t in_flight_fences_{0U};
+  std::size_t private_head_{0U};
+  std::size_t private_tail_{0U};
+  std::size_t pending_private_commands_{0U};
   std::size_t maximum_drive_turns_;
   std::optional<model::AdmissionOrdinal> last_admission_ordinal_;
   std::optional<model::ReceiveSequence> last_receive_sequence_;
@@ -550,8 +727,12 @@ private:
   std::optional<model::DomainError> terminal_error_;
   bool closed_{false};
   bool turn_active_{false};
+  std::optional<ActivePrivateTurnState> active_private_turn_;
+  std::optional<PrivateAdmissionObservation> invalid_private_completion_observation_;
+  std::shared_ptr<PrivateAdmissionLease> private_admission_lease_;
 
   friend class DedicatedExecutorDriver;
+  friend class AdmittedPrivateOrderSlot;
 };
 
 // ########################################################################
