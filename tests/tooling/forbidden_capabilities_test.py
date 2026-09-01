@@ -740,8 +740,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         self.assertTrue(direct <= discovered)
 
     # --------------------------------------------------------
-    # The explicit M4 manifest covers every current foundation file and applies owner-hop rules to
-    # production owner construction, normalization, and planning without widening them to tests.
+    # The explicit M4 manifest covers every current foundation and admission file while applying
+    # owner-hop rules only to the production paths that do not share the general-purpose executor.
     def test_m4_manifest_covers_foundation_and_owner_paths(self) -> None:
         """Pin current offline files and prove M4 owner production receives direct-path checks."""
 
@@ -758,6 +758,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "include/aegis/recovery/recovery_identity.hpp",
             "include/aegis/risk/account_safety.hpp",
             "include/aegis/runtime/m4_policy.hpp",
+            "include/aegis/runtime/private_order_admission.hpp",
+            "include/aegis/runtime/serialized_executor.hpp",
             "include/aegis/trace/m4_semantic_evidence.hpp",
             "src/aegis/configuration/startup_configuration.cpp",
             "src/aegis/oms/private_order_event.cpp",
@@ -770,6 +772,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/runtime/private_order_event_factory.hpp",
             "src/aegis/runtime/private_order_reconciler.cpp",
             "src/aegis/runtime/private_order_reconciler.hpp",
+            "src/aegis/runtime/serialized_executor.cpp",
             "src/aegis/trace/m4_semantic_evidence.cpp",
             "tests/support/m4_private_event_fixture.hpp",
             "tests/support/m4_test_authority.cpp",
@@ -780,6 +783,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/recovery/deterministic_fake_recovery_medium_test.cpp",
             "tests/unit/runtime/m4_policy_test.cpp",
             "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+            "tests/unit/runtime/private_order_admission_test.cpp",
             "tests/unit/runtime/private_order_correlation_planner_test.cpp",
             "tests/unit/runtime/private_order_reconciler_test.cpp",
             "tests/unit/trace/m4_semantic_evidence_test.cpp",
@@ -797,6 +801,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "include/aegis/recovery/recovery_identity.hpp",
             "include/aegis/risk/account_safety.hpp",
             "include/aegis/runtime/m4_policy.hpp",
+            "include/aegis/runtime/private_order_admission.hpp",
             "include/aegis/trace/m4_semantic_evidence.hpp",
             "src/aegis/configuration/startup_configuration.cpp",
             "src/aegis/oms/private_order_event.cpp",
@@ -813,9 +818,14 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         }
         general = set(scanner.M4_GENERAL_FILE_PATTERNS)
         owner = set(scanner.M4_OWNER_PATH_FILE_PATTERNS)
+        shared_executor = {
+            "include/aegis/runtime/serialized_executor.hpp",
+            "src/aegis/runtime/serialized_executor.cpp",
+        }
         self.assertTrue(required <= general)
         self.assertTrue(required_owner <= owner)
         self.assertTrue(owner <= general)
+        self.assertTrue(shared_executor.isdisjoint(owner))
         discovered = {
             path.relative_to(REPOSITORY).as_posix()
             for path in scanner.discover_default_scan_paths_or_raise(REPOSITORY)
@@ -848,6 +858,41 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                         [finding.rule for finding in findings],
                         ["forbidden include", "executor handoff"],
                     )
+
+            # Exact private-admission declarations may name their sole executor authority, while
+            # unrelated use in the same owner path must remain visible to the scanner.
+            private_header = self.write_repository_file(
+                repository,
+                "include/aegis/runtime/private_order_admission.hpp",
+                "namespace aegis::runtime {\n"
+                "class SerializedExecutor;\n"
+                "class AdmittedPrivateOrderSlot {\n"
+                "private:\n"
+                "  AdmittedPrivateOrderSlot(SerializedExecutor& owner);\n"
+                "  SerializedExecutor* owner_;\n"
+                "  AcceptedTurnContext context_;\n"
+                "  friend class SerializedExecutor;\n"
+                "};\n"
+                "class RetainedPrivateTurn {\n"
+                "  std::optional<risk::AccountSafetyReason> account_reason_;\n"
+                "  friend class SerializedExecutor;\n"
+                "};\n"
+                "}\n",
+            )
+            self.assertEqual(
+                scanner.scan_repository_paths_or_raise(repository, [private_header]), []
+            )
+            private_header.write_text(
+                private_header.read_text(encoding="utf-8")
+                + "class Unrelated { friend class SerializedExecutor; };\n"
+                + "void forbidden_handoff(SerializedExecutor& executor);\n",
+                encoding="utf-8",
+            )
+            findings = scanner.scan_repository_paths_or_raise(repository, [private_header])
+            self.assertEqual(
+                [finding.rule for finding in findings],
+                ["executor handoff", "executor handoff"],
+            )
 
     # --------------------------------------------------------
     # Default scans must not silently succeed after an explicitly assigned artifact disappears.

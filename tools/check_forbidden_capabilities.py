@@ -157,6 +157,8 @@ M4_GENERAL_FILE_PATTERNS = (
     "include/aegis/recovery/recovery_identity.hpp",
     "include/aegis/risk/account_safety.hpp",
     "include/aegis/runtime/m4_policy.hpp",
+    "include/aegis/runtime/private_order_admission.hpp",
+    "include/aegis/runtime/serialized_executor.hpp",
     "include/aegis/trace/m4_semantic_evidence.hpp",
     "src/aegis/configuration/startup_configuration.cpp",
     "src/aegis/oms/private_order_event.cpp",
@@ -169,6 +171,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "src/aegis/runtime/private_order_event_factory.hpp",
     "src/aegis/runtime/private_order_reconciler.cpp",
     "src/aegis/runtime/private_order_reconciler.hpp",
+    "src/aegis/runtime/serialized_executor.cpp",
     "src/aegis/trace/m4_semantic_evidence.cpp",
     "tests/support/m4_private_event_fixture.hpp",
     "tests/support/m4_test_authority.cpp",
@@ -179,6 +182,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "tests/unit/recovery/deterministic_fake_recovery_medium_test.cpp",
     "tests/unit/runtime/m4_policy_test.cpp",
     "tests/unit/runtime/m4_provenance_resolver_test.cpp",
+    "tests/unit/runtime/private_order_admission_test.cpp",
     "tests/unit/runtime/private_order_correlation_planner_test.cpp",
     "tests/unit/runtime/private_order_reconciler_test.cpp",
     "tests/unit/trace/m4_semantic_evidence_test.cpp",
@@ -199,6 +203,7 @@ M4_OWNER_PATH_FILE_PATTERNS = (
     "include/aegis/recovery/recovery_identity.hpp",
     "include/aegis/risk/account_safety.hpp",
     "include/aegis/runtime/m4_policy.hpp",
+    "include/aegis/runtime/private_order_admission.hpp",
     "include/aegis/trace/m4_semantic_evidence.hpp",
     "src/aegis/configuration/startup_configuration.cpp",
     "src/aegis/oms/private_order_event.cpp",
@@ -459,6 +464,31 @@ APPROVED_NON_CAPABILITY_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
+# This header names its sole executor authority in five exact declaration forms. Path-scoped span
+# masks permit only those closed capability bindings while leaving executable handoffs visible.
+APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
+    Path("include/aegis/runtime/private_order_admission.hpp"): (
+        re.compile(
+            r"\bnamespace\s+aegis::runtime\s*\{\s*class\s+"
+            r"(?P<identifier>SerializedExecutor)\s*;"
+        ),
+        re.compile(
+            r"\bprivate\s*:\s*AdmittedPrivateOrderSlot\s*\(\s*"
+            r"(?P<identifier>SerializedExecutor)"
+            r"\s*&\s*owner\b"
+        ),
+        re.compile(r"\b(?P<identifier>SerializedExecutor)\s*\*\s*owner_\s*;"),
+        re.compile(
+            r"\bAcceptedTurnContext\s+context_\s*;\s*friend\s+class\s+"
+            r"(?P<identifier>SerializedExecutor)\s*;"
+        ),
+        re.compile(
+            r"\bstd::optional\s*<\s*risk::AccountSafetyReason\s*>\s*account_reason_\s*;\s*"
+            r"friend\s+class\s+(?P<identifier>SerializedExecutor)\s*;"
+        ),
+    ),
+}
+
 # Direct-path identifier rules reject blocking operations and every known owner/executor handoff.
 DIRECT_PATH_FORBIDDEN_IDENTIFIERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -697,6 +727,16 @@ def strip_approved_non_capability_identifiers(text: str, relative: Path) -> str:
     """Exclude exact disabled-credential identifiers from live findings."""
 
     patterns = APPROVED_NON_CAPABILITY_IDENTIFIERS.get(relative, ())
+    spans = (match.span("identifier") for pattern in patterns for match in pattern.finditer(text))
+    return mask_spans(text, spans)
+
+
+# --------------------------------------------------------
+# Mask only path-exact executor authority declarations before applying owner-path handoff rules.
+def strip_approved_direct_path_identifiers(text: str, relative: Path) -> str:
+    """Exclude closed authority spellings without hiding executable executor use."""
+
+    patterns = APPROVED_DIRECT_PATH_IDENTIFIERS.get(relative, ())
     spans = (match.span("identifier") for pattern in patterns for match in pattern.finditer(text))
     return mask_spans(text, spans)
 
@@ -1031,6 +1071,7 @@ def scan_file(repository: Path, path: Path) -> list[ForbiddenCapabilityViolation
     # ++++++++++++++++++++++++++++++++++++++++
     # Apply the stricter blocking and owner-hop rules only to production paths in the direct stack.
     if is_direct_path(relative):
+        direct_text = strip_approved_direct_path_identifiers(text, relative)
         for match in DIRECT_PATH_FORBIDDEN_INCLUDE.finditer(include_text):
             findings.append(
                 forbidden_capability_violation_from_match(
@@ -1038,9 +1079,11 @@ def scan_file(repository: Path, path: Path) -> list[ForbiddenCapabilityViolation
                 )
             )
         for rule, pattern in DIRECT_PATH_FORBIDDEN_IDENTIFIERS:
-            for match in pattern.finditer(text):
+            for match in pattern.finditer(direct_text):
                 findings.append(
-                    forbidden_capability_violation_from_match(repository, path, text, match, rule)
+                    forbidden_capability_violation_from_match(
+                        repository, path, direct_text, match, rule
+                    )
                 )
 
     # ++++++++++++++++++++++++++++++++++++++++
