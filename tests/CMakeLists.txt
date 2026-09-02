@@ -70,6 +70,9 @@ add_executable(
   unit/runtime/m4_provenance_resolver_test.cpp
   # First-seen planner tests pin detached correlation values and public owner non-mutation.
   unit/runtime/private_order_correlation_planner_test.cpp
+  # Critical private-admission tests pin isolated capacity, global ordering, owner capabilities,
+  # retained lifecycle evidence, and conservative account/global loss fencing.
+  unit/runtime/private_order_admission_test.cpp
   # Reconciler tests pin exact owner binding, empty identity tables, and longitudinal submissions.
   unit/runtime/private_order_reconciler_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.

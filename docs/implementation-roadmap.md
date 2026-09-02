@@ -256,11 +256,12 @@ conversion, signed seven-scope inventory and account quarantine.
 journal/snapshot ordering, complete reconciliation proof, restart identities, safe convergence and
 the one-shot reference intent. [ADR-0013](decisions/0013-m4-policy-and-canonical-evidence.md) fixes
 the immutable M4 capacity policy, stable evidence semantics, provenance scopes and fail-closed
-headroom. The current baseline integrates policy/identity, normalized-ingress, first-admission
-resolution, owner-bound correlation, fake-recovery authority, provenance, audit-span, and typed
-semantic-evidence foundations. A required ADR-0014 must still fix exact new evidence bytes before
-any M4 encoder or byte golden. The remaining inventory, reservation-conversion, full reconciliation,
-crash-matrix, and exit-evidence work keeps the complete M4 gate open.
+headroom. The current baseline integrates policy/identity, normalized-ingress, the ordinary-private
+critical-admission lane foundation, first-admission resolution, owner-bound correlation,
+fake-recovery authority, provenance, audit-span, and typed semantic-evidence foundations. A required
+ADR-0014 must still fix exact new evidence bytes before any M4 encoder or byte golden.
+Reconciliation-event admission, inventory, reservation conversion, full reconciliation, the crash
+matrix, and exit-evidence work remain deferred and keep the complete M4 gate open.
 
 ### Outcome
 
