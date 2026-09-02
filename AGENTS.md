@@ -167,9 +167,10 @@ Apply the boundaries as follows:
   responsibility, invariant or architectural reason; do not repeat the same sentences in both. If
   the construct has no docstring, the divider comment alone must satisfy all applicable rules.
 - Close every governed block with the same divider, separated from the governed code by the required
-  blank line. The final class, function or algorithm phase in a file must also have an explicit
-  closing divider; reaching a C++ namespace close, a Python dedent or end of file is not an implicit
-  close.
+  blank line. Consecutive class-like blocks use the shared-boundary rule below instead of adding a
+  separate closing divider after each type. The final class, function or algorithm phase in a file
+  must still have an explicit closing divider; reaching a C++ namespace close, a Python dedent or end
+  of file is not an implicit close.
 - Use the class/type divider for `class`, `struct`, `union` and `enum class` definitions or forward
   declarations, Python classes, and named concept/type-alias/protocol contract groups. Continue to
   use method/function dividers for functions declared or defined inside class-like types.
@@ -179,8 +180,13 @@ Apply the boundaries as follows:
 - Use the step divider only inside longer function bodies where validation, transformation,
   encoding, commit or other meaningful phases need to be distinguished. Close the final phase
   before the C/C++ function's closing brace or the Python function's closing dedent.
-- Adjacent blocks at the same level may share one divider as the previous block's close and the next
-  block's open. Put the required blank line before that shared divider, then put the next block's
+- Consecutive class-like blocks at the same scope must share exactly one class/type divider as the
+  previous type's close and the next type's open. Put that divider immediately above the next type's
+  description; do not leave a separate closing divider below the previous type when another
+  class-like block follows next. Put a trailing class/type divider below a type only when no other
+  class-like block follows it next at that scope.
+- Other adjacent blocks at the same level may share one divider as the previous block's close and the
+  next block's open. Put the required blank line before that shared divider, then put the next block's
   description immediately after it.
 - In Python, put an opening divider and its description before any decorators without inserting a
   blank line between the description, decorators and declaration.
@@ -204,6 +210,12 @@ public:
   [[nodiscard]] Result<void> add(Order order);
 
   // --------------------------------------------------------
+};
+
+// ########################################################################
+// Reports the directly stored size of one validated order-book snapshot.
+struct OrderBookSnapshot {
+  std::size_t active_order_count;
 };
 
 // ########################################################################

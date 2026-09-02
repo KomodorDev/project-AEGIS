@@ -42,8 +42,6 @@ inline constexpr std::size_t recorded_fixture_maximum_integrity_token_bytes =
     maximum_integrity_token_bytes;
 
 // ########################################################################
-
-// ########################################################################
 // The post-admission recorded frame is a distinct immutable product rather than an ingress alias.
 class RecordedFrame;
 

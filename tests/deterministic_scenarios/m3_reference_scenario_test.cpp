@@ -40,16 +40,12 @@ concept HasExchangeAcknowledgement =
 static_assert(!HasExchangeAcknowledgement<execution::SubmitResult>);
 
 // ########################################################################
-
-// ########################################################################
 // Replay mode changes only owner mechanics; every input, clock, script, identity, and capacity is
 // otherwise identical.
 enum class M3SubmissionReplayMode : std::uint8_t {
   Manual = 1,
   Dedicated = 2,
 };
-
-// ########################################################################
 
 // ########################################################################
 // One copied callback context retains all public attribution and policy identities after the
@@ -72,8 +68,6 @@ struct ObservedBotContext {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A copied state callback preserves the complete sanitized transition and exact bound context.
 struct ObservedStateCallback {
   ObservedBotContext context;
@@ -85,8 +79,6 @@ struct ObservedStateCallback {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A copied market callback owns the normalized input, commit identity, and coherent visible book.
@@ -105,12 +97,8 @@ struct ObservedMarketCallback {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The closed union keeps callback kind explicit while permitting one ordered replay vector.
 using CallbackObservation = std::variant<ObservedStateCallback, ObservedMarketCallback>;
-
-// ########################################################################
 
 // ########################################################################
 // The result projection retains every SubmitResult field, including the dedicated scripted
@@ -130,8 +118,6 @@ struct ObservedSubmitResult {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One assigned expectation row makes each stable local outcome and identity-presence rule explicit.
@@ -264,8 +250,6 @@ private:
   std::vector<ObservedSubmitResult>* results_;
   bool submitted_{false};
 };
-
-// ########################################################################
 
 // ########################################################################
 // The peer-firm strategy exposes any accidental observation grant through a race-free counter.
@@ -619,8 +603,6 @@ private:
   model::DeterministicClockProvider callback_clock_;
   std::unique_ptr<runtime::MarketRuntime> runtime_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One replay result owns all strategy-visible and cold canonical products after owner release.

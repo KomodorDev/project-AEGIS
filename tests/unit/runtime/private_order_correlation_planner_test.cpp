@@ -130,8 +130,6 @@ static_assert(!HasPrivateRecoveryCapability<FirstSeenPlan>);
 static_assert(!HasPrivateCallbackCapability<FirstSeenPlan>);
 
 // ########################################################################
-
-// ########################################################################
 // One OMS row snapshot copies immutable admission and every mutable private-order projection field.
 struct OmsRowSnapshot {
   oms::OutboundOrderAdmission admission;
@@ -143,8 +141,6 @@ struct OmsRowSnapshot {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One fake-write snapshot retains the complete attempt chain and accepted byte prefix.
@@ -161,8 +157,6 @@ struct FakeWriteSnapshot {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // This snapshot covers all publicly observable owner state plus the three identity-table counts;

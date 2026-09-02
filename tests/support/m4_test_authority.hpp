@@ -27,8 +27,6 @@ struct M4TestAuthority {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The owner fixture keeps the exact sealed configuration, runtime policy, sole M3 coordinator,
 // derived M4 policy, and longitudinal callback predecessors together. Its counters always name the
 // next unused owner turn and processing timestamp for this coordinator.
@@ -42,8 +40,6 @@ struct M4OwnerTestAuthority {
   model::TurnOrdinal next_owner_turn;
   std::uint64_t next_processing_timestamp_nanoseconds;
 };
-
-// ########################################################################
 
 // ########################################################################
 // The move-only recovery fixture retains an external fake-medium handle beside its sole live

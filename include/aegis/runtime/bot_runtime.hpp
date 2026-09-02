@@ -31,8 +31,6 @@ namespace aegis::runtime {
 class SubmissionCoordinator;
 
 // ########################################################################
-
-// ########################################################################
 // Forward-declare the strategy owner so turn-scoped context and plan capabilities can restrict
 // construction without exposing its private implementation.
 class BotRuntime;
@@ -251,8 +249,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Latched status keeps post-callback measurement and evidence faults externally observable.
 // Noncanonical faults never truncate a preflighted fan-out; critical trace loss fails closed.
 struct BotRuntimeStatus {
@@ -389,8 +385,6 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // Bind one canonical subscription and full attribution to its owning strategy and source.
   struct SubscriptionCallbackGrant {
     model::MarketSourceOrdinal source_ordinal;
@@ -400,8 +394,6 @@ private:
     Strategy* strategy;
     BotContext* context;
   };
-
-  // ########################################################################
 
   // ########################################################################
   // Own validated callback and possible re-entry trace fields before strategy execution begins.

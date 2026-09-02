@@ -46,8 +46,6 @@ struct AdmissionDecision {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One bounded fence summarizes all currently pending losses for a configured source without
 // erasing the earliest failed attempt that determines global owner-turn order.
 struct SourceDiscontinuity {
@@ -61,8 +59,6 @@ struct SourceDiscontinuity {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Runtime-owned implementations apply source loss on the serialized owner before later attempts
@@ -85,8 +81,6 @@ public:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Stable turn kinds distinguish public/private work and each attributable or reasonless fence.
 enum class TurnKind : std::uint8_t {
   Command = 1,
@@ -95,8 +89,6 @@ enum class TurnKind : std::uint8_t {
   AccountSafetyFence = 4,
   GlobalPrivateFence = 5,
 };
-
-// ########################################################################
 
 // ########################################################################
 // A successful report covers one completed owner turn. Fence turns deliberately omit receive
@@ -128,8 +120,6 @@ struct TurnReport {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A bounded execution report distinguishes turns completed by one call from lifetime completion
 // and appends the complete private-lane diagnostic alongside existing public/source counters.
 struct PendingTurnExecutionReport {
@@ -148,8 +138,6 @@ struct PendingTurnExecutionReport {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A synchronized queue snapshot exposes bounded ingress and terminal lifecycle state without
@@ -176,8 +164,6 @@ struct ExecutorQueueSnapshot {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A source-fence snapshot exposes loss folding and in-flight gating without publishing
 // mutable fence storage or permitting callers to clear an integrity interval.
 struct SourceFenceSnapshot {
@@ -194,8 +180,6 @@ struct SourceFenceSnapshot {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Construction-only counter seeds support deterministic boundary qualification without exposing
 // mutable production counters after the executor begins accepting work.
 struct ExecutorCounterSeed {
@@ -203,8 +187,6 @@ struct ExecutorCounterSeed {
   std::optional<model::ReceiveSequence> last_receive_sequence;
   std::optional<model::TurnOrdinal> last_turn_ordinal;
 };
-
-// ########################################################################
 
 // ########################################################################
 // InlineCommandWorkItem owns one immutable, trivially copyable command in fixed inline storage.
@@ -289,8 +271,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // The construction-time lease serializes token inspection with executor invalidation. It grants no
 // admission authority and is never allocated or replaced on an owner turn.
 class PrivateAdmissionLease final {
@@ -308,8 +288,6 @@ private:
   friend class SerializedExecutor;
   friend class AdmittedPrivateOrderSlot;
 };
-
-// ########################################################################
 
 // ########################################################################
 // SerializedExecutor owns separate preallocated public/private reserves plus source, account, and
@@ -455,16 +433,12 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // Each configured one-based source ordinal indexes one persistent merge slot.
   struct SourceFenceState {
     std::optional<model::AdmissionOrdinal> earliest_failed_attempt;
     std::uint64_t lost_attempt_count{0U};
     bool in_flight{false};
   };
-
-  // ########################################################################
 
   // ########################################################################
   // Loss folding reports only fixed internal failure classes so post-handler containment performs
@@ -474,15 +448,11 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // One fixed pending private slot owns the immutable attempt/receipt pair until owner extraction.
   struct PrivateSlot {
     std::optional<oms::PrivateOrderIngressAttempt> attempt;
     std::optional<AdmissionReceipt> receipt;
   };
-
-  // ########################################################################
 
   // ########################################################################
   // The sole active owner turn is detached from pending capacity while retaining exact token
@@ -492,8 +462,6 @@ private:
     AdmissionReceipt receipt;
     model::TurnOrdinal turn_ordinal;
   };
-
-  // ########################################################################
 
   // ########################################################################
   // One typed interval preserves every unique reason's first complete occurrence in ordinal order;
@@ -508,8 +476,6 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // A configured account owns exactly one fixed pending interval. The owner extracts it onto its
   // stack while a Boolean gate lets producer races refill the same sole slot with a successor.
   struct AccountFenceState {
@@ -517,8 +483,6 @@ private:
     std::optional<PrivateFenceInterval> pending;
     bool in_flight{false};
   };
-
-  // ########################################################################
 
   // ########################################################################
   // Constructor-owned fixed errors let every executor-authored post-handler failure move separate
@@ -541,8 +505,6 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // The reasonless global fence permanently keeps its first unattributable fact and becomes an
   // owner-applied gate without inventing an account identity.
   struct GlobalFenceState {
@@ -554,8 +516,6 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // Internal candidate sources distinguish physical stores while reports retain the stable turn
   // vocabulary.
   enum class RunnableSource : std::uint8_t {
@@ -565,8 +525,6 @@ private:
     AccountFence = 4,
     GlobalFence = 5,
   };
-
-  // ########################################################################
 
   // ########################################################################
   // Candidate selection names one physical store and carries its already validated global attempt.
@@ -734,8 +692,6 @@ private:
   friend class DedicatedExecutorDriver;
   friend class AdmittedPrivateOrderSlot;
 };
-
-// ########################################################################
 
 // ########################################################################
 // DeterministicExecutorDriver gives one caller explicit owner binding and bounded manual

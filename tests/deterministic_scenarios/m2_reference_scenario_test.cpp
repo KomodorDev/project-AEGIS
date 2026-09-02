@@ -47,8 +47,6 @@ struct ObservedBotContext {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A copied state callback retains the complete sanitized transition and no hidden book alias.
 struct ObservedStateCallback {
   ObservedBotContext context;
@@ -60,8 +58,6 @@ struct ObservedStateCallback {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A copied market callback owns the complete normalized event, commit identity, and coherent
@@ -81,12 +77,8 @@ struct ObservedMarketCallback {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The closed observation union preserves callback kind without a lossy projection.
 using CallbackObservation = std::variant<ObservedStateCallback, ObservedMarketCallback>;
-
-// ########################################################################
 
 // ########################################################################
 // A callback gate holds one dedicated turn after its observation is copied so the producer can
@@ -200,8 +192,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // An ungranted strategy counts any accidental callback without depending on callback contents.
 class UnrelatedBotStrategy final : public runtime::Strategy {
 public:
@@ -229,8 +219,6 @@ public:
 private:
   std::atomic_uint32_t* callback_count_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One immutable script entry binds credential-free bytes to its external session and deterministic
@@ -317,8 +305,6 @@ constexpr ScriptedFrame final_recovery{
     4'200U, 2U,
     "AEGISMD|1|source.deribit-btc-perpetual|snapshot|4|none|4200|1|ok:session2book4|2|"
     "B,50080,25|A,50080.5,26"};
-
-// ########################################################################
 
 // ########################################################################
 // Replay mode selects only ownership mechanics; all fixture bytes, clocks, and assertions remain
@@ -630,8 +616,6 @@ private:
   std::uint64_t current_clock_{1'000U};
   std::unique_ptr<runtime::MarketRuntime> runtime_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One replay result owns the complete callback vector and cold runtime evidence after owner

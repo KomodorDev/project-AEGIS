@@ -32,15 +32,11 @@ inline constexpr std::size_t maximum_encoded_fake_order_bytes = 1'024U;
 inline constexpr std::uint64_t maximum_submission_attempts_supported = 1'000'000U;
 
 // ########################################################################
-
-// ########################################################################
 // Assigned script actions make exact encoding and an ordinary deterministic failure explicit.
 enum class FakeEncodingAction : std::uint8_t {
   Encode = 1,
   Fail = 2,
 };
-
-// ########################################################################
 
 // ########################################################################
 // One override replaces the default action at an exact one-based encoder invocation.
@@ -54,8 +50,6 @@ struct FakeEncodingOverride {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // The validated script owns canonical ordinal-sorted unique overrides and a non-exhausting default.
@@ -100,8 +94,6 @@ private:
   std::uint64_t maximum_invocations_;
   std::vector<FakeEncodingOverride> overrides_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One successful local transform owns exact canonical bytes plus non-payload attempt/invocation
@@ -155,8 +147,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // One reached encoder call exposes its consumed invocation and either exact bytes or the scripted
 // ordinary EncodingFailed action; invalid internal state remains a separate DomainError.
 class FakeEncodingResult final {
@@ -206,8 +196,6 @@ private:
   model::EncoderInvocationOrdinal invocation_ordinal_;
   std::optional<EncodedFakeOrder> encoded_order_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // This final concrete type performs only one bounded in-memory transform selected by its validated

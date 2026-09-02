@@ -38,8 +38,6 @@ enum class OutboundOrderState : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Cancellation is orthogonal to the primary OMS state, so local write uncertainty cannot become a
 // false venue-terminal order fact.
 enum class CancellationState : std::uint8_t {
@@ -52,8 +50,6 @@ enum class CancellationState : std::uint8_t {
   Rejected = 6,
   Confirmed = 7,
 };
-
-// ########################################################################
 
 // ########################################################################
 // A complete detached copy of one row's mutable M4 projection supports recovery and atomic tests
@@ -80,8 +76,6 @@ struct PrivateOrderProjection {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One admitted order owns the complete immutable identity and provenance projection needed by the
@@ -114,8 +108,6 @@ struct OutboundOrderProvenance {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Admission transfers the already-authorized, validated, and risk-reserved order into the OMS;
 // callers cannot omit its attempt, local identity, reservation, exposure, or provenance.
 struct OutboundOrderAdmission {
@@ -132,8 +124,6 @@ struct OutboundOrderAdmission {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A record retains its complete admission permanently and exposes only detached or const
@@ -230,8 +220,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Ordinary duplicate and capacity non-admission remain SubmitResult reasons, while impossible
 // lower-level state is returned separately as a DomainError by OutboundOms::admit_outbound_order.
 // Every
@@ -277,8 +265,6 @@ private:
   const OutboundOrderRecord* record_{nullptr};
   std::optional<execution::SubmissionReason> reason_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // The owner-local table uses deterministic open addressing and never erases rows, so complete

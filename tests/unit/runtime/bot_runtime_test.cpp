@@ -63,16 +63,12 @@ static_assert(!std::is_default_constructible_v<runtime::BotDispatchPlan>);
 static_assert(!std::is_aggregate_v<runtime::BotDispatchPlan>);
 
 // ########################################################################
-
-// ########################################################################
 // Callback observations copy only immutable strategy-visible values so assertions never retain a
 // turn-scoped book view or context reference.
 enum class ObservedCallbackKind : std::uint8_t {
   State = 1,
   Market = 2,
 };
-
-// ########################################################################
 
 // ########################################################################
 // One observation pins callback order, attribution, state, book identity, and coherent top levels.
@@ -93,8 +89,6 @@ struct CallbackObservation {
   std::size_t bid_count;
   std::size_t ask_count;
 };
-
-// ########################################################################
 
 // ########################################################################
 // CallbackRecordingStrategy owns no runtime state beyond its test controls and copies each
@@ -292,8 +286,6 @@ private:
   bool trace_slot_consumed_{false};
   bool clock_advance_failed_{false};
 };
-
-// ########################################################################
 
 // ########################################################################
 // A two-reading clock makes callback measurement regression deterministic without changing any

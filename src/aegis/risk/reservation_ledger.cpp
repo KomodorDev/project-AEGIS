@@ -39,8 +39,6 @@ struct RiskScopeCountKey {
 };
 
 // ########################################################################
-
-// ########################################################################
 // RiskScopeInstrumentQuantityKey prevents directional contract quantities from aggregating across
 // instruments.
 struct RiskScopeInstrumentQuantityKey {
@@ -56,8 +54,6 @@ struct RiskScopeInstrumentQuantityKey {
 };
 
 // ########################################################################
-
-// ########################################################################
 // RiskScopeQuoteNotionalKey qualifies gross and aggregate worst exposure by quote currency.
 struct RiskScopeQuoteNotionalKey {
   RiskScopeCountKey count;
@@ -70,8 +66,6 @@ struct RiskScopeQuoteNotionalKey {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // RiskScopeInstrumentDirectionalNotionalKey retains each instrument contribution before

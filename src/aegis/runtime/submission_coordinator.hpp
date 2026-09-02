@@ -55,12 +55,8 @@ namespace aegis::runtime {
 class BotContext;
 
 // ########################################################################
-
-// ########################################################################
 // BotRuntime alone may close recovery installation before callback authority becomes reachable.
 class BotRuntime;
-
-// ########################################################################
 
 // ########################################################################
 // The immutable M4 policy is borrowed only while an owner-bound planning child validates and copies
@@ -68,12 +64,8 @@ class BotRuntime;
 class M4Policy;
 
 // ########################################################################
-
-// ########################################################################
 // The source-private identity planner remains incomplete at this public M3 boundary.
 class PrivateOrderReconciler;
-
-// ########################################################################
 
 // ########################################################################
 // Source-private fault points let focused tests force exact canonical-append containment branches
@@ -84,8 +76,6 @@ enum class TraceAppendFaultPointForTest : std::uint8_t {
   WriteInitiatedAfterAcceptance = 3,
   SubmissionCompletedAfterInitiation = 4,
 };
-
-// ########################################################################
 
 // ########################################################################
 // SubmissionCoordinator owns every mutable M3 component and is the sole direct-path entry below
@@ -201,8 +191,6 @@ private:
   friend class BotContext;
 
   // ########################################################################
-
-  // ########################################################################
   // Only a successfully constructed BotRuntime may permanently close the recovery-install seam.
   friend class BotRuntime;
 
@@ -229,8 +217,6 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // This private fixed-data probe lets focused tests request bounded genuine BotContext re-entry at
   // the identity seam without installing a callback, virtual provider, or public submission seam.
   struct ReentryProbe {
@@ -240,8 +226,6 @@ private:
     std::uint32_t requested_attempts;
     bool armed{true};
   };
-
-  // ########################################################################
 
   // ########################################################################
   // One post-risk guard owns the sole rollback right. Explicit release or accepted-copy retention

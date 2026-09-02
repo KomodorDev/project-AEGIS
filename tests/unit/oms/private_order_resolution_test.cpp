@@ -57,8 +57,6 @@ static_assert(
 static_assert(static_cast<std::uint8_t>(risk::AccountSafetyReason::ProvenanceMismatch) == 19U);
 
 // ########################################################################
-
-// ########################################################################
 // Registry alternatives remain nominal; the sealed resolution and trade wrappers have no public
 // construction authority.
 static_assert(std::variant_size_v<oms::PrivateEventRegistryKeyValue> == 3U);

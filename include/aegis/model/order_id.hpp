@@ -200,8 +200,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // A scripted replay provider owns only already minted canonical identities. Repeated values are
 // deliberately permitted so OMS duplicate handling can be proved without an open callback seam.
 class ScriptedOrderIdProvider final {
@@ -230,14 +228,10 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Interesting syntax: this closed variant admits only the two final deterministic implementations;
 // callers cannot inject a user-defined virtual provider into the synchronous submission path.
 using DeterministicOrderIdSource =
     std::variant<DeterministicOrderIdProvider, ScriptedOrderIdProvider>;
-
-// ########################################################################
 
 // ########################################################################
 // Production construction supplies a fresh operating-system namespace and delegates counter

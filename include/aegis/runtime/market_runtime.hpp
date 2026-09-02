@@ -31,8 +31,6 @@ namespace aegis::runtime {
 class SubmissionCoordinator;
 
 // ########################################################################
-
-// ########################################################################
 // Runtime lifecycle distinguishes source bootstrap, ordinary operation, deliberate closure, and
 // fail-closed suppression after an owner-turn fault.
 enum class MarketRuntimeLifecycle : std::uint8_t {
@@ -41,8 +39,6 @@ enum class MarketRuntimeLifecycle : std::uint8_t {
   Closed = 3,
   Faulted = 4,
 };
-
-// ########################################################################
 
 // ########################################################################
 // A synchronized status copy exposes bounded ingress and callback health without publishing any
@@ -68,8 +64,6 @@ struct MarketRuntimeStatus {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Quiescent source evidence copies owner state only after ownership is released and work is either
 // drained by closure or terminally suppressed, so no caller receives a live mutable-state alias.
 struct MarketRuntimeSourceEvidence {
@@ -88,8 +82,6 @@ struct MarketRuntimeSourceEvidence {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One copied OMS row preserves its complete immutable admission plus the final owner-local state.
 struct SubmissionOmsOrderEvidence {
   oms::OutboundOrderAdmission admission;
@@ -102,8 +94,6 @@ struct SubmissionOmsOrderEvidence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One copied fake accepted slot owns the exact bytes and every assigned local causal identity.
@@ -121,8 +111,6 @@ struct SubmissionAcceptedWriteEvidence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Quiescent M3 evidence owns all deterministic policy identities, canonical and diagnostic
@@ -156,8 +144,6 @@ struct SubmissionRuntimeEvidence {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Final evidence owns M2 canonical replay state plus the optional M3 fake-submission bundle so it
 // remains valid independently of the runtime object's later destruction.
 struct MarketRuntimeEvidence {
@@ -181,8 +167,6 @@ struct MarketRuntimeEvidence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // MarketRuntime is the stable heap-owned composition root and the sole handler allowed to mutate
@@ -287,15 +271,11 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // A frame command contains only the stable runtime handle and bounded slot index.
   struct FrameCommand {
     MarketRuntime* runtime;
     std::uint32_t slot_index;
   };
-
-  // ########################################################################
 
   // ########################################################################
   // Bootstrap commands name one canonical configured source at a stable runtime address.
@@ -305,15 +285,11 @@ private:
   };
 
   // ########################################################################
-
-  // ########################################################################
   // Resynchronization commands defer one explicit source reset to the serialized owner.
   struct ResynchronizeCommand {
     MarketRuntime* runtime;
     std::uint32_t source_index;
   };
-
-  // ########################################################################
 
   // ########################################################################
   // A pending noncanonical diagnostic is validated before state work and appended only after the

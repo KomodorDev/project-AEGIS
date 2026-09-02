@@ -363,8 +363,6 @@ struct SubmissionMeasurementProbe {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The baseline strategy invokes the sole public bot-bound submission capability and brackets no
 // operation except that exact synchronous call with benchmark-only allocation tracking.
 class MeasuredSubmissionStrategy final : public runtime::Strategy {
@@ -410,8 +408,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // The peer-firm strategy satisfies complete configured-bot ownership without receiving a market
 // subscription or participating in either measured baseline-firm submission.
 class NoopStrategy final : public runtime::Strategy {
@@ -429,8 +425,6 @@ public:
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One fixture seals the exact policies, preallocates all 10,000-attempt state, establishes Ready

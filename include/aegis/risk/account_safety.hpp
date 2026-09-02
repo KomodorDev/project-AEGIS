@@ -16,8 +16,6 @@ enum class AccountSafetyState : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Stable reasons let later owners retain the first correctness loss and each unique escalation.
 enum class AccountSafetyReason : std::uint8_t {
   SubmissionUnknown = 1,

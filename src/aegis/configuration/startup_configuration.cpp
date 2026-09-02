@@ -233,8 +233,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Nested record encoders assign field tags and order explicitly; changing either changes schema 1.
 using CanonicalConfigurationWriterResult = model::Result<CanonicalConfigurationWriter>;
 

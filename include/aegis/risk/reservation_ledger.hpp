@@ -31,8 +31,6 @@ enum class ReservationState : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // ReservationEvidence retains the exact creating identity, side, and once-calculated economics.
 struct ReservationEvidence {
   model::ReservationId reservation_id;
@@ -46,8 +44,6 @@ struct ReservationEvidence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // RiskScopeExposure is a read-only coherent view of the five mutable cells used by one complete
@@ -71,8 +67,6 @@ struct RiskScopeExposure {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Canonical scope evidence owns the complete risk-policy key and its coherent mutable cell view so
 // quiescent runtime inspection never depends on a live route or caller-authored subject spelling.
 struct RiskScopeExposureEvidence {
@@ -90,8 +84,6 @@ struct RiskScopeExposureEvidence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // RiskCheckResult is either a committed held reservation or the first stable ordinary risk reason;
@@ -162,8 +154,6 @@ private:
   std::optional<OrderExposure> exposure_;
   std::optional<execution::RiskLimitEvidence> risk_evidence_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // ReservationLedger preallocates every policy cell and reservation slot at construction. Its direct

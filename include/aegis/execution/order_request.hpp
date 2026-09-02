@@ -18,22 +18,16 @@ enum class OrderSide : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // M3 intentionally exposes only limit orders so risk never invents a market-order price collar.
 enum class OrderType : std::uint8_t {
   Limit = 1,
 };
 
 // ########################################################################
-
-// ########################################################################
 // Good-til-cancelled is the sole deterministic M3 time-in-force value.
 enum class TimeInForce : std::uint8_t {
   GoodTilCancelled = 1,
 };
-
-// ########################################################################
 
 // ########################################################################
 // A strategy supplies only route selection and exact economics; runtime-owned identity and
@@ -53,8 +47,6 @@ struct OrderRequest {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Route and attribution are removed after authorization; risk and encoding receive only the exact

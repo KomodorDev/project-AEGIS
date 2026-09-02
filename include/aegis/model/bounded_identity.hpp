@@ -106,8 +106,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Fixed opaque identities preserve exact injected bytes while the component tag prevents mixing.
 template <typename Tag, std::size_t Size> class FixedOpaqueIdentity final {
 public:
@@ -135,8 +133,6 @@ private:
   // Retain exactly the component-defined width without object-memory encoding.
   Bytes bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // Namespace-counter identities share the OrderId byte profile but preserve component-owned tags.
@@ -201,8 +197,6 @@ private:
   std::uint64_t counter_;
   Bytes bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One move-only provider owns a namespace-counter stream and enters sticky exhaustion immediately
@@ -290,8 +284,6 @@ private:
   std::uint64_t next_counter_;
   bool exhausted_{false};
 };
-
-// ########################################################################
 
 // ########################################################################
 // Component-tagged ordinals reject zero and report the tag's exact exhaustion code before wrap.

@@ -42,8 +42,6 @@ enum class RuntimePolicyTag : std::uint16_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Nested source tags restart at one and explicitly include the M2-fixed order-book channel so a
 // future channel extension cannot reinterpret existing bytes.
 enum class RuntimeSourceTag : std::uint16_t {

@@ -50,8 +50,6 @@ struct CallbackMeasurementProbe {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A trivially copied command gives BENCH-M2-EXEC-001 no behavior beyond proving handler invocation.
 struct NoopCommand {
   std::uint64_t token;

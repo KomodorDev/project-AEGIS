@@ -20,8 +20,6 @@ enum class RiskScopeKind : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Limit order is stable inside each scope and matches the AEGISRSP schema-one encoding.
 enum class RiskLimitKind : std::uint8_t {
   SingleOrderQuantity = 1,

@@ -62,8 +62,6 @@ struct M4PolicyCapacities {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The digest names exact schema-one AEGISM4P bytes and cannot be confused with earlier policies.
 class M4PolicyFingerprint final {
 public:
@@ -90,8 +88,6 @@ private:
   // The exact SHA-256 bytes are the complete fingerprint state.
   model::Sha256Digest bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // Successful creation cross-validates the complete M1-M3 authority chain, validates all M4 bounds,

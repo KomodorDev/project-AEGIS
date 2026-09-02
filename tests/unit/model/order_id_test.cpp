@@ -89,8 +89,6 @@ static_assert(!std::is_copy_constructible_v<DeterministicOrderIdSource>);
 static_assert(std::is_move_constructible_v<DeterministicOrderIdSource>);
 
 // ########################################################################
-
-// ########################################################################
 // Interesting syntax: a requires-expression proves bool and plain character input cannot select the
 // factory, while signed char and wider standard integers remain callable. The narrow runtime case
 // below instantiates the accepted body and its std::in_range use.

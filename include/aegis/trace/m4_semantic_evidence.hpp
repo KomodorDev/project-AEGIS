@@ -29,8 +29,6 @@ enum class OriginatingEventIdentityKind : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Stable audit kinds name semantic row profiles while leaving their canonical bytes undefined.
 enum class M4AuditKind : std::uint8_t {
   EventDisposition = 1,
@@ -45,8 +43,6 @@ enum class M4AuditKind : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Callback decisions distinguish primary-row suppression from aggregate planned and terminal rows.
 enum class CallbackDecision : std::uint8_t {
   None = 0,
@@ -59,8 +55,6 @@ enum class CallbackDecision : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Recovery gaps classify retained uncertainty without pretending callback delivery occurred.
 enum class RecoveryGapKind : std::uint8_t {
   None = 0,
@@ -70,8 +64,6 @@ enum class RecoveryGapKind : std::uint8_t {
   LocalProvenanceMissing = 4,
   CallbackDeliveryAmbiguous = 5,
 };
-
-// ########################################################################
 
 // ########################################################################
 // Diagnostic stages name the first semantic boundary that observed one bounded M4 failure.
@@ -90,8 +82,6 @@ enum class M4DiagnosticStage : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A diagnostic records its safety consequence separately from its domain error and processing
 // stage.
 enum class DiagnosticSafetyAction : std::uint8_t {
@@ -100,8 +90,6 @@ enum class DiagnosticSafetyAction : std::uint8_t {
   Quarantined = 2,
   RuntimeFaulted = 3,
 };
-
-// ########################################################################
 
 // ########################################################################
 // A recovery action has a distinct checked one-based ordinal within one reconciliation epoch.
@@ -151,8 +139,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // The identity-free alternative carries no sentinel identity bytes.
 struct NoOriginatingEventIdentity {
 
@@ -163,8 +149,6 @@ struct NoOriginatingEventIdentity {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One local originating identity carries only the AEGIS-minted local event ID.
@@ -180,8 +164,6 @@ struct LocalOriginatingEventIdentity {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One venue originating identity preserves the complete source-scoped event key.
 struct VenueOriginatingEventIdentity {
   oms::VenuePrivateEventKey event_key;
@@ -193,8 +175,6 @@ struct VenueOriginatingEventIdentity {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One reconciliation identity carries its epoch, authoritative cut, and row ordinal.
@@ -212,8 +192,6 @@ struct ReconciliationOriginatingEventIdentity {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One recovery-action identity is scoped by its reconciliation epoch and independent action
 // ordinal.
 struct RecoveryActionOriginatingEventIdentity {
@@ -229,15 +207,11 @@ struct RecoveryActionOriginatingEventIdentity {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Exactly one closed originating identity alternative is active in semantic evidence.
 using OriginatingEventIdentityValue =
     std::variant<NoOriginatingEventIdentity, LocalOriginatingEventIdentity,
                  VenueOriginatingEventIdentity, ReconciliationOriginatingEventIdentity,
                  RecoveryActionOriginatingEventIdentity>;
-
-// ########################################################################
 
 // ########################################################################
 // The closed value keeps an origin tag inseparable from its exact identity-domain payload.
@@ -300,8 +274,6 @@ private:
   // Store the active origin tag and its complete payload as one immutable value.
   OriginatingEventIdentityValue value_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One checked nonempty callback range owns its first, count, and validated inclusive last ordinal.

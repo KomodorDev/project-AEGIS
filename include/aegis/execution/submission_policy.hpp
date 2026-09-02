@@ -27,8 +27,6 @@ enum class SubmissionCapability : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // All mutable owner storage limits are sealed together so no direct-path component can silently
 // allocate or select an independent capacity.
 struct SubmissionPolicyCapacities {
@@ -49,8 +47,6 @@ struct SubmissionPolicyCapacities {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Construction receives raw canonical identities and the independently derived longest AEGISFOE
 // size while validated fake-script objects retain their canonical sorted override order.
 struct SubmissionPolicyParams {
@@ -64,8 +60,6 @@ struct SubmissionPolicyParams {
   FakeEncoderScript encoder_script;
   FakeInitiatorScript initiator_script;
 };
-
-// ########################################################################
 
 // ########################################################################
 // This digest names the exact AEGISSUP positional bytes; hexadecimal rendering is not a second
@@ -95,8 +89,6 @@ public:
 private:
   model::Sha256Digest bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // Successful creation publishes one coherent fake-only policy after validating all capacity,

@@ -48,8 +48,6 @@ concept AdmitsPrivateConstRvalue = requires(Executor& executor, const Attempt at
 };
 
 // ########################################################################
-
-// ########################################################################
 // Literal assignments and construction traits are authored test expectations, not reflections of
 // a production lookup table or declaration order.
 static_assert(static_cast<std::uint8_t>(runtime::AdmissionOutcome::Accepted) == 1U);
@@ -89,8 +87,6 @@ static_assert(
 static_assert(
     !noexcept(std::declval<const runtime::SerializedExecutor&>().private_admission_observation(
         std::declval<model::AdmissionOrdinal>())));
-
-// ########################################################################
 
 // ########################################################################
 // A test-owned owner records only bounded copies exposed through the lawful capability API and can
@@ -501,8 +497,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // One copied public command records its complete owner context so shared private/public counter
 // and merge ordering can be proved without using production expectations.
 struct PublicTurnRecord {
@@ -510,14 +504,10 @@ struct PublicTurnRecord {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The inline work value borrows bounded test state whose lifetime encloses the executor.
 struct PublicRecordCommand {
   PublicTurnRecord* record;
 };
-
-// ########################################################################
 
 // ########################################################################
 // A fixed scripted clock exposes its exact observation count so pre-clock terminal boundaries and

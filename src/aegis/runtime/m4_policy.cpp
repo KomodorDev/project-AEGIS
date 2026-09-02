@@ -22,15 +22,11 @@ using model::DomainError;
 using model::DomainErrorCode;
 
 // ########################################################################
-
-// ########################################################################
 // Validation metadata names all 26 fields without defining their canonical encoding order.
 struct M4PolicyCapacityField {
   std::uint64_t M4PolicyCapacities::*member;
   std::string_view name;
 };
-
-// ########################################################################
 
 // ########################################################################
 // This internal projection exists only after the public factory cross-validates sealed authorities.
@@ -42,8 +38,6 @@ struct M4PolicyCanonicalInputs {
   model::Sha256Digest risk_policy_fingerprint;
   model::Sha256Digest submission_policy_fingerprint;
 };
-
-// ########################################################################
 
 // ########################################################################
 // Counts derived from sealed M1-M3 objects define generic lower bounds without fixture authorship.

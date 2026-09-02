@@ -20,8 +20,6 @@ namespace aegis::runtime {
 class M4Policy;
 
 // ########################################################################
-
-// ########################################################################
 // The source-private reconciler alone may consume a completed bootstrap during owner installation.
 class PrivateOrderReconciler;
 
@@ -35,8 +33,6 @@ namespace detail {
 // ########################################################################
 // One shared backing allocation outlives either the external handle or a live runtime lease.
 struct FakeRecoveryBacking;
-
-// ########################################################################
 
 // ########################################################################
 // Shared lease control releases the single-incarnation flag after every installed authority that
@@ -119,15 +115,11 @@ private:
   friend class DeterministicFakeRecoveryMedium;
 
   // ########################################################################
-
-  // ########################################################################
   // The exact source-private owner consumes lease and provider together after complete validation.
   friend class runtime::PrivateOrderReconciler;
 
   // ########################################################################
 };
-
-// ########################################################################
 
 // ########################################################################
 // The concrete fake medium owns one fixed-capacity in-memory typed journal and namespace registry.

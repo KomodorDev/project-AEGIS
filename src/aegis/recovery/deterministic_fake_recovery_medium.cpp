@@ -78,8 +78,6 @@ struct FakeRecoveryBacking {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Shared startup-and-runtime control keeps backing alive and releases the exclusive incarnation
 // only after the final installed identity or reconciliation owner stops using it.
 struct FakeJournalLeaseControl {
