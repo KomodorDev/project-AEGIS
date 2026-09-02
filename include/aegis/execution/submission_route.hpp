@@ -27,8 +27,6 @@ struct SubmissionRouteInput {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One installed route owns every immutable value needed by authorization, risk, OMS, encoding,
 // and evidence after startup configuration is no longer consulted on the direct path.
 class InstalledSubmissionRoute final {
@@ -109,8 +107,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Authorization returns either one borrowed immutable installed route or one stable first reason.
 struct RouteAuthorizationDecision {
   const InstalledSubmissionRoute* installed_route;
@@ -122,8 +118,6 @@ struct RouteAuthorizationDecision {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // The catalog installs once, remains canonically RouteId-sorted, and performs no subscription or

@@ -108,8 +108,6 @@ using ReconciliationRowOrdinal =
     model::OneBasedComponentOrdinal<detail::ReconciliationRowOrdinalTag>;
 
 // ########################################################################
-
-// ########################################################################
 // Reconciliation epochs extend one runtime epoch with a nonzero local counter.
 class ReconciliationEpochId final {
 public:
@@ -177,8 +175,6 @@ private:
   std::uint64_t counter_;
   Bytes bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One runtime owns one reconciliation-epoch counter stream with sticky non-wrapping exhaustion.

@@ -18,8 +18,6 @@ namespace aegis::runtime {
 class M4Policy;
 
 // ########################################################################
-
-// ########################################################################
 // The composition-root resolver is the sole subject-provenance construction authority.
 class M4ProvenanceResolver;
 
@@ -118,8 +116,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Route identity and its sealed revision are one atomic provenance group; neither may appear alone.
 struct M4RouteSubject {
   RouteId route_id;
@@ -133,8 +129,6 @@ struct M4RouteSubject {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Instrument identity and metadata revision are one atomic supported-subject group.
 struct M4InstrumentSubject {
   InstrumentId instrument_id;
@@ -146,8 +140,6 @@ struct M4InstrumentSubject {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One optional M4 subject retains only attribution proved by sealed configuration or a complete
@@ -230,8 +222,6 @@ private:
 
   // ########################################################################
 };
-
-// ########################################################################
 
 // ########################################################################
 // The complete provenance value combines the mandatory seven-field root with either no subject or

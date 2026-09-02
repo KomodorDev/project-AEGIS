@@ -31,8 +31,6 @@ enum class SubmissionDiagnosticKind : std::uint16_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Raw canonical digests keep the diagnostic leaf independent of policy wrapper ownership while
 // still binding every retained record to the exact startup, risk, and submission rulebooks.
 struct SubmissionDiagnosticProvenance {
@@ -47,8 +45,6 @@ struct SubmissionDiagnosticProvenance {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Optional fixed fields preserve only the submission identity available at the observation point;
@@ -73,8 +69,6 @@ struct SubmissionDiagnosticFields {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One retained observation owns a sink-issued ordinal, exact kind/profile, and all required
 // canonical provenance digests.
 struct SubmissionDiagnosticRecord {
@@ -90,8 +84,6 @@ struct SubmissionDiagnosticRecord {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // The owner-local sink preserves the earliest valid prefix and saturates its dropped count so

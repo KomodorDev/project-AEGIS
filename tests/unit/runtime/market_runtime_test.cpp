@@ -34,8 +34,6 @@ enum class ObservedCallbackKind : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Fixed optional level arrays let the capturing strategy remain allocation-free during callbacks.
 struct CallbackObservation {
   ObservedCallbackKind kind;
@@ -59,8 +57,6 @@ struct CallbackObservation {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // MarketCallbackCapturingStrategy records only bounded immutable values from each synchronous
@@ -142,8 +138,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // OwnerCloseControl transfers one stable runtime handle into a dedicated callback and publishes
 // entry/return observations without exposing any runtime-owned mutable state.
 struct OwnerCloseControl {
@@ -155,8 +149,6 @@ struct OwnerCloseControl {
 };
 
 // ########################################################################
-
-// ########################################################################
 // OwnerReentrantExecutionControl publishes the result of one deliberately recursive over-bound
 // drive request.
 struct OwnerReentrantExecutionControl {
@@ -165,8 +157,6 @@ struct OwnerReentrantExecutionControl {
   std::atomic_bool returned{false};
   std::atomic_uint32_t error_code{0U};
 };
-
-// ########################################################################
 
 // ########################################################################
 // OwnerClosingStrategy exercises graceful closure from the dedicated owner callback itself.
@@ -212,8 +202,6 @@ private:
   // --------------------------------------------------------
   OwnerCloseControl* control_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // OwnerReentrantExecutionStrategy proves active-owner reentry takes precedence over an invalid
@@ -265,8 +253,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // ArmedRegressingClock remains stable for bootstrap, then deterministically makes every later
 // callback finish before it starts to trigger the production post-commit fault path.
 class ArmedRegressingClock final : public model::ClockProvider {
@@ -296,8 +282,6 @@ private:
   std::atomic_bool armed_{false};
   std::atomic_uint64_t reading_{0U};
 };
-
-// ########################################################################
 
 // ########################################################################
 // ArmedBudgetClock leaves bootstrap unmeasured, then makes each callback exceed the sealed budget
@@ -331,8 +315,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Interesting syntax: requires-expression probes prove a caller-authored order has no organization,
 // account, venue, or local identity fields with which a strategy could forge runtime-bound
 // submission attribution.
@@ -358,8 +340,6 @@ static_assert(!HasCallerVenue<execution::OrderRequest>);
 static_assert(!HasCallerOrderId<execution::OrderRequest>);
 
 // ########################################################################
-
-// ########################################################################
 // SubmissionCapture retains only immutable callback attribution and the synchronous local result
 // projection, so manual and dedicated owners can be compared after release.
 struct SubmissionCapture {
@@ -382,8 +362,6 @@ struct SubmissionCapture {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // SubmittingStrategy exercises exactly one synchronous bot-bound submission from the bootstrap
@@ -440,8 +418,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // SubmissionGateControl safely publishes a live submission-capable context to the test thread while
 // the dedicated owner callback remains active, then retains that same context after deactivation.
 struct SubmissionGateControl {
@@ -449,8 +425,6 @@ struct SubmissionGateControl {
   std::atomic_bool callback_active{false};
   std::atomic_bool release_callback{false};
 };
-
-// ########################################################################
 
 // ########################################################################
 // SubmissionGateStrategy holds its first callback open without submitting so wrong-thread and

@@ -58,8 +58,6 @@ static_assert(static_cast<std::uint8_t>(oms::PrivateEventResolutionKind::Conflic
 static_assert(static_cast<std::uint8_t>(oms::PrivateEventResolutionKind::NotOrderScoped) == 4U);
 
 // ########################################################################
-
-// ########################################################################
 // Producer attempts are nominal bounded values with no receive timestamp or public normalization.
 // Interesting syntax: the requires-expressions turn forbidden public members into compile-time
 // facts without invoking or granting either operation.

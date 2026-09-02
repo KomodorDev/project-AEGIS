@@ -108,8 +108,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Pair the integrity decision with the fixed identity of the token on which it was based.
 struct MarketIntegrity {
   IntegrityVerdict verdict;
@@ -121,8 +119,6 @@ struct MarketIntegrity {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Bind one configured source ordinal to its complete venue-neutral and venue-native attribution.
@@ -183,8 +179,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Carry one absolute quantity at an exact price; delta quantity zero means deletion while snapshot
 // entries must remain positive after normalization.
 struct MarketLevelChange {
@@ -198,8 +192,6 @@ struct MarketLevelChange {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Collect authored normalization inputs so the factory can validate and canonicalize them before
@@ -225,8 +217,6 @@ struct NormalizedMarketUpdateFields {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Own one completely validated and canonically ordered pre-book update. Its payload digest excludes
@@ -321,8 +311,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Reset continuity for one configured source using only recorded and owner-assigned identities.
 struct SessionStarted {
   MarketSourceIdentity source;
@@ -337,8 +325,6 @@ struct SessionStarted {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Evaluate freshness for exactly one source at an explicit owner processing time; no ambient clock
@@ -358,14 +344,10 @@ struct StalenessCheck {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Keep the three accepted recorded-frame products distinct. Owner-local resynchronization and
 // rejected-admission discontinuity are runtime controls rather than parsed market commands.
 using NormalizedRecordedMarketCommand =
     std::variant<NormalizedMarketUpdate, SessionStarted, StalenessCheck>;
-
-// ########################################################################
 
 // ########################################################################
 // Couple one successful commit to the exact serialized owner turn that made it visible.
@@ -382,8 +364,6 @@ struct MarketCommitContext {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Expose only a successfully committed Ready update. The later book module supplies the separate
@@ -427,8 +407,6 @@ private:
   NormalizedMarketUpdate update_;
   MarketCommitContext context_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // Collect transition fields whose input-specific identities may be absent for startup, explicit
@@ -494,8 +472,6 @@ private:
   // --------------------------------------------------------
   MarketStateEventFields fields_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // The order-book module defines this immutable turn-scoped view; this boundary intentionally owns

@@ -26,8 +26,6 @@ enum class FakeInitiationOutcome : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One override replaces the default outcome at an exact one-based initiator invocation.
 struct FakeInitiationOverride {
   std::uint64_t invocation_ordinal;
@@ -39,8 +37,6 @@ struct FakeInitiationOverride {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // The validated script owns canonical ordinal-sorted unique overrides and a permanent default.
@@ -86,8 +82,6 @@ private:
   std::uint64_t maximum_invocations_;
   std::vector<FakeInitiationOverride> overrides_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // A retained slot proves the exact bytes crossed the fake acceptance boundary and binds them to
@@ -152,8 +146,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // One reached initiator call reports its consumed invocation, effective outcome, accepted-write
 // identity, and the immediate post-copy measurement reading at the exact accepted boundary.
 class FakeInitiationResult final {
@@ -210,8 +202,6 @@ private:
   std::optional<model::FakeWriteOrdinal> write_ordinal_;
   std::optional<std::uint64_t> accepted_slot_endpoint_nanoseconds_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // This final in-memory type owns only a validated script and preallocated byte slots; it has no

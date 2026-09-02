@@ -32,13 +32,9 @@ namespace aegis::runtime {
 class SerializedExecutor;
 
 // ########################################################################
-
-// ########################################################################
 // A construction-time lease lets a retained token reject executor destruction before touching its
 // opaque raw owner address.
 class PrivateAdmissionLease;
-
-// ########################################################################
 
 // ########################################################################
 // Ordinary admission outcomes remain successful Result values so overload and shutdown cannot be
@@ -48,8 +44,6 @@ enum class AdmissionOutcome : std::uint8_t {
   CapacityExceeded = 2,
   Closed = 3,
 };
-
-// ########################################################################
 
 // ########################################################################
 // An accepted receipt binds one attempt to its distinct receive sequence, timestamp, and atomic
@@ -69,8 +63,6 @@ struct AdmissionReceipt {
 };
 
 // ########################################################################
-
-// ########################################################################
 // AcceptedTurnContext is stack-scoped owner authority for one accepted command. Handlers must use
 // stable runtime handles in their copied command and must not retain this context reference.
 struct AcceptedTurnContext {
@@ -87,8 +79,6 @@ struct AcceptedTurnContext {
 };
 
 // ########################################################################
-
-// ########################################################################
 // ControlTurnContext gives a fence handler only its owner-turn identity and processing time; a
 // fence has no receive sequence, timestamp, or queue age.
 struct ControlTurnContext {
@@ -101,8 +91,6 @@ struct ControlTurnContext {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One canonical configured account/venue pair is copied from sealed startup configuration and
@@ -118,8 +106,6 @@ struct PrivateAdmissionAccountBinding {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // The sealed configuration derives all private-lane capacities and account bindings from mutually
@@ -258,8 +244,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Stable critical lifecycle assignments distinguish copied work from its two terminal owner
 // results.
 enum class CriticalPrivateAdmissionState : std::uint8_t {
@@ -267,8 +251,6 @@ enum class CriticalPrivateAdmissionState : std::uint8_t {
   EconomicallyConsumed = 2,
   RetainedForReconciliation = 3,
 };
-
-// ########################################################################
 
 // ########################################################################
 // One producer decision reports the shared attempt identity, private reserve observation, optional
@@ -291,8 +273,6 @@ struct PrivateAdmissionDecision {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One terminal or live observation exposes copied queue ownership before owner commit, a terminal
 // disposition after consumption, or exactly one retention error for reconciliation work. A
 // completed BufferedGap has no observation until its older ordinal advances to AppliedFromBuffer,
@@ -310,8 +290,6 @@ struct PrivateAdmissionObservation {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // An immutable token inspection copies owner-turn source and receipt authority, so retaining the
@@ -371,8 +349,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // The move-only capability owns immutable source/turn copies plus opaque executor metadata. Moving
 // it invalidates the source token, and public inspection never dereferences pending ring storage.
 class AdmittedPrivateOrderSlot final {
@@ -429,8 +405,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // A consumed owner result names the exact append-only committed event disposition it observed.
 struct ConsumedPrivateTurn {
   oms::PrivateEventDisposition disposition;
@@ -443,8 +417,6 @@ struct ConsumedPrivateTurn {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A buffered owner result confirms that the exact admitted ordinal committed BufferedGap evidence
 // without applying economics; the owner oracle may later advance it once to AppliedFromBuffer.
 struct BufferedPrivateTurn {
@@ -455,8 +427,6 @@ struct BufferedPrivateTurn {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A retained owner result keeps its nominal failure and optional progress. Named constructors make
@@ -540,21 +510,15 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Exactly one owner completion arm is active: terminal consumption, successful buffering, or
 // retained reconciliation.
 using PrivateTurnCompletion =
     std::variant<ConsumedPrivateTurn, BufferedPrivateTurn, RetainedPrivateTurn>;
 
 // ########################################################################
-
-// ########################################################################
 // The stable AccountSafetyReason vocabulary has nineteen assigned values, so one fixed occurrence
 // array can retain every unique reason without allocating or dropping an escalation.
 inline constexpr std::size_t account_safety_reason_occurrence_capacity = 19U;
-
-// ########################################################################
 
 // ########################################################################
 // One reason occurrence retains the first complete fact and ordinal that introduced that reason;
@@ -571,8 +535,6 @@ struct AccountSafetyReasonOccurrence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One account fence turn retains an exact configured binding, checked total loss count, and every
@@ -594,8 +556,6 @@ struct AccountSafetyFenceTurn {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A diagnostic reason summary exposes only the assigned cause and first ordinal, never the complete
 // private source fact retained by the owner/recovery fence.
 struct AccountSafetyReasonOccurrenceSnapshot {
@@ -609,8 +569,6 @@ struct AccountSafetyReasonOccurrenceSnapshot {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One synchronized account-fence snapshot exposes pending counts, ordered reason/ordinal summaries,
@@ -635,8 +593,6 @@ struct AccountSafetyFenceSnapshot {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The global fence retains the first unattributable fact and earliest attempt without selecting or
 // inventing any logical account or account-safety reason.
 struct GlobalPrivateFenceTurn {
@@ -650,8 +606,6 @@ struct GlobalPrivateFenceTurn {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Private-lane diagnostics expose counts and the global gate only; no slot, token, or mutable fence
@@ -675,8 +629,6 @@ struct PrivateLaneSnapshot {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // The runtime-owned handler is the sole private-turn consumer and evidence oracle. An admission

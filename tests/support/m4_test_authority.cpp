@@ -171,8 +171,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Peer bots remain registered but deliberately inert so exactly the configured route owner can
 // submit during the synthetic initialization dispatch.
 class M4IdleStrategy final : public runtime::Strategy {

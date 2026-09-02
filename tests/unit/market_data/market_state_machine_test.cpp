@@ -287,8 +287,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Capture the exact coordinator-facing shape and optionally reject it to prove the transactional
 // placement of the callback-fanout seam.
 class RecordingMarketTurnPreflightAuthority final

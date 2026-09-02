@@ -308,8 +308,6 @@ struct SubmissionCallbackTarget {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The probe strategy invokes exactly one public BotContext submission from a real canonical
 // BotRuntime callback and copies the synchronous local result into caller-owned test storage.
 class SubmissionProbeStrategy final : public runtime::Strategy {
@@ -353,8 +351,6 @@ private:
   std::optional<execution::SubmitResult>* result_;
   bool invoked_{false};
 };
-
-// ########################################################################
 
 // ########################################################################
 // Complete strategy coverage requires peer bots even when only one selected context submits.

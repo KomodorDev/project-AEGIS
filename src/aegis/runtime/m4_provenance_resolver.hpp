@@ -28,8 +28,6 @@ namespace aegis::runtime {
 class PrivateOrderEventFactory;
 
 // ########################################################################
-
-// ########################################################################
 // The resolver is the single composition-root authority for subject presence. It owns one sealed
 // configuration and copies the matching immutable seven-field root. Owning the configuration
 // prevents a temporary or moved composition input from leaving a dangling authority reference.

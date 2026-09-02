@@ -23,8 +23,6 @@ enum class SubmitDisposition : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Stages identify where a decision occurred independently from its stable reason.
 enum class SubmissionStage : std::uint8_t {
   Context = 1,
@@ -39,8 +37,6 @@ enum class SubmissionStage : std::uint8_t {
   Initiation = 10,
   Internal = 11,
 };
-
-// ########################################################################
 
 // ########################################################################
 // Assigned reasons are persisted compatibility values; new reasons must never renumber M3 values.
@@ -94,8 +90,6 @@ enum class SubmissionReason : std::uint16_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Risk evidence states which nominal representation the observed and configured values use.
 enum class RiskMeasureKind : std::uint8_t {
   None = 0,
@@ -103,8 +97,6 @@ enum class RiskMeasureKind : std::uint8_t {
   QuoteNotional = 2,
   OrderCount = 3,
 };
-
-// ########################################################################
 
 // ########################################################################
 // One limit rejection owns exactly one scope and one pair of same-domain observed/limit values.
@@ -221,8 +213,6 @@ private:
   std::optional<std::uint64_t> observed_count_;
   std::optional<std::uint64_t> count_limit_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // SubmitResult is a synchronous local decision only. It deliberately has no acknowledged,

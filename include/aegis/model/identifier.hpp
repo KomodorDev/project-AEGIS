@@ -127,7 +127,6 @@ AEGIS_ORGANIZATION_ID_TRAITS(RouteIdTag, "route.", "route_id");
 // Market-source traits bind the source prefix and stable field to the organization grammar.
 AEGIS_ORGANIZATION_ID_TRAITS(MarketSourceIdTag, "source.", "market_source_id");
 
-// ########################################################################
 #undef AEGIS_ORGANIZATION_ID_TRAITS
 
 // ########################################################################
@@ -170,8 +169,6 @@ AEGIS_ADAPTER_ID_TRAITS(VenueAccountIdTag, "venue_account_id");
 
 // ########################################################################
 #undef AEGIS_ADAPTER_ID_TRAITS
-
-// ########################################################################
 
 // --------------------------------------------------------
 // Validate one candidate against the selected internal grammar and optional prefix.

@@ -28,8 +28,6 @@ namespace aegis::runtime {
 class SubmissionCoordinator;
 
 // ########################################################################
-
-// ########################################################################
 // One event-identity slot schema pairs timestamp-free ingress semantics with an immutable
 // resolution and original disposition. This slice allocates slots but never populates them.
 struct PrivateEventIdentityRecord {
@@ -46,8 +44,6 @@ struct PrivateEventIdentityRecord {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One trade-identity slot schema pairs a complete semantic tuple with its original and current
@@ -68,8 +64,6 @@ struct PrivateTradeIdentityRecord {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One exchange-mapping slot schema binds a venue/account-scoped exchange key to one local order.
 // This slice allocates slots but never populates them.
 struct PrivateExchangeOrderMapping {
@@ -84,8 +78,6 @@ struct PrivateExchangeOrderMapping {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A known correlation retains the immutable owner-derived resolution and at most one uncommitted
@@ -103,8 +95,6 @@ struct KnownFirstSeenPrivateCorrelationPlan {
 };
 
 // ########################################################################
-
-// ########################################################################
 // An unknown correlation retains the sealed unknown resolution without inventing local ownership.
 struct UnknownFirstSeenPrivateCorrelationPlan {
   oms::PrivateEventResolution resolution;
@@ -116,8 +106,6 @@ struct UnknownFirstSeenPrivateCorrelationPlan {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A conflict correlation retains the sealed provenance or locator-conflict resolution and no
@@ -134,14 +122,10 @@ struct ConflictFirstSeenPrivateCorrelationPlan {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Exactly one known, unknown, or conflict first-seen correlation outcome is active.
 using FirstSeenPrivateCorrelationPlan =
     std::variant<KnownFirstSeenPrivateCorrelationPlan, UnknownFirstSeenPrivateCorrelationPlan,
                  ConflictFirstSeenPrivateCorrelationPlan>;
-
-// ########################################################################
 
 // ########################################################################
 // A derived trade identity retains the exact account-scoped key and sealed comparison tuple.
@@ -158,8 +142,6 @@ struct FirstSeenPrivateTradeIdentityPlan {
 };
 
 // ########################################################################
-
-// ########################################################################
 // This marker states that correlation or a non-execution payload stopped before trade derivation.
 struct FirstSeenPrivateTradeNotReachedPlan {
 
@@ -170,8 +152,6 @@ struct FirstSeenPrivateTradeNotReachedPlan {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // This marker preserves the distinct known-execution source-side contradiction outcome.
@@ -186,14 +166,10 @@ struct FirstSeenPrivateTradeSourceSideConflictPlan {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Exactly one trade tuple, ordinary not-reached marker, or source-side-conflict marker is active.
 using FirstSeenPrivateTradePlan =
     std::variant<FirstSeenPrivateTradeIdentityPlan, FirstSeenPrivateTradeNotReachedPlan,
                  FirstSeenPrivateTradeSourceSideConflictPlan>;
-
-// ########################################################################
 
 // ########################################################################
 // The sealed plan owns detached copies of every first-seen identity decision and grants no
@@ -265,8 +241,6 @@ private:
 
   // ########################################################################
 };
-
-// ########################################################################
 
 // ########################################################################
 // The pre-application child is permanently bound to one nonmoving coordinator, one acknowledged
@@ -386,8 +360,6 @@ private:
 
     // --------------------------------------------------------
   };
-
-  // ########################################################################
 
   // ########################################################################
   // One private move-only value keeps the acknowledged provider inside its recovery lease between

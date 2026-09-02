@@ -49,7 +49,6 @@ AEGIS_PRIVATE_OPAQUE_ID_TAG(PrivateSourceEpochIdTag, "private_source_epoch_id");
 // The authoritative-cut tag is opaque because AEGIS must never order venue-native cuts.
 AEGIS_PRIVATE_OPAQUE_ID_TAG(AuthoritativeCutIdTag, "authoritative_cut_id");
 
-// ########################################################################
 // Close the local macro so no downstream header can manufacture an unreviewed tag silently.
 #undef AEGIS_PRIVATE_OPAQUE_ID_TAG
 
@@ -78,8 +77,6 @@ using LocalOrderEventId = model::NamespaceCounterIdentity<detail::LocalOrderEven
 using LocalOrderEventIdProvider = model::NamespaceCounterIdentityProvider<LocalOrderEventId>;
 
 // ########################################################################
-
-// ########################################################################
 // The exact venue event key survives replay and scopes ordinary event identity by source epoch.
 struct VenuePrivateEventKey {
   model::VenueId venue_id;
@@ -94,8 +91,6 @@ struct VenuePrivateEventKey {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Trade identity deliberately excludes private-source epoch so reconnect replay cannot refill.
@@ -113,8 +108,6 @@ struct TradeKey {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Exchange-order mappings remain account/venue scoped and never imply local ownership by bytes.
 struct ExchangeOrderKey {
   model::VenueId venue_id;
@@ -128,8 +121,6 @@ struct ExchangeOrderKey {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Cancel identity includes the durability-fenced runtime epoch, complete local order, and one
@@ -209,8 +200,6 @@ private:
   std::uint64_t ordinal_;
   Bytes bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One order in one runtime epoch owns a move-only monotonic cancel-attempt stream.

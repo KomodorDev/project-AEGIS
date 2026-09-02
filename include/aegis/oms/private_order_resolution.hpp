@@ -42,8 +42,6 @@ enum class PrivateEventDisposition : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A reconciliation registry key retains its complete row identity while excluding every timestamp.
 struct ReconciliationPrivateEventKey {
   recovery::ReconciliationEpochId reconciliation_epoch_id;
@@ -61,13 +59,9 @@ struct ReconciliationPrivateEventKey {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The tagged registry key preserves the origin identity domain while excluding every timestamp.
 using PrivateEventRegistryKeyValue =
     std::variant<LocalOrderEventId, VenuePrivateEventKey, ReconciliationPrivateEventKey>;
-
-// ########################################################################
 
 // ########################################################################
 // One nominal registry key is derived from the same retained receive-time-free semantic value used
@@ -111,8 +105,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // A known resolution binds exact retained local identity to its complete owner-derived provenance.
 struct KnownPrivateEventResolution {
   model::OrderId order_id;
@@ -127,8 +119,6 @@ struct KnownPrivateEventResolution {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Unknown adds no mapping-derived ownership to the already retained source-normalized input.
 struct UnknownPrivateEventResolution {
 
@@ -139,8 +129,6 @@ struct UnknownPrivateEventResolution {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Pre-trade conflict retains exactly the provenance or correlation reason fixed by ADR-0010.
@@ -156,8 +144,6 @@ struct ConflictPrivateEventResolution {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Account timeout and source disconnect are total rows but never pretend to resolve one order.
 struct NotOrderScopedPrivateEventResolution {
 
@@ -170,15 +156,11 @@ struct NotOrderScopedPrivateEventResolution {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The variant makes all four first-admission payload shapes mutually exclusive. Only the sealed
 // wrapper retains its selected payload immutably.
 using PrivateEventResolutionValue =
     std::variant<KnownPrivateEventResolution, UnknownPrivateEventResolution,
                  ConflictPrivateEventResolution, NotOrderScopedPrivateEventResolution>;
-
-// ########################################################################
 
 // ########################################################################
 // A retained resolution is immutable evidence. Only the exact owner-bound reconciler may construct
@@ -246,8 +228,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Known trade comparison owns its exact local order and OMS-derived canonical economic side.
 struct KnownPrivateTradeResolution {
   model::OrderId order_id;
@@ -260,8 +240,6 @@ struct KnownPrivateTradeResolution {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Unknown trade comparison retains every raw locator presence bit and authoritative-side presence.
@@ -278,13 +256,9 @@ struct UnknownPrivateTradeResolution {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Exactly one known or unknown trade-resolution shape is active, preventing contradictory fields.
 using PrivateTradeResolutionValue =
     std::variant<KnownPrivateTradeResolution, UnknownPrivateTradeResolution>;
-
-// ########################################################################
 
 // ########################################################################
 // The closed trade value contains exactly the ADR-0010 comparison tuple. Only the exact owner-bound

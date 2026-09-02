@@ -23,8 +23,6 @@ enum class PrivateCompletionFailure : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Fixed failure selection delays moving constructor-owned DomainErrors until an actual post-handler
 // fault has already selected its exact stable cause.
 enum class PrivateReservedFailure : std::uint8_t {

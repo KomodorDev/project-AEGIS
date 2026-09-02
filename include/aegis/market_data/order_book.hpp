@@ -21,12 +21,8 @@ namespace aegis::market_data {
 class MarketStateMachine;
 
 // ########################################################################
-
-// ########################################################################
 // The fixed current/scratch representation may create views only for its owner state machine.
 class FixedDepthOrderBook;
-
-// ########################################################################
 
 // ########################################################################
 // One retained market-by-price level owns an exact positive price and quantity.
@@ -40,8 +36,6 @@ struct BookLevel {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A Ready view privately borrows canonical storage for one synchronous turn while public access
@@ -112,8 +106,6 @@ private:
   std::span<const BookLevel> bids_;
   std::span<const BookLevel> asks_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // FixedDepthOrderBook stores current or scratch state without heap growth. Mutation is private so

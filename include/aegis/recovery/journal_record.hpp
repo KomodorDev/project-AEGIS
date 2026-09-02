@@ -33,8 +33,6 @@ enum class JournalRecordKind : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One immutable audit span owns a nonempty contiguous range; construction proves the count fits
 // the retained width and the inclusive final ordinal cannot wrap.
 class AuditSpan final {
@@ -115,8 +113,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Replay provenance preserves global executor ordering without changing event-key equality.
 struct JournalReplayProvenance {
   model::AdmissionOrdinal admission_ordinal;
@@ -128,8 +124,6 @@ struct JournalReplayProvenance {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Namespace registration is root-scoped and records the acknowledged append-only registry count.
@@ -146,13 +140,9 @@ struct NamespaceRegisteredJournalPayload {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The namespace-only fake medium accepts no business input; later owner slices extend this closed
 // variant only together with their complete typed replay and audit contracts.
 using JournalPayloadValue = std::variant<NamespaceRegisteredJournalPayload>;
-
-// ########################################################################
 
 // ########################################################################
 // One immutable semantic journal record owns causal lineage order, applicable provenance, and a

@@ -32,8 +32,6 @@ public:
 };
 
 // ########################################################################
-
-// ########################################################################
 // MarketTurnTraceDraftBatch retains the at-most-two state-machine records on the stack so every
 // shape and the complete callback/re-entry fan-out can be preflighted before append or domain
 // mutation.
@@ -59,8 +57,6 @@ struct MarketTurnTraceDraftBatch {
   std::array<std::optional<MarketTurnTraceDraft>, 2U> entries{};
   std::size_t count{0U};
 };
-
-// ########################################################################
 
 // ########################################################################
 // CallbackFanoutBudget fixes exact callbacks and the paired callback/re-entry trace slots derived

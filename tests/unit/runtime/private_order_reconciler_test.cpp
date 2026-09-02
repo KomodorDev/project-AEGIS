@@ -95,8 +95,6 @@ static_assert(std::same_as<decltype(std::declval<const runtime::SubmissionCoordi
                            const runtime::PrivateOrderReconciler*>);
 
 // ########################################################################
-
-// ########################################################################
 // IdleRecoveryFenceStrategy makes BotRuntime callback authority concrete without submitting or
 // mutating any owner state; the fence must close as soon as this callback-capable owner exists.
 class IdleRecoveryFenceStrategy final : public runtime::Strategy {
@@ -114,8 +112,6 @@ public:
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One detached observation covers every publicly inspectable mutable M3 owner component. Equality
@@ -139,8 +135,6 @@ struct SubmissionOwnerStateObservation {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One copied oracle proves a reported install failure did not consume or alter public bootstrap

@@ -30,8 +30,6 @@ struct M4PolicyAuthorityFixture {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Test-owned field metadata drives only negative authoring cases and never production encoding.
 struct M4PolicyCapacityCase {
   std::uint64_t aegis::runtime::M4PolicyCapacities::*member;

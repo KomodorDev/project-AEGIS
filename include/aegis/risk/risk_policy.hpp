@@ -50,8 +50,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Authoring parameters retain a wide count and heterogeneous scope-subject spelling until the
 // complete policy can validate them against sealed owner-local routes.
 struct RiskLimitSetParams {
@@ -67,8 +65,6 @@ struct RiskLimitSetParams {
   model::Quantity maximum_worst_case_position_quantity;
   model::Notional maximum_worst_case_position_quote_notional;
 };
-
-// ########################################################################
 
 // ########################################################################
 // RiskLimitSet is one immutable complete semantic key with all six positive M3 limits.
@@ -174,8 +170,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // RiskPolicyParams is the complete authored immutable snapshot before provenance and completeness
 // checks bind it to the sealed startup authority.
 struct RiskPolicyParams {
@@ -189,8 +183,6 @@ struct RiskPolicyParams {
   std::vector<configuration::InstrumentMetadataRevisionEntry> metadata_revisions;
   std::vector<RiskLimitSetParams> limit_sets;
 };
-
-// ########################################################################
 
 // ########################################################################
 // RiskPolicySnapshot validates once, sorts by semantic key, and exposes immutable direct-path

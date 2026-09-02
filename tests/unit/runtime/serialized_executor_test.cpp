@@ -47,16 +47,12 @@ struct FixedCapacityTurnRecorder {
 };
 
 // ########################################################################
-
-// ########################################################################
 // RecordTurnCommand copies one stable recorder pointer and value into InlineCommandWorkItem inline
 // storage.
 struct RecordTurnCommand {
   FixedCapacityTurnRecorder* recorder;
   int value;
 };
-
-// ########################################################################
 
 // ########################################################################
 // SourceDiscontinuityRecorder applies source-control turns to the same ordered log while retaining
@@ -105,8 +101,6 @@ private:
   std::size_t size_{0U};
   std::latch* completion_latch_{nullptr};
 };
-
-// ########################################################################
 
 // ########################################################################
 // FailingSourceDiscontinuityHandler admits one same-source successor while the extracted fence is
@@ -159,8 +153,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // ReentryObservation retains stable outcomes produced from inside one active owner turn.
 struct ReentryObservation {
   runtime::SerializedExecutor* executor;
@@ -173,14 +165,10 @@ struct ReentryObservation {
 };
 
 // ########################################################################
-
-// ########################################################################
 // ReentryCommand keeps the mutable observation outside its immutable copied work value.
 struct ReentryCommand {
   ReentryObservation* observation;
 };
-
-// ########################################################################
 
 // ########################################################################
 // TerminalOverlapObservation captures a successful active handler whose nested producer attempt
@@ -194,14 +182,10 @@ struct TerminalOverlapObservation {
 };
 
 // ########################################################################
-
-// ########################################################################
 // TerminalOverlapCommand keeps mutable lifecycle evidence behind one stable runtime handle.
 struct TerminalOverlapCommand {
   TerminalOverlapObservation* observation;
 };
-
-// ########################################################################
 
 // ########################################################################
 // OwnerFaultObservation retains the results of owner-local fault publication while the enclosing
@@ -216,14 +200,10 @@ struct OwnerFaultObservation {
 };
 
 // ########################################################################
-
-// ########################################################################
 // OwnerFaultCommand keeps mutable fault-publication evidence behind one stable runtime handle.
 struct OwnerFaultCommand {
   OwnerFaultObservation* observation;
 };
-
-// ########################################################################
 
 // ########################################################################
 // CompletionCommand synchronizes a dedicated owner turn without sharing non-atomic mutable data.
@@ -233,16 +213,12 @@ struct CompletionCommand {
 };
 
 // ########################################################################
-
-// ########################################################################
 // StopGateCommand holds one active dedicated turn until its test has synchronized stop or close.
 struct StopGateCommand {
   std::atomic_size_t* completed;
   std::latch* started;
   std::latch* release;
 };
-
-// ########################################################################
 
 // ########################################################################
 // ScriptedClockProvider returns an exact bounded observation sequence and then repeats its final

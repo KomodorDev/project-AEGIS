@@ -42,8 +42,6 @@ enum class PrivateEventOrigin : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // These nine values are the complete ordinary normalized private-order vocabulary in M4.
 enum class PrivateOrderEventKind : std::uint8_t {
   ExchangeAcknowledged = 1,
@@ -58,16 +56,12 @@ enum class PrivateOrderEventKind : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Subject scope fixes whether one input targets an order, a whole account, or one private source.
 enum class PrivateEventSubjectScope : std::uint8_t {
   Order = 1,
   Account = 2,
   PrivateSource = 3,
 };
-
-// ########################################################################
 
 // ########################################################################
 // Fake cancel-write outcomes describe local initiation certainty and never imply venue terminality.
@@ -78,8 +72,6 @@ enum class CancelWriteOutcome : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Authoritative cancellation results distinguish terminal cancellation from a rejected cancel.
 enum class CancellationResult : std::uint8_t {
   Cancelled = 1,
@@ -87,15 +79,11 @@ enum class CancellationResult : std::uint8_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Local failure certainty decides whether venue acceptance is impossible or remains conservative.
 enum class LocalFailureCertainty : std::uint8_t {
   ProvenBeforeAcceptance = 1,
   AcceptanceCouldHaveOccurred = 2,
 };
-
-// ########################################################################
 
 // ########################################################################
 // Rejection categories are venue-neutral evidence labels rather than ownership or retry authority.
@@ -109,8 +97,6 @@ enum class ExchangeRejectionCategory : std::uint16_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // First-admission resolution is retained separately from source input and cannot change on replay.
 enum class PrivateEventResolutionKind : std::uint8_t {
   Known = 1,
@@ -118,8 +104,6 @@ enum class PrivateEventResolutionKind : std::uint8_t {
   Conflict = 3,
   NotOrderScoped = 4,
 };
-
-// ########################################################################
 
 // ########################################################################
 // One local origin owns exactly one AEGIS event identity and both typed observation times.
@@ -136,8 +120,6 @@ struct LocalPrivateEventOrigin {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One venue origin owns the complete account/source-epoch/event key and both observation times.
 struct VenuePrivateEventOrigin {
   VenuePrivateEventKey event_key;
@@ -150,8 +132,6 @@ struct VenuePrivateEventOrigin {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // One reconciliation origin owns the complete epoch/cut/row key and its cut/receive times.
@@ -171,13 +151,9 @@ struct ReconciliationPrivateEventOrigin {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The variant makes exactly one origin identity shape active in every normalized input.
 using PrivateEventOriginValue = std::variant<LocalPrivateEventOrigin, VenuePrivateEventOrigin,
                                              ReconciliationPrivateEventOrigin>;
-
-// ########################################################################
 
 // ########################################################################
 // Local ingress identity retains the locally minted event identity and source time while making
@@ -195,8 +171,6 @@ struct LocalPrivateIngressOrigin {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Venue ingress identity retains the scoped source event key and source time without receive time.
 struct VenuePrivateIngressOrigin {
   VenuePrivateEventKey event_key;
@@ -209,8 +183,6 @@ struct VenuePrivateIngressOrigin {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Reconciliation ingress identity retains its complete row key and authoritative cut time while
@@ -230,13 +202,9 @@ struct ReconciliationPrivateIngressOrigin {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The tagged ingress origin preserves the source domain while making receive time unrepresentable.
 using PrivateIngressOriginValue = std::variant<LocalPrivateIngressOrigin, VenuePrivateIngressOrigin,
                                                ReconciliationPrivateIngressOrigin>;
-
-// ########################################################################
 
 // ########################################################################
 // A raw authoritative locator contains at least one syntactically valid local or exchange identity;
@@ -283,8 +251,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Rejection detail is zero through 256 opaque bytes in inline storage; text parsing and ownership
 // inference are deliberately absent.
 class PrivateRejectionDetail final {
@@ -326,8 +292,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Acknowledgement carries authoritative exchange identity and an optional raw client locator.
 struct ExchangeAcknowledgedPayload {
   ExchangeOrderId exchange_order_id;
@@ -342,8 +306,6 @@ struct ExchangeAcknowledgedPayload {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Rejection retains the exact raw locator, assigned category, and bounded opaque detail.
 struct ExchangeRejectedPayload {
   PrivateOrderLocator locator;
@@ -356,8 +318,6 @@ struct ExchangeRejectedPayload {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Execution retains raw correlation evidence, claimed metadata, exact fill interval, price, and
@@ -380,8 +340,6 @@ struct ExecutionPayload {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A local cancel request binds one retained local order to one epoch-qualified attempt identity.
 struct CancelRequestedPayload {
   model::OrderId order_id;
@@ -393,8 +351,6 @@ struct CancelRequestedPayload {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A local cancel-write fact reports initiation certainty for the exact matching attempt.
@@ -410,8 +366,6 @@ struct CancelWriteOutcomePayload {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // An authoritative cancellation carries terminal cumulative quantity exactly for Cancelled and
@@ -431,8 +385,6 @@ struct CancellationResultPayload {
 };
 
 // ########################################################################
-
-// ########################################################################
 // A local failure binds the retained order and its original submission attempt to exact certainty.
 struct LocalFailurePayload {
   model::OrderId order_id;
@@ -445,8 +397,6 @@ struct LocalFailurePayload {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Order timeout identifies one exact retained local order but carries no terminal authority.
@@ -462,8 +412,6 @@ struct OrderTimeoutObservedPayload {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Account timeout has no payload beyond its envelope account/venue and remains nonterminal.
 struct AccountTimeoutObservedPayload {
 
@@ -474,8 +422,6 @@ struct AccountTimeoutObservedPayload {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Disconnect identifies the exact affected source epoch without an order locator or economics.
@@ -491,16 +437,12 @@ struct DisconnectObservedPayload {
 };
 
 // ########################################################################
-
-// ########################################################################
 // The payload variant makes unrelated kind-specific fields structurally unrepresentable.
 using PrivateOrderEventPayload =
     std::variant<ExchangeAcknowledgedPayload, ExchangeRejectedPayload, ExecutionPayload,
                  CancelRequestedPayload, CancelWriteOutcomePayload, CancellationResultPayload,
                  LocalFailurePayload, OrderTimeoutObservedPayload, AccountTimeoutObservedPayload,
                  DisconnectObservedPayload>;
-
-// ########################################################################
 
 // ########################################################################
 // A validated input owns exactly one origin, one closed payload, source-normalized provenance, and
@@ -593,8 +535,6 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // The event-registry value owns the complete correlation-independent ingress projection while
 // making local receive time, admission, and later resolution state structurally unrepresentable.
 class PrivateEventIngressSemanticValue final {
@@ -665,8 +605,6 @@ private:
 
   // ########################################################################
 };
-
-// ########################################################################
 
 // ########################################################################
 // One private-order ingress attempt owns the complete bounded source semantics while making receive

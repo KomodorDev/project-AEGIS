@@ -51,16 +51,12 @@ enum class SubmissionTraceEventKind : std::uint16_t {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Release values distinguish no transition, exact rollback, and conservative retained exposure.
 enum class SubmissionReleaseTransition : std::uint8_t {
   None = 0,
   Released = 1,
   Retained = 2,
 };
-
-// ########################################################################
 
 // ########################################################################
 // Runtime-minted attribution is repeated in every record so the request cannot forge organizational
@@ -78,8 +74,6 @@ struct SubmissionTraceAttribution {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Raw digests and exact revisions bind one sink to the complete startup and immutable M2/M3 policy
@@ -103,8 +97,6 @@ struct SubmissionTraceProvenance {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One outer-attempt context fixes callback identity, runtime attribution, and exact caller request;
 // ReentryRejected deliberately substitutes only the nested request under the same outer identity.
 struct SubmissionTraceContext {
@@ -121,8 +113,6 @@ struct SubmissionTraceContext {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Authorization copies the complete route/account/venue/instrument projection and exact metadata
@@ -144,8 +134,6 @@ struct AuthorizedSubmissionProjection {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Successful encoding evidence identifies the consumed invocation and hashes the exact AEGISFOE
 // bytes without copying the bounded byte payload into every later cumulative record.
 struct SubmissionEncodingEvidence {
@@ -162,8 +150,6 @@ struct SubmissionEncodingEvidence {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Initiation evidence records the exact selected boundary outcome and accepted-write identity only
 // when the fixed slot copy definitely completed.
 struct SubmissionInitiationEvidence {
@@ -178,8 +164,6 @@ struct SubmissionInitiationEvidence {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Only the three canonical SubmitResult fields are persisted; identities and risk evidence already
@@ -204,8 +188,6 @@ struct SubmissionFinalResult {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Optional groups become present only at their named causal event and then remain available in all
 // later outer-attempt snapshots; shape validation rejects partial or premature evidence.
 struct SubmissionTraceFields {
@@ -227,8 +209,6 @@ struct SubmissionTraceFields {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Ordinals are one-based accepted-prefix positions issued only by the submission trace sink.
@@ -260,8 +240,6 @@ private:
   // --------------------------------------------------------
   std::uint64_t value_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // One immutable record owns its sink-issued ordinal, assigned event, policy provenance, and
@@ -324,8 +302,6 @@ private:
   SubmissionTraceProvenance provenance_;
   SubmissionTraceFields fields_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // The sole append authority reserves fixed storage, validates event profiles and exact sequence,

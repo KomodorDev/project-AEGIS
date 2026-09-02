@@ -46,8 +46,6 @@ inline constexpr std::uint32_t maximum_runtime_retained_book_depth =
     static_cast<std::uint32_t>(market_data::maximum_retained_book_depth);
 
 // ########################################################################
-
-// ########################################################################
 // Runtime limits are authored together and become immutable only after RuntimePolicy::create has
 // established positivity and the M2 compile-time ceilings.
 struct RuntimePolicyLimits {
@@ -70,8 +68,6 @@ struct RuntimePolicyLimits {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Authored source definitions contain only normalized public-market identity and the exact
 // metadata revision; M2 fixes the channel to OrderBook during validation and encoding.
 struct RuntimeSourceDefinition {
@@ -89,8 +85,6 @@ struct RuntimeSourceDefinition {
 };
 
 // ########################################################################
-
-// ########################################################################
 // This key is the M2 uniqueness and subscription-dispatch identity. A later decision is required
 // before redundant sources may share one key.
 struct RuntimeSourceKey {
@@ -104,8 +98,6 @@ struct RuntimeSourceKey {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Published sources pair a validated definition with its stable one-based canonical-list ordinal.
@@ -159,16 +151,12 @@ private:
 };
 
 // ########################################################################
-
-// ########################################################################
 // Authoring parameters remain mutable outside the published value so failed creation cannot expose
 // a partially sorted or partially validated policy.
 struct RuntimePolicyParams {
   RuntimePolicyLimits limits;
   std::vector<RuntimeSourceDefinition> sources;
 };
-
-// ########################################################################
 
 // ########################################################################
 // This digest names exact schema-versioned runtime-policy bytes. Hexadecimal output is only a
@@ -198,8 +186,6 @@ public:
 private:
   model::Sha256Digest bytes_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // Successful creation publishes one immutable policy whose startup identity, limits, source

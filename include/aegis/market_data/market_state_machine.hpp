@@ -32,8 +32,6 @@ struct AcceptedMarketTurnContext {
 };
 
 // ########################################################################
-
-// ########################################################################
 // Owner controls have no accepted ingress identity and cannot alter configured callback fan-out.
 struct OwnerMarketTurnContext {
   model::TurnOrdinal turn_ordinal;
@@ -45,8 +43,6 @@ struct OwnerMarketTurnContext {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // Sanitized attributable parse failures retain only their assigned disposition and trusted
@@ -67,8 +63,6 @@ struct AttributableMarketFailure {
 };
 
 // ########################################################################
-
-// ########################################################################
 // One exact preflight request exposes only bounded routing and evidence counts. It deliberately
 // carries no market event, book view, strategy, or runtime-specific dispatch capability.
 struct MarketTurnPreflight {
@@ -87,8 +81,6 @@ struct MarketTurnPreflight {
 
   // --------------------------------------------------------
 };
-
-// ########################################################################
 
 // ########################################################################
 // A coordinator-supplied authority may reserve an exact callback plan only after the market owner
@@ -171,8 +163,6 @@ private:
   model::BookGeneration generation_;
   model::BookRevision revision_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // The integrity seam receives only normalized input and an immutable complete candidate. M2's
@@ -286,8 +276,6 @@ private:
   std::uint32_t expected_callback_count_;
   std::uint32_t reserved_callback_trace_records_;
 };
-
-// ########################################################################
 
 // ########################################################################
 // MarketStateMachine is the dedicated owner of mutable source continuity, current/scratch books,

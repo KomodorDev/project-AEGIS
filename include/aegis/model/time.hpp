@@ -133,7 +133,6 @@ AEGIS_ORDINAL_TAG(BookGenerationTag, "book_generation", MarketCounterExhausted);
 // Every committed snapshot or delta advances the globally monotonic book revision.
 AEGIS_ORDINAL_TAG(BookRevisionTag, "book_revision", MarketCounterExhausted);
 
-// ########################################################################
 #undef AEGIS_ORDINAL_TAG
 
 // ########################################################################
@@ -289,7 +288,6 @@ AEGIS_REVISION_TAG(RouteRevisionTag, "route_revision");
 // Immutable M3 risk snapshots receive a distinct nonzero policy revision.
 AEGIS_REVISION_TAG(RiskPolicyRevisionTag, "risk_policy_revision");
 
-// ########################################################################
 #undef AEGIS_REVISION_TAG
 
 // ########################################################################

@@ -22,8 +22,6 @@ namespace aegis::runtime {
 class PrivateOrderReconciler;
 
 // ########################################################################
-
-// ########################################################################
 // The factory derives provenance and closed scope from one validated resolver; its public inputs
 // contain only source/local facts and never accept caller-authored organizational attribution.
 class PrivateOrderEventFactory final {
