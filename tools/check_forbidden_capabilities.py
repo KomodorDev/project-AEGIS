@@ -185,6 +185,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "tests/unit/runtime/private_order_admission_test.cpp",
     "tests/unit/runtime/private_order_correlation_planner_test.cpp",
     "tests/unit/runtime/private_order_reconciler_test.cpp",
+    "tests/unit/runtime/reconciliation_private_event_admission_test.cpp",
     "tests/unit/trace/m4_semantic_evidence_test.cpp",
 )
 
@@ -464,8 +465,9 @@ APPROVED_NON_CAPABILITY_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
-# This header names its sole executor authority in five exact declaration forms. Path-scoped span
-# masks permit only those closed capability bindings while leaving executable handoffs visible.
+# This header names its sole executor authority in eight exact declaration forms. Path-scoped span
+# masks bind token pointer/friend authority to each complete named class body and retain only the
+# separate retained-turn friendship, leaving lookalike classes and executable handoffs visible.
 APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
     Path("include/aegis/runtime/private_order_admission.hpp"): (
         re.compile(
@@ -477,10 +479,34 @@ APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
             r"(?P<identifier>SerializedExecutor)"
             r"\s*&\s*owner\b"
         ),
-        re.compile(r"\b(?P<identifier>SerializedExecutor)\s*\*\s*owner_\s*;"),
         re.compile(
-            r"\bAcceptedTurnContext\s+context_\s*;\s*friend\s+class\s+"
+            r"\bprivate\s*:\s*AdmittedReconciliationEventSlot\s*\(\s*"
+            r"(?P<identifier>SerializedExecutor)"
+            r"\s*&\s*owner\b"
+        ),
+        re.compile(
+            r"\bclass\s+AdmittedPrivateOrderSlot\s+final\s*\{"
+            r"(?:(?!\n\s*};)[\s\S])*?"
+            r"(?P<identifier>SerializedExecutor)\s*\*\s*owner_\s*;"
+            r"(?:(?!\n\s*};)[\s\S])*?\n\s*};"
+        ),
+        re.compile(
+            r"\bclass\s+AdmittedReconciliationEventSlot\s+final\s*\{"
+            r"(?:(?!\n\s*};)[\s\S])*?"
+            r"(?P<identifier>SerializedExecutor)\s*\*\s*owner_\s*;"
+            r"(?:(?!\n\s*};)[\s\S])*?\n\s*};"
+        ),
+        re.compile(
+            r"\bclass\s+AdmittedPrivateOrderSlot\s+final\s*\{"
+            r"(?:(?!\n\s*};)[\s\S])*?friend\s+class\s+"
             r"(?P<identifier>SerializedExecutor)\s*;"
+            r"(?:(?!\n\s*};)[\s\S])*?\n\s*};"
+        ),
+        re.compile(
+            r"\bclass\s+AdmittedReconciliationEventSlot\s+final\s*\{"
+            r"(?:(?!\n\s*};)[\s\S])*?friend\s+class\s+"
+            r"(?P<identifier>SerializedExecutor)\s*;"
+            r"(?:(?!\n\s*};)[\s\S])*?\n\s*};"
         ),
         re.compile(
             r"\bstd::optional\s*<\s*risk::AccountSafetyReason\s*>\s*account_reason_\s*;\s*"

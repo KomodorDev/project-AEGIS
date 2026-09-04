@@ -81,13 +81,15 @@ public:
 };
 
 // ########################################################################
-// Stable turn kinds distinguish public/private work and each attributable or reasonless fence.
+// Stable turn kinds distinguish public, ordinary-private, and reconciliation work plus each
+// attributable or reasonless fence.
 enum class TurnKind : std::uint8_t {
   Command = 1,
   SourceDiscontinuity = 2,
   PrivateCommand = 3,
   AccountSafetyFence = 4,
   GlobalPrivateFence = 5,
+  ReconciliationCommand = 6,
 };
 
 // ########################################################################
@@ -141,7 +143,8 @@ struct PendingTurnExecutionReport {
 
 // ########################################################################
 // A synchronized queue snapshot exposes bounded ingress and terminal lifecycle state without
-// publishing public/private slots, fence values, or owner-local commands.
+// publishing public, ordinary-private, or reconciliation slots, fence values, or owner-local
+// commands.
 struct ExecutorQueueSnapshot {
   std::size_t pending_commands;
   std::size_t pending_fences;
@@ -287,11 +290,13 @@ private:
 
   friend class SerializedExecutor;
   friend class AdmittedPrivateOrderSlot;
+  friend class AdmittedReconciliationEventSlot;
 };
 
 // ########################################################################
-// SerializedExecutor owns separate preallocated public/private reserves plus source, account, and
-// global fence stores. Exactly one bound thread drains their merged global attempt order.
+// SerializedExecutor owns separate preallocated public, ordinary-private, and reconciliation
+// reserves plus source, account, and global fence stores. Exactly one bound thread drains their
+// merged global attempt order.
 class SerializedExecutor final {
 public:
 
@@ -362,6 +367,24 @@ public:
   try_admit_private(const oms::PrivateOrderIngressAttempt&& attempt) = delete;
 
   // --------------------------------------------------------
+  // Copy one trusted authoritative reconciliation fact into its isolated reserve, or retain source
+  // ownership while atomically recording the exact configured-account or global loss fence.
+  [[nodiscard]] model::Result<ReconciliationAdmissionDecision>
+  try_admit_reconciliation_event(const oms::ReconciliationPrivateEventIngressAttempt& attempt);
+
+  // --------------------------------------------------------
+  // Interesting syntax: deleting the rvalue overload preserves a temporary authoritative fact when
+  // non-acceptance requires its trusted caller to retry or retain it.
+  [[nodiscard]] model::Result<ReconciliationAdmissionDecision>
+  try_admit_reconciliation_event(oms::ReconciliationPrivateEventIngressAttempt&& attempt) = delete;
+
+  // --------------------------------------------------------
+  // Interesting syntax: const reconciliation temporaries cannot disappear after non-acceptance by
+  // binding through the accepted const-reference overload.
+  [[nodiscard]] model::Result<ReconciliationAdmissionDecision> try_admit_reconciliation_event(
+      const oms::ReconciliationPrivateEventIngressAttempt&& attempt) = delete;
+
+  // --------------------------------------------------------
   // Permanently reject later work while preserving the already established command/fence prefix.
   void close() noexcept;
 
@@ -408,7 +431,14 @@ public:
   private_admission_observation(model::AdmissionOrdinal attempt_ordinal) const;
 
   // --------------------------------------------------------
-  // Copy only bounded private-lane counts and gates under the executor synchronization boundary.
+  // Resolve reconciliation copied, retained, or append-only consumed state only through its
+  // lane-specific owner oracle; retained errors are copied and this query is not noexcept.
+  [[nodiscard]] std::optional<PrivateAdmissionObservation>
+  reconciliation_admission_observation(model::AdmissionOrdinal attempt_ordinal) const;
+
+  // --------------------------------------------------------
+  // Copy bounded ordinary-private and reconciliation counts plus their shared safety gates under
+  // the executor synchronization boundary.
   [[nodiscard]] PrivateLaneSnapshot private_lane_snapshot() const noexcept;
 
   // --------------------------------------------------------
@@ -455,10 +485,27 @@ private:
   };
 
   // ########################################################################
+  // One fixed reconciliation slot owns an authoritative attempt/receipt pair until owner
+  // extraction; this distinct type prevents accidental reserve sharing with ordinary private work.
+  struct ReconciliationSlot {
+    std::optional<oms::ReconciliationPrivateEventIngressAttempt> attempt;
+    std::optional<AdmissionReceipt> receipt;
+  };
+
+  // ########################################################################
   // The sole active owner turn is detached from pending capacity while retaining exact token
   // validation authority until its terminal completion is reconciled.
   struct ActivePrivateTurnState {
     oms::PrivateOrderIngressAttempt attempt;
+    AdmissionReceipt receipt;
+    model::TurnOrdinal turn_ordinal;
+  };
+
+  // ########################################################################
+  // The sole active reconciliation turn is detached from its pending reserve while retaining exact
+  // token-validation authority until owner completion is reconciled.
+  struct ActiveReconciliationTurnState {
+    oms::ReconciliationPrivateEventIngressAttempt attempt;
     AdmissionReceipt receipt;
     model::TurnOrdinal turn_ordinal;
   };
@@ -502,13 +549,23 @@ private:
     model::DomainError global_ingress_loss_result;
     model::DomainError global_owner_loss_terminal;
     model::DomainError global_owner_loss_result;
+    model::DomainError reconciliation_committed_observation;
+    model::DomainError reconciliation_committed_terminal;
+    model::DomainError reconciliation_committed_result;
+    model::DomainError reconciliation_retained_observation;
+    model::DomainError reconciliation_retained_terminal;
+    model::DomainError reconciliation_retained_result;
+    model::DomainError reconciliation_account_ingress_loss_terminal;
+    model::DomainError reconciliation_account_ingress_loss_result;
+    model::DomainError reconciliation_global_ingress_loss_terminal;
+    model::DomainError reconciliation_global_ingress_loss_result;
   };
 
   // ########################################################################
   // The reasonless global fence permanently keeps its first unattributable fact and becomes an
   // owner-applied gate without inventing an account identity.
   struct GlobalFenceState {
-    std::optional<oms::PrivateOrderIngressAttempt> first_attempt;
+    std::optional<CriticalPrivateEventAttempt> first_attempt;
     std::optional<model::AdmissionOrdinal> earliest_attempt_ordinal;
     std::uint64_t lost_attempt_count{0U};
     bool in_flight{false};
@@ -524,6 +581,7 @@ private:
     PrivateCommand = 3,
     AccountFence = 4,
     GlobalFence = 5,
+    ReconciliationCommand = 6,
   };
 
   // ########################################################################
@@ -603,16 +661,17 @@ private:
 
   // --------------------------------------------------------
   // Resolve only an exact sealed root plus configured account/venue pair without a partial match.
-  [[nodiscard]] AccountFenceState*
-  find_configured_account_fence_locked(const oms::PrivateOrderIngressAttempt& attempt) noexcept;
+  [[nodiscard]] AccountFenceState* find_configured_account_fence_locked(
+      const oms::PrivateEventIngressSemanticValue& semantic) noexcept;
   [[nodiscard]] const AccountFenceState* find_configured_account_fence_locked(
-      const oms::PrivateOrderIngressAttempt& attempt) const noexcept;
+      const oms::PrivateEventIngressSemanticValue& semantic) const noexcept;
 
   // --------------------------------------------------------
   // Fold a failed configured-account attempt into its one fixed canonical interval.
-  [[nodiscard]] std::optional<PrivateLossFailure> record_account_loss_locked(
-      AccountFenceState& fence, const oms::PrivateOrderIngressAttempt& attempt,
-      model::AdmissionOrdinal attempt_ordinal, risk::AccountSafetyReason reason) noexcept;
+  [[nodiscard]] std::optional<PrivateLossFailure>
+  record_account_loss_locked(AccountFenceState& fence, const CriticalPrivateEventAttempt& attempt,
+                             model::AdmissionOrdinal attempt_ordinal,
+                             risk::AccountSafetyReason reason) noexcept;
 
   // --------------------------------------------------------
   // Insert or replace one reason's earliest occurrence while preserving ascending ordinal order.
@@ -623,13 +682,18 @@ private:
   // --------------------------------------------------------
   // Fold an unattributable attempt into the sole permanent reasonless global fence.
   [[nodiscard]] std::optional<PrivateLossFailure>
-  record_global_loss_locked(const oms::PrivateOrderIngressAttempt& attempt,
+  record_global_loss_locked(const CriticalPrivateEventAttempt& attempt,
                             model::AdmissionOrdinal attempt_ordinal) noexcept;
 
   // --------------------------------------------------------
   // Validate a move-only capability against the exact active owner, admission generation, and turn.
   [[nodiscard]] model::Result<void>
   validate_admitted_private_order_slot(const AdmittedPrivateOrderSlot& admitted) const;
+
+  // --------------------------------------------------------
+  // Validate reconciliation capability identity, lifetime generation, and exact active owner turn.
+  [[nodiscard]] model::Result<void> validate_admitted_reconciliation_event_slot(
+      const AdmittedReconciliationEventSlot& admitted) const;
 
   // --------------------------------------------------------
   // Copy bounded private diagnostics while the caller already owns the synchronization mutex.
@@ -647,7 +711,8 @@ private:
                                       AccountSafetyFenceTurn failed) noexcept;
 
   // --------------------------------------------------------
-  // Find the globally oldest runnable public/private value or source/account/global fence.
+  // Find the globally oldest runnable public, ordinary-private, or reconciliation value or the
+  // oldest source, account, or global fence.
   [[nodiscard]] std::optional<RunnableTurnCandidate>
   find_oldest_runnable_turn_locked() const noexcept;
 
@@ -666,6 +731,7 @@ private:
   std::vector<QueuedWorkEntry> queue_;
   std::vector<SourceFenceState> fences_;
   std::vector<PrivateSlot> private_slots_;
+  std::vector<ReconciliationSlot> reconciliation_slots_;
   std::vector<AccountFenceState> account_fences_;
   GlobalFenceState global_fence_;
   std::size_t head_{0U};
@@ -676,6 +742,9 @@ private:
   std::size_t private_head_{0U};
   std::size_t private_tail_{0U};
   std::size_t pending_private_commands_{0U};
+  std::size_t reconciliation_head_{0U};
+  std::size_t reconciliation_tail_{0U};
+  std::size_t pending_reconciliation_commands_{0U};
   std::size_t maximum_drive_turns_;
   std::optional<model::AdmissionOrdinal> last_admission_ordinal_;
   std::optional<model::ReceiveSequence> last_receive_sequence_;
@@ -686,11 +755,14 @@ private:
   bool closed_{false};
   bool turn_active_{false};
   std::optional<ActivePrivateTurnState> active_private_turn_;
+  std::optional<ActiveReconciliationTurnState> active_reconciliation_turn_;
   std::optional<PrivateAdmissionObservation> invalid_private_completion_observation_;
+  std::optional<PrivateAdmissionObservation> invalid_reconciliation_completion_observation_;
   std::shared_ptr<PrivateAdmissionLease> private_admission_lease_;
 
   friend class DedicatedExecutorDriver;
   friend class AdmittedPrivateOrderSlot;
+  friend class AdmittedReconciliationEventSlot;
 };
 
 // ########################################################################
