@@ -182,7 +182,8 @@ PrivateOrderEventFactory::normalize_private_event_ingress_semantic_value(
 }
 
 // --------------------------------------------------------
-// Validate one ordinary venue acknowledgement without inferring local ownership.
+// Create a receive-time-free attempt for one ordinary venue acknowledgement without inferring local
+// ownership.
 model::Result<oms::PrivateOrderIngressAttempt>
 PrivateOrderEventFactory::create_venue_acknowledgement_attempt(
     oms::VenuePrivateIngressOrigin origin, oms::ExchangeOrderId exchange_order_id,
@@ -214,7 +215,7 @@ PrivateOrderEventFactory::normalize_venue_acknowledgement(
 }
 
 // --------------------------------------------------------
-// Validate one authoritative reconciliation acknowledgement into a receive-time-free nominal row.
+// Create a receive-time-free nominal row for one authoritative reconciliation acknowledgement.
 model::Result<oms::ReconciliationPrivateEventIngressAttempt>
 PrivateOrderEventFactory::create_reconciliation_acknowledgement_attempt(
     oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,

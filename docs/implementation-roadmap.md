@@ -261,8 +261,7 @@ and reconciliation-event critical-admission lane foundations, first-admission re
 owner-bound correlation, fake-recovery authority, provenance, audit-span, and typed
 semantic-evidence foundations. A required ADR-0014 must still fix exact new evidence bytes before any
 M4 encoder or byte golden. Inventory, reservation conversion, full reconciliation, the crash matrix,
-ADR-0014 exact evidence bytes, and exit-evidence work remain deferred and keep the complete M4 gate
-open.
+and exit-evidence work remain deferred and keep the complete M4 gate open.
 
 ### Outcome
 

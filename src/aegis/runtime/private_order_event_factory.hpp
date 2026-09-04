@@ -33,7 +33,7 @@ public:
       : resolver_{std::move(resolver)} {}
 
   // --------------------------------------------------------
-  // Validate one ordinary acknowledgement into a receive-time-free attempt without inferring local
+  // Create a receive-time-free attempt for one ordinary acknowledgement without inferring local
   // ownership from its optional client locator.
   [[nodiscard]] model::Result<oms::PrivateOrderIngressAttempt>
   create_venue_acknowledgement_attempt(oms::VenuePrivateIngressOrigin origin,
@@ -49,8 +49,8 @@ public:
                                   std::optional<model::OrderId> local_order_locator) const;
 
   // --------------------------------------------------------
-  // Validate one authoritative reconciliation acknowledgement into a receive-time-free nominal
-  // attempt. Only trusted runtime code can reach this internal factory boundary.
+  // Create a receive-time-free nominal attempt for one authoritative reconciliation
+  // acknowledgement. Only trusted runtime code can reach this internal factory boundary.
   [[nodiscard]] model::Result<oms::ReconciliationPrivateEventIngressAttempt>
   create_reconciliation_acknowledgement_attempt(
       oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
