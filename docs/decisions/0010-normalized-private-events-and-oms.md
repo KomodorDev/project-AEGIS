@@ -151,9 +151,11 @@ local receive time or executor admission. The trusted runtime receipt boundary l
 own observed receive timestamp to form `NormalizedPrivateOrderInput`; the attempt contributes no
 receive timestamp to that decision. Compatibility normalization APIs may attach an explicitly
 supplied receive timestamp for value-level tests and pre-admission callers, but the returned
-normalized value grants neither executor admission nor consumption authority. Reconciliation
-remains a separate trusted normalization path and exposes no producer-facing reconciliation attempt
-API.
+normalized value grants neither executor admission nor consumption authority. Reconciliation uses
+the nominal `ReconciliationPrivateEventIngressAttempt`, which only the internal trusted
+`PrivateOrderEventFactory` may create, and copies it through a dedicated reconciliation-event
+admission lane. Neither boundary is a public producer API, and this foundation does not implement
+complete-batch reconciliation.
 
 `PrivateEventSubjectScope` assigns `Order = 1`, `Account = 2`, and `PrivateSource = 3`. The closed
 origin envelope is:
