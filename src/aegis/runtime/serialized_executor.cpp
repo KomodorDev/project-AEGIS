@@ -1002,17 +1002,15 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
                             : CriticalPrivateEventAttempt{active_private_turn_->attempt};
     const auto& active_receipt =
         reconciliation_turn ? active_reconciliation_turn_->receipt : active_private_turn_->receipt;
-    const auto& active_semantic = std::visit(
-        [](const auto& attempt) -> const oms::PrivateEventIngressSemanticValue& {
-          return attempt.semantic_value();
-        },
-        active_attempt);
+    const auto* active_semantic = reconciliation_turn
+                                      ? &active_reconciliation_turn_->attempt.semantic_value()
+                                      : &active_private_turn_->attempt.semantic_value();
     if (private_completion_failure == PrivateCompletionFailure::None &&
         std::holds_alternative<RetainedPrivateTurn>(private_completion.value())) {
       auto& retained = std::get<RetainedPrivateTurn>(private_completion.value());
-      auto* configured = find_configured_account_fence_locked(active_semantic);
+      auto* configured = find_configured_account_fence_locked(*active_semantic);
       const bool progress_is_valid =
-          is_retained_progress_valid(retained, active_semantic, active_receipt);
+          is_retained_progress_valid(retained, *active_semantic, active_receipt);
       const bool reason_shape_is_valid =
           configured != nullptr
               ? retained.account_safety_reason().has_value() &&
@@ -1066,7 +1064,7 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
                                ? PrivateReservedFailure::ReconciliationRetainedCompletion
                                : PrivateReservedFailure::RetainedCompletion;
       }
-      auto* configured = find_configured_account_fence_locked(active_semantic);
+      auto* configured = find_configured_account_fence_locked(*active_semantic);
       auto containment =
           configured != nullptr
               ? record_account_loss_locked(*configured, active_attempt,
