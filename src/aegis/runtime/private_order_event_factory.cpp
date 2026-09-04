@@ -22,10 +22,10 @@ private_order_ingress_attempt_failure_from_field(std::string_view field) {
 }
 
 // --------------------------------------------------------
-// Return the equivalent normalized-input failure for reconciliation compatibility paths.
-[[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
-normalized_private_order_input_failure_from_field(std::string_view field) {
-  return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+// Return the stable reconciliation-attempt failure without exposing an open caller detail channel.
+[[nodiscard]] model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+reconciliation_private_event_ingress_attempt_failure_from_field(std::string_view field) {
+  return model::Result<oms::ReconciliationPrivateEventIngressAttempt>::create_failure(
       model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
                                           std::string{field}));
 }
@@ -115,11 +115,42 @@ PrivateOrderEventFactory::create_authoritative_private_order_ingress_attempt(
 }
 
 // --------------------------------------------------------
-// Attach one supplied observation time while retaining every receive-time-free field exactly.
+// Attach independently proved reconciliation provenance to one receive-time-free nominal row.
+oms::ReconciliationPrivateEventIngressAttempt
+PrivateOrderEventFactory::create_authoritative_reconciliation_private_event_ingress_attempt(
+    oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+    model::VenueId venue_id, const std::optional<model::InstrumentId>& instrument_id,
+    oms::PrivateOrderEventPayload payload) const noexcept {
+  auto provenance =
+      resolver_.derive_authoritative_source_provenance(logical_account_id, venue_id, instrument_id);
+  return oms::ReconciliationPrivateEventIngressAttempt{oms::PrivateEventIngressSemanticValue{
+      std::move(origin), oms::PrivateEventSubjectScope::Order, std::move(logical_account_id),
+      std::move(venue_id), std::move(provenance), std::move(payload)}};
+}
+
+// --------------------------------------------------------
+// Attach one supplied observation time to an ordinary attempt behind the compatibility boundary.
 oms::NormalizedPrivateOrderInput PrivateOrderEventFactory::normalize_private_order_ingress_attempt(
     const oms::PrivateOrderIngressAttempt& attempt,
     model::ReceiveTimestamp received_at) const noexcept {
-  const auto& semantic = attempt.semantic_value();
+  return normalize_private_event_ingress_semantic_value(attempt.semantic_value(), received_at);
+}
+
+// --------------------------------------------------------
+// Attach one supplied observation time to a trusted reconciliation attempt.
+oms::NormalizedPrivateOrderInput
+PrivateOrderEventFactory::normalize_reconciliation_private_event_ingress_attempt(
+    const oms::ReconciliationPrivateEventIngressAttempt& attempt,
+    model::ReceiveTimestamp received_at) const noexcept {
+  return normalize_private_event_ingress_semantic_value(attempt.semantic_value(), received_at);
+}
+
+// --------------------------------------------------------
+// Attach one supplied observation time while retaining every receive-time-free field exactly.
+oms::NormalizedPrivateOrderInput
+PrivateOrderEventFactory::normalize_private_event_ingress_semantic_value(
+    const oms::PrivateEventIngressSemanticValue& semantic,
+    model::ReceiveTimestamp received_at) const noexcept {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Convert exactly the active source domain and attach only the supplied observation.
@@ -183,7 +214,23 @@ PrivateOrderEventFactory::normalize_venue_acknowledgement(
 }
 
 // --------------------------------------------------------
-// Normalize one reconciliation acknowledgement without exposing a producer-facing attempt API.
+// Validate one authoritative reconciliation acknowledgement into a receive-time-free nominal row.
+model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+PrivateOrderEventFactory::create_reconciliation_acknowledgement_attempt(
+    oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+    model::VenueId venue_id, oms::ExchangeOrderId exchange_order_id,
+    std::optional<model::OrderId> local_order_locator,
+    std::optional<model::InstrumentId> source_instrument_id) const {
+  return model::Result<oms::ReconciliationPrivateEventIngressAttempt>::create_success(
+      create_authoritative_reconciliation_private_event_ingress_attempt(
+          std::move(origin), std::move(logical_account_id), std::move(venue_id),
+          source_instrument_id,
+          oms::ExchangeAcknowledgedPayload{std::move(exchange_order_id),
+                                           std::move(local_order_locator)}));
+}
+
+// --------------------------------------------------------
+// Normalize one reconciliation acknowledgement through its nominal row and supplied observation.
 model::Result<oms::NormalizedPrivateOrderInput>
 PrivateOrderEventFactory::normalize_reconciliation_acknowledgement(
     oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
@@ -191,15 +238,17 @@ PrivateOrderEventFactory::normalize_reconciliation_acknowledgement(
     std::optional<model::OrderId> local_order_locator,
     std::optional<model::InstrumentId> source_instrument_id) const {
   const auto received_at = origin.receive_time;
-  const auto attempt = create_authoritative_private_order_ingress_attempt(
+  auto attempt = create_reconciliation_acknowledgement_attempt(
       oms::ReconciliationPrivateIngressOrigin{std::move(origin.reconciliation_epoch_id),
                                               std::move(origin.authoritative_cut_id),
                                               origin.row_ordinal, origin.cut_time},
-      std::move(logical_account_id), std::move(venue_id), source_instrument_id,
-      oms::ExchangeAcknowledgedPayload{std::move(exchange_order_id),
-                                       std::move(local_order_locator)});
+      std::move(logical_account_id), std::move(venue_id), std::move(exchange_order_id),
+      std::move(local_order_locator), source_instrument_id);
+  if (!attempt) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
+  }
   return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
-      normalize_private_order_ingress_attempt(attempt, received_at));
+      normalize_reconciliation_private_event_ingress_attempt(attempt.value(), received_at));
 }
 
 // --------------------------------------------------------
@@ -242,29 +291,46 @@ model::Result<oms::NormalizedPrivateOrderInput> PrivateOrderEventFactory::normal
 }
 
 // --------------------------------------------------------
-// Normalize a reconciliation rejection under the same bounded semantic validation.
+// Validate one authoritative reconciliation rejection under the bounded semantic contract.
+model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+PrivateOrderEventFactory::create_reconciliation_rejection_attempt(
+    oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+    model::VenueId venue_id, oms::PrivateOrderLocator locator,
+    oms::ExchangeRejectionCategory category, std::span<const std::byte> detail) const {
+  if (!is_exchange_rejection_category_assigned(category)) {
+    return reconciliation_private_event_ingress_attempt_failure_from_field(
+        "private_event.rejection_category");
+  }
+  auto retained_detail = oms::PrivateRejectionDetail::create_private_rejection_detail(detail);
+  if (!retained_detail) {
+    return model::Result<oms::ReconciliationPrivateEventIngressAttempt>::create_failure(
+        retained_detail.error());
+  }
+  return model::Result<oms::ReconciliationPrivateEventIngressAttempt>::create_success(
+      create_authoritative_reconciliation_private_event_ingress_attempt(
+          std::move(origin), std::move(logical_account_id), std::move(venue_id), std::nullopt,
+          oms::ExchangeRejectedPayload{std::move(locator), category,
+                                       std::move(retained_detail).value()}));
+}
+
+// --------------------------------------------------------
+// Normalize one reconciliation rejection through its nominal row and supplied observation.
 model::Result<oms::NormalizedPrivateOrderInput>
 PrivateOrderEventFactory::normalize_reconciliation_rejection(
     oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
     model::VenueId venue_id, oms::PrivateOrderLocator locator,
     oms::ExchangeRejectionCategory category, std::span<const std::byte> detail) const {
-  if (!is_exchange_rejection_category_assigned(category)) {
-    return normalized_private_order_input_failure_from_field("private_event.rejection_category");
-  }
-  auto retained_detail = oms::PrivateRejectionDetail::create_private_rejection_detail(detail);
-  if (!retained_detail) {
-    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(retained_detail.error());
-  }
   const auto received_at = origin.receive_time;
-  const auto attempt = create_authoritative_private_order_ingress_attempt(
+  auto attempt = create_reconciliation_rejection_attempt(
       oms::ReconciliationPrivateIngressOrigin{std::move(origin.reconciliation_epoch_id),
                                               std::move(origin.authoritative_cut_id),
                                               origin.row_ordinal, origin.cut_time},
-      std::move(logical_account_id), std::move(venue_id), std::nullopt,
-      oms::ExchangeRejectedPayload{std::move(locator), category,
-                                   std::move(retained_detail).value()});
+      std::move(logical_account_id), std::move(venue_id), std::move(locator), category, detail);
+  if (!attempt) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
+  }
   return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
-      normalize_private_order_ingress_attempt(attempt, received_at));
+      normalize_reconciliation_private_event_ingress_attempt(attempt.value(), received_at));
 }
 
 // --------------------------------------------------------
@@ -312,7 +378,33 @@ model::Result<oms::NormalizedPrivateOrderInput> PrivateOrderEventFactory::normal
 }
 
 // --------------------------------------------------------
-// Normalize a reconciliation execution whose source row always supplies side evidence.
+// Validate one authoritative reconciliation execution whose source row supplies side evidence.
+model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+PrivateOrderEventFactory::create_reconciliation_execution_attempt(
+    oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+    model::VenueId venue_id, oms::PrivateOrderLocator locator, oms::TradeId trade_id,
+    model::InstrumentId instrument_id, model::InstrumentMetadataRevision metadata_revision,
+    model::Quantity incremental_quantity, model::Quantity cumulative_quantity,
+    model::Price execution_price, execution::OrderSide source_side) const {
+  if (!is_execution_interval_valid(incremental_quantity, cumulative_quantity, execution_price)) {
+    return reconciliation_private_event_ingress_attempt_failure_from_field(
+        "private_event.execution");
+  }
+  if (!is_order_side_assigned(source_side)) {
+    return reconciliation_private_event_ingress_attempt_failure_from_field(
+        "private_event.source_side");
+  }
+  const auto source_instrument = instrument_id;
+  return model::Result<oms::ReconciliationPrivateEventIngressAttempt>::create_success(
+      create_authoritative_reconciliation_private_event_ingress_attempt(
+          std::move(origin), std::move(logical_account_id), std::move(venue_id), source_instrument,
+          oms::ExecutionPayload{std::move(locator), std::move(trade_id), std::move(instrument_id),
+                                metadata_revision, incremental_quantity, cumulative_quantity,
+                                execution_price, source_side}));
+}
+
+// --------------------------------------------------------
+// Normalize one reconciliation execution through its nominal row and supplied observation.
 model::Result<oms::NormalizedPrivateOrderInput>
 PrivateOrderEventFactory::normalize_reconciliation_execution(
     oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
@@ -320,24 +412,19 @@ PrivateOrderEventFactory::normalize_reconciliation_execution(
     model::InstrumentId instrument_id, model::InstrumentMetadataRevision metadata_revision,
     model::Quantity incremental_quantity, model::Quantity cumulative_quantity,
     model::Price execution_price, execution::OrderSide source_side) const {
-  if (!is_execution_interval_valid(incremental_quantity, cumulative_quantity, execution_price)) {
-    return normalized_private_order_input_failure_from_field("private_event.execution");
-  }
-  if (!is_order_side_assigned(source_side)) {
-    return normalized_private_order_input_failure_from_field("private_event.source_side");
-  }
   const auto received_at = origin.receive_time;
-  const auto source_instrument = instrument_id;
-  const auto attempt = create_authoritative_private_order_ingress_attempt(
+  auto attempt = create_reconciliation_execution_attempt(
       oms::ReconciliationPrivateIngressOrigin{std::move(origin.reconciliation_epoch_id),
                                               std::move(origin.authoritative_cut_id),
                                               origin.row_ordinal, origin.cut_time},
-      std::move(logical_account_id), std::move(venue_id), source_instrument,
-      oms::ExecutionPayload{std::move(locator), std::move(trade_id), std::move(instrument_id),
-                            metadata_revision, incremental_quantity, cumulative_quantity,
-                            execution_price, source_side});
+      std::move(logical_account_id), std::move(venue_id), std::move(locator), std::move(trade_id),
+      std::move(instrument_id), metadata_revision, incremental_quantity, cumulative_quantity,
+      execution_price, source_side);
+  if (!attempt) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
+  }
   return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
-      normalize_private_order_ingress_attempt(attempt, received_at));
+      normalize_reconciliation_private_event_ingress_attempt(attempt.value(), received_at));
 }
 
 // --------------------------------------------------------
@@ -414,28 +501,45 @@ PrivateOrderEventFactory::normalize_venue_cancel_rejection_with_causal_id(
 }
 
 // --------------------------------------------------------
-// Normalize a reconciliation cancellation result under the same source-shape validation.
-model::Result<oms::NormalizedPrivateOrderInput>
-PrivateOrderEventFactory::normalize_reconciliation_cancellation_result(
-    oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
+// Validate one authoritative reconciliation cancellation under the source-shape contract.
+model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+PrivateOrderEventFactory::create_reconciliation_cancellation_result_attempt(
+    oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
     model::VenueId venue_id, oms::PrivateOrderLocator locator, oms::CancellationResult result,
     std::optional<model::Quantity> terminal_cumulative_quantity) const {
   if (!is_cancellation_result_assigned(result) ||
       (result == oms::CancellationResult::Cancelled) != terminal_cumulative_quantity.has_value() ||
       (terminal_cumulative_quantity.has_value() &&
        terminal_cumulative_quantity->coefficient() < 0)) {
-    return normalized_private_order_input_failure_from_field("private_event.cancellation_result");
+    return reconciliation_private_event_ingress_attempt_failure_from_field(
+        "private_event.cancellation_result");
   }
+  return model::Result<oms::ReconciliationPrivateEventIngressAttempt>::create_success(
+      create_authoritative_reconciliation_private_event_ingress_attempt(
+          std::move(origin), std::move(logical_account_id), std::move(venue_id), std::nullopt,
+          oms::CancellationResultPayload{std::move(locator), result, std::nullopt,
+                                         terminal_cumulative_quantity}));
+}
+
+// --------------------------------------------------------
+// Normalize one reconciliation cancellation through its nominal row and supplied observation.
+model::Result<oms::NormalizedPrivateOrderInput>
+PrivateOrderEventFactory::normalize_reconciliation_cancellation_result(
+    oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
+    model::VenueId venue_id, oms::PrivateOrderLocator locator, oms::CancellationResult result,
+    std::optional<model::Quantity> terminal_cumulative_quantity) const {
   const auto received_at = origin.receive_time;
-  const auto attempt = create_authoritative_private_order_ingress_attempt(
+  auto attempt = create_reconciliation_cancellation_result_attempt(
       oms::ReconciliationPrivateIngressOrigin{std::move(origin.reconciliation_epoch_id),
                                               std::move(origin.authoritative_cut_id),
                                               origin.row_ordinal, origin.cut_time},
-      std::move(logical_account_id), std::move(venue_id), std::nullopt,
-      oms::CancellationResultPayload{std::move(locator), result, std::nullopt,
-                                     terminal_cumulative_quantity});
+      std::move(logical_account_id), std::move(venue_id), std::move(locator), result,
+      terminal_cumulative_quantity);
+  if (!attempt) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(attempt.error());
+  }
   return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
-      normalize_private_order_ingress_attempt(attempt, received_at));
+      normalize_reconciliation_private_event_ingress_attempt(attempt.value(), received_at));
 }
 
 // --------------------------------------------------------

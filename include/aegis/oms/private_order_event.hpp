@@ -643,5 +643,43 @@ private:
 };
 
 // ########################################################################
+// One reconciliation ingress attempt owns a complete authoritative row semantic without receive
+// time. Its invariant is a reconciliation origin, and only the trusted runtime factory may create
+// it, so an ordinary producer cannot claim reconciliation authority.
+class ReconciliationPrivateEventIngressAttempt final {
+public:
+
+  // --------------------------------------------------------
+  // Borrow the immutable authoritative source fact copied by later admission and loss fencing.
+  [[nodiscard]] const PrivateEventIngressSemanticValue& semantic_value() const noexcept {
+    return semantic_value_;
+  }
+
+  // --------------------------------------------------------
+  // Structural equality compares exactly the receive-time-free authoritative source fact.
+  friend bool operator==(const ReconciliationPrivateEventIngressAttempt&,
+                         const ReconciliationPrivateEventIngressAttempt&) = default;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Wrap one factory-validated reconciliation semantic without attaching local observation state.
+  explicit ReconciliationPrivateEventIngressAttempt(
+      PrivateEventIngressSemanticValue semantic_value) noexcept
+      : semantic_value_{std::move(semantic_value)} {}
+
+  // --------------------------------------------------------
+  // Retain one complete bounded authoritative source fact.
+  PrivateEventIngressSemanticValue semantic_value_;
+
+  // ########################################################################
+  // Only the trusted source factory may publish a nominal reconciliation attempt.
+  friend class runtime::PrivateOrderEventFactory;
+
+  // ########################################################################
+};
+
+// ########################################################################
 
 } // namespace aegis::oms

@@ -1,5 +1,5 @@
-// Purpose: prove the assigned M4 private-event vocabulary, bounded receive-time-free attempts,
-// source-limited provenance, compatibility normalization, and ingress equality.
+// Purpose: prove the assigned M4 private-event vocabulary, origin-specific receive-time-free
+// attempts, source-limited provenance, compatibility normalization, and ingress equality.
 
 #include "aegis/oms/private_order_event.hpp"
 #include "aegis/runtime/private_order_event_factory.hpp"
@@ -58,7 +58,8 @@ static_assert(static_cast<std::uint8_t>(oms::PrivateEventResolutionKind::Conflic
 static_assert(static_cast<std::uint8_t>(oms::PrivateEventResolutionKind::NotOrderScoped) == 4U);
 
 // ########################################################################
-// Producer attempts are nominal bounded values with no receive timestamp or public normalization.
+// Ordinary and reconciliation attempts are distinct nominal bounded values with no receive
+// timestamp, public construction, conversion, or receipt-attachment authority.
 // Interesting syntax: the requires-expressions turn forbidden public members into compile-time
 // facts without invoking or granting either operation.
 template <typename Value>
@@ -68,6 +69,13 @@ template <typename Factory>
 concept ExposesAttemptNormalization =
     requires(const Factory& factory, const oms::PrivateOrderIngressAttempt& attempt) {
       factory.normalize_private_order_ingress_attempt(attempt, model::ReceiveTimestamp{1U});
+    };
+
+template <typename Factory>
+concept ExposesReconciliationAttemptNormalization =
+    requires(const Factory& factory, const oms::ReconciliationPrivateEventIngressAttempt& attempt) {
+      factory.normalize_reconciliation_private_event_ingress_attempt(attempt,
+                                                                     model::ReceiveTimestamp{1U});
     };
 
 static_assert(!std::is_default_constructible_v<oms::PrivateEventIngressSemanticValue>);
@@ -87,6 +95,28 @@ static_assert(std::is_nothrow_move_constructible_v<oms::PrivateOrderIngressAttem
 static_assert(std::is_nothrow_move_assignable_v<oms::PrivateOrderIngressAttempt>);
 static_assert(!ExposesReceiveTime<oms::PrivateOrderIngressAttempt>);
 static_assert(!ExposesAttemptNormalization<runtime::PrivateOrderEventFactory>);
+static_assert(!std::is_default_constructible_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(!std::is_aggregate_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(!std::is_constructible_v<oms::ReconciliationPrivateEventIngressAttempt,
+                                       oms::PrivateEventIngressSemanticValue>);
+static_assert(!std::is_constructible_v<oms::ReconciliationPrivateEventIngressAttempt,
+                                       oms::PrivateOrderIngressAttempt>);
+static_assert(!std::is_constructible_v<oms::PrivateOrderIngressAttempt,
+                                       oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_copy_constructible_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_copy_assignable_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_move_constructible_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_move_assignable_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_nothrow_copy_constructible_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_nothrow_copy_assignable_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_nothrow_move_constructible_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_nothrow_move_assignable_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(!ExposesReceiveTime<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(!ExposesReconciliationAttemptNormalization<runtime::PrivateOrderEventFactory>);
+static_assert(
+    std::is_same_v<decltype(std::declval<const oms::ReconciliationPrivateEventIngressAttempt&>()
+                                .semantic_value()),
+                   const oms::PrivateEventIngressSemanticValue&>);
 
 // ########################################################################
 
@@ -121,6 +151,46 @@ create_both_identity_locator_or_throw(const test_support::M4PrivateEventFixture&
     throw std::logic_error{"invalid normalized private-event fixture"};
   }
   return std::move(result).value();
+}
+
+// --------------------------------------------------------
+// Remove only receive time from one trusted reconciliation origin.
+[[nodiscard]] oms::ReconciliationPrivateIngressOrigin
+to_reconciliation_private_ingress_origin(const oms::ReconciliationPrivateEventOrigin& origin) {
+  return oms::ReconciliationPrivateIngressOrigin{origin.reconciliation_epoch_id,
+                                                 origin.authoritative_cut_id, origin.row_ordinal,
+                                                 origin.cut_time};
+}
+
+// --------------------------------------------------------
+// Prove a nominal reconciliation attempt and its compatibility wrapper retain exactly the same
+// source semantic while the wrapper alone gains the supplied receive observation.
+void require_reconciliation_attempt_matches_compatibility_normalization(
+    const model::Result<oms::ReconciliationPrivateEventIngressAttempt>& attempt,
+    const model::Result<oms::NormalizedPrivateOrderInput>& normalized,
+    const oms::ReconciliationPrivateIngressOrigin& expected_origin,
+    const model::LogicalAccountId& expected_account, const model::VenueId& expected_venue,
+    model::ReceiveTimestamp expected_receive_time, oms::PrivateOrderEventKind expected_kind) {
+  REQUIRE(attempt);
+  REQUIRE(normalized);
+  const auto& semantic = attempt.value().semantic_value();
+  REQUIRE(std::holds_alternative<oms::ReconciliationPrivateIngressOrigin>(semantic.origin()));
+  CHECK(std::get<oms::ReconciliationPrivateIngressOrigin>(semantic.origin()) == expected_origin);
+  CHECK(semantic ==
+        oms::PrivateEventIngressSemanticValue::from_normalized_input(normalized.value()));
+  CHECK(semantic.subject_scope() == oms::PrivateEventSubjectScope::Order);
+  CHECK(semantic.logical_account_id() == expected_account);
+  CHECK(semantic.venue_id() == expected_venue);
+  CHECK(semantic.logical_account_id() == normalized.value().logical_account_id());
+  CHECK(semantic.venue_id() == normalized.value().venue_id());
+  REQUIRE(semantic.provenance().subject());
+  CHECK(semantic.provenance().subject()->logical_account_id() == expected_account);
+  CHECK(semantic.provenance().subject()->venue_id() == expected_venue);
+  CHECK(semantic.provenance() == normalized.value().provenance());
+  CHECK(semantic.payload() == normalized.value().payload());
+  CHECK(normalized.value().origin() == oms::PrivateEventOrigin::Reconciliation);
+  CHECK(normalized.value().receive_time() == expected_receive_time);
+  CHECK(normalized.value().kind() == expected_kind);
 }
 
 // --------------------------------------------------------
@@ -486,6 +556,166 @@ TEST_CASE("ordinary private ingress attempts preserve compatibility semantics wi
   CHECK(std::get<oms::ReconciliationPrivateIngressOrigin>(reconciliation_semantic.origin()) ==
         expected_reconciliation_origin);
   CHECK(reconciliation_semantic.provenance() == reconciliation.value().provenance());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Each trusted reconciliation translator publishes its exact authoritative row in a distinct
+// receive-time-free carrier, and compatibility normalization adds only the receipt observation.
+TEST_CASE("reconciliation private ingress attempts preserve exact compatibility semantics",
+          "[m4][private][reconciliation]") {
+  test_support::M4PrivateEventFixture fixture;
+  const auto& factory = fixture.private_event_factory();
+  const auto account = fixture.account_id();
+  const auto venue = fixture.venue_id();
+  const auto instrument = fixture.instrument_id();
+  const auto order_id = fixture.outbound_order_record().order_id();
+  const auto revision = fixture.outbound_order_record().provenance().metadata_revision;
+  const auto exchange_id =
+      test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x61U);
+  const auto trade_id = test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(0x71U);
+  const auto locator = create_both_identity_locator_or_throw(fixture);
+  const std::array detail{std::byte{0x01U}, std::byte{0x02U}};
+  const auto one = test_support::create_m4_decimal_or_throw<model::Quantity>(1);
+  const auto two = test_support::create_m4_decimal_or_throw<model::Quantity>(2);
+  const auto price = test_support::create_m4_decimal_or_throw<model::Price>(10);
+  const auto acknowledgement_origin =
+      fixture.create_reconciliation_private_event_origin_or_throw(31U, 131U, 231U);
+  const auto rejection_origin =
+      fixture.create_reconciliation_private_event_origin_or_throw(32U, 132U, 232U);
+  const auto execution_origin =
+      fixture.create_reconciliation_private_event_origin_or_throw(33U, 133U, 233U);
+  const auto cancellation_origin =
+      fixture.create_reconciliation_private_event_origin_or_throw(34U, 134U, 234U);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Every accepted translator shape creates the nominal row used by its compatibility wrapper.
+  const auto acknowledgement_attempt = factory.create_reconciliation_acknowledgement_attempt(
+      to_reconciliation_private_ingress_origin(acknowledgement_origin), account, venue, exchange_id,
+      order_id, instrument);
+  const auto acknowledgement = factory.normalize_reconciliation_acknowledgement(
+      acknowledgement_origin, account, venue, exchange_id, order_id, instrument);
+  const auto rejection_attempt = factory.create_reconciliation_rejection_attempt(
+      to_reconciliation_private_ingress_origin(rejection_origin), account, venue, locator,
+      oms::ExchangeRejectionCategory::InvalidOrder, detail);
+  const auto rejection = factory.normalize_reconciliation_rejection(
+      rejection_origin, account, venue, locator, oms::ExchangeRejectionCategory::InvalidOrder,
+      detail);
+  const auto execution_attempt = factory.create_reconciliation_execution_attempt(
+      to_reconciliation_private_ingress_origin(execution_origin), account, venue, locator, trade_id,
+      instrument, revision, one, two, price, execution::OrderSide::Buy);
+  const auto execution = factory.normalize_reconciliation_execution(
+      execution_origin, account, venue, locator, trade_id, instrument, revision, one, two, price,
+      execution::OrderSide::Buy);
+  const auto cancellation_attempt = factory.create_reconciliation_cancellation_result_attempt(
+      to_reconciliation_private_ingress_origin(cancellation_origin), account, venue, locator,
+      oms::CancellationResult::Cancelled, two);
+  const auto cancellation = factory.normalize_reconciliation_cancellation_result(
+      cancellation_origin, account, venue, locator, oms::CancellationResult::Cancelled, two);
+
+  require_reconciliation_attempt_matches_compatibility_normalization(
+      acknowledgement_attempt, acknowledgement,
+      to_reconciliation_private_ingress_origin(acknowledgement_origin), account, venue,
+      acknowledgement_origin.receive_time, oms::PrivateOrderEventKind::ExchangeAcknowledged);
+  require_reconciliation_attempt_matches_compatibility_normalization(
+      rejection_attempt, rejection, to_reconciliation_private_ingress_origin(rejection_origin),
+      account, venue, rejection_origin.receive_time, oms::PrivateOrderEventKind::ExchangeRejected);
+  require_reconciliation_attempt_matches_compatibility_normalization(
+      execution_attempt, execution, to_reconciliation_private_ingress_origin(execution_origin),
+      account, venue, execution_origin.receive_time, oms::PrivateOrderEventKind::Execution);
+  require_reconciliation_attempt_matches_compatibility_normalization(
+      cancellation_attempt, cancellation,
+      to_reconciliation_private_ingress_origin(cancellation_origin), account, venue,
+      cancellation_origin.receive_time, oms::PrivateOrderEventKind::CancellationResult);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The four nominal payloads and provenance presence shapes retain their exact authored fields.
+  const auto& acknowledgement_semantic = acknowledgement_attempt.value().semantic_value();
+  const auto& acknowledgement_payload =
+      std::get<oms::ExchangeAcknowledgedPayload>(acknowledgement_semantic.payload());
+  CHECK(acknowledgement_payload.exchange_order_id == exchange_id);
+  CHECK(acknowledgement_payload.local_order_locator == order_id);
+  REQUIRE(acknowledgement_semantic.provenance().subject()->instrument());
+  CHECK(acknowledgement_semantic.provenance().subject()->instrument()->instrument_id == instrument);
+  CHECK(acknowledgement_semantic.provenance().subject()->instrument()->metadata_revision ==
+        revision);
+
+  const auto& rejection_semantic = rejection_attempt.value().semantic_value();
+  const auto& rejection_payload =
+      std::get<oms::ExchangeRejectedPayload>(rejection_semantic.payload());
+  CHECK(rejection_payload.locator == locator);
+  CHECK(rejection_payload.category == oms::ExchangeRejectionCategory::InvalidOrder);
+  REQUIRE(rejection_payload.detail.active_byte_count() == detail.size());
+  CHECK(rejection_payload.detail.bytes()[0] == detail[0]);
+  CHECK(rejection_payload.detail.bytes()[1] == detail[1]);
+  CHECK_FALSE(rejection_semantic.provenance().subject()->instrument());
+
+  const auto& execution_semantic = execution_attempt.value().semantic_value();
+  const auto& execution_payload = std::get<oms::ExecutionPayload>(execution_semantic.payload());
+  CHECK(execution_payload.locator == locator);
+  CHECK(execution_payload.trade_id == trade_id);
+  CHECK(execution_payload.instrument_id == instrument);
+  CHECK(execution_payload.metadata_revision == revision);
+  CHECK(execution_payload.incremental_quantity == one);
+  CHECK(execution_payload.cumulative_quantity == two);
+  CHECK(execution_payload.execution_price == price);
+  CHECK(execution_payload.source_side == execution::OrderSide::Buy);
+  REQUIRE(execution_semantic.provenance().subject()->instrument());
+  CHECK(execution_semantic.provenance().subject()->instrument()->instrument_id == instrument);
+  CHECK(execution_semantic.provenance().subject()->instrument()->metadata_revision == revision);
+
+  const auto& cancellation_semantic = cancellation_attempt.value().semantic_value();
+  const auto& cancellation_payload =
+      std::get<oms::CancellationResultPayload>(cancellation_semantic.payload());
+  CHECK(cancellation_payload.locator == locator);
+  CHECK(cancellation_payload.result == oms::CancellationResult::Cancelled);
+  CHECK_FALSE(cancellation_payload.causal_cancel_attempt_id);
+  CHECK(cancellation_payload.terminal_cumulative_quantity == two);
+  CHECK_FALSE(cancellation_semantic.provenance().subject()->instrument());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Nominal creation and compatibility normalization reject every reconciliation validation family
+  // with the same stable error and validation precedence.
+  const auto invalid_category = static_cast<oms::ExchangeRejectionCategory>(0U);
+  require_matching_failure(factory.create_reconciliation_rejection_attempt(
+                               to_reconciliation_private_ingress_origin(rejection_origin), account,
+                               venue, locator, invalid_category, detail),
+                           factory.normalize_reconciliation_rejection(rejection_origin, account,
+                                                                      venue, locator,
+                                                                      invalid_category, detail));
+  const std::array<std::byte, 257U> oversized_detail{};
+  require_matching_failure(
+      factory.create_reconciliation_rejection_attempt(
+          to_reconciliation_private_ingress_origin(rejection_origin), account, venue, locator,
+          oms::ExchangeRejectionCategory::InvalidOrder, oversized_detail),
+      factory.normalize_reconciliation_rejection(rejection_origin, account, venue, locator,
+                                                 oms::ExchangeRejectionCategory::InvalidOrder,
+                                                 oversized_detail));
+
+  const auto zero = test_support::create_m4_decimal_or_throw<model::Quantity>(0);
+  require_matching_failure(
+      factory.create_reconciliation_execution_attempt(
+          to_reconciliation_private_ingress_origin(execution_origin), account, venue, locator,
+          trade_id, instrument, revision, zero, two, price, execution::OrderSide::Buy),
+      factory.normalize_reconciliation_execution(execution_origin, account, venue, locator,
+                                                 trade_id, instrument, revision, zero, two, price,
+                                                 execution::OrderSide::Buy));
+  const auto invalid_side = static_cast<execution::OrderSide>(0U);
+  require_matching_failure(
+      factory.create_reconciliation_execution_attempt(
+          to_reconciliation_private_ingress_origin(execution_origin), account, venue, locator,
+          trade_id, instrument, revision, one, two, price, invalid_side),
+      factory.normalize_reconciliation_execution(execution_origin, account, venue, locator,
+                                                 trade_id, instrument, revision, one, two, price,
+                                                 invalid_side));
+  require_matching_failure(factory.create_reconciliation_cancellation_result_attempt(
+                               to_reconciliation_private_ingress_origin(cancellation_origin),
+                               account, venue, locator, oms::CancellationResult::Cancelled,
+                               std::nullopt),
+                           factory.normalize_reconciliation_cancellation_result(
+                               cancellation_origin, account, venue, locator,
+                               oms::CancellationResult::Cancelled, std::nullopt));
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
