@@ -1,5 +1,5 @@
-// Purpose: compose the deterministic M3 submission stack, install one recovery-bound read-only M4
-// planning child while pristine, and execute the unchanged synchronous submission path.
+// Purpose: compose the deterministic M3 submission stack, install one recovery-bound M4 private
+// owner while pristine, and gate synchronous submissions on its account-correctness state.
 
 #pragma once
 
@@ -59,13 +59,16 @@ class BotContext;
 class BotRuntime;
 
 // ########################################################################
-// The immutable M4 policy is borrowed only while an owner-bound planning child validates and copies
-// it.
+// The immutable M4 policy is borrowed only while the private owner validates and copies it.
 class M4Policy;
 
 // ########################################################################
-// The source-private identity planner remains incomplete at this public M3 boundary.
+// The source-private identity owner retains bounded private facts and account correctness.
 class PrivateOrderReconciler;
+
+// ########################################################################
+// The serialized executor borrows the installed private-turn owner through this narrow interface.
+class PrivateAdmissionOwner;
 
 // ########################################################################
 // Source-private fault points let focused tests force exact canonical-append containment branches
@@ -80,9 +83,9 @@ enum class TraceAppendFaultPointForTest : std::uint8_t {
 // ########################################################################
 // SubmissionCoordinator owns every mutable M3 component and is the sole direct-path entry below
 // BotContext. Before any M3 activity or callback-capable BotRuntime exists, it may consume one
-// acknowledged recovery bootstrap into the active identity stream and one read-only M4 planning
-// child, which is destroyed first; no public operation grants it event-application or mutation
-// authority.
+// acknowledged recovery bootstrap into the active identity stream and one bounded M4 private owner,
+// which is destroyed first. Only that installed child's correctness state gates M4 submissions;
+// the source-private admission interface accepts executor-issued authority alone.
 class SubmissionCoordinator final {
 public:
 
@@ -107,20 +110,25 @@ public:
   ~SubmissionCoordinator();
 
   // --------------------------------------------------------
-  // Consume one namespace-acknowledged recovery bootstrap and install a fully allocated planning
-  // child only before callback authority attaches and while every M3 activity, evidence, fault,
+  // Consume one namespace-acknowledged recovery bootstrap and install a fully allocated private
+  // owner only before callback authority attaches and while every M3 activity, evidence, fault,
   // and test-probe field remains pristine. Any reported failure leaves both owner and bootstrap
   // unchanged; success replaces the unused construction-time identity stream before publishing
-  // the read-only child.
+  // the private owner.
   [[nodiscard]] model::Result<void> install_recovery_bound_private_order_reconciler(
       const configuration::StartupConfiguration& configuration, const M4Policy& policy,
       recovery::RecoveryBootstrap&& recovery_bootstrap);
 
   // --------------------------------------------------------
-  // Borrow the installed read-only planning child, or return null before successful installation.
+  // Borrow the installed private owner's read-only state, or return null before installation.
   [[nodiscard]] const PrivateOrderReconciler* private_order_reconciler() const noexcept {
     return private_order_reconciler_.get();
   }
+
+  // --------------------------------------------------------
+  // Borrow the private admission interface for an executor whose lifetime is enclosed by this
+  // coordinator, or return null before installation; only admitted owner-turn tokens can consume.
+  [[nodiscard]] PrivateAdmissionOwner* private_admission_owner() noexcept;
 
   // --------------------------------------------------------
   // Borrow the exact installed route catalog used by the synchronous M3 owner.
@@ -357,7 +365,7 @@ private:
       const std::optional<std::uint64_t>* captured_measurement_finished = nullptr) noexcept;
 
   // --------------------------------------------------------
-  // Retain every M3 owner component, activity/fault latch, and the last-declared M4 planning child;
+  // Retain every M3 owner component, activity/fault latch, and the last-declared M4 private owner;
   // the lease declared before the identity stream outlives that provider during reverse-order
   // destruction, and all mutable fields remain source-private to the serialized submission path.
   execution::OwnerLocalRouteCatalog routes_;

@@ -13,6 +13,48 @@
 
 namespace aegis::runtime {
 
+// The current proof belongs only to its synchronous thread and never owns the referenced values.
+thread_local const PrivateFenceTurnAuthority* PrivateFenceTurnAuthority::current_ = nullptr;
+
+// --------------------------------------------------------
+// Temporarily authenticate the exact stack references passed to one private fence handler.
+PrivateFenceTurnAuthority::PrivateFenceTurnAuthority(
+    SerializedExecutor& executor, PrivateAdmissionOwner& owner, const ControlTurnContext& context,
+    const AccountSafetyFenceTurn* account_fence,
+    const GlobalPrivateFenceTurn* global_fence) noexcept
+    : executor_{&executor}, owner_{&owner}, context_{&context}, account_fence_{account_fence},
+      global_fence_{global_fence}, previous_{current_} {
+  current_ = this;
+}
+
+// --------------------------------------------------------
+// Remove this proof before the virtual call's stack references can leave their lifetime.
+PrivateFenceTurnAuthority::~PrivateFenceTurnAuthority() { current_ = previous_; }
+
+// --------------------------------------------------------
+// Return authority only for the matching thread, exact consumer, fence, and context references.
+SerializedExecutor* PrivateFenceTurnAuthority::find_current_account_fence_executor(
+    const PrivateAdmissionOwner& owner, const AccountSafetyFenceTurn& fence,
+    const ControlTurnContext& context) noexcept {
+  return current_ != nullptr && current_->owner_ == &owner && current_->account_fence_ == &fence &&
+                 current_->global_fence_ == nullptr && current_->context_ == &context
+             ? current_->executor_
+             : nullptr;
+}
+
+// --------------------------------------------------------
+// Reject account-lane or copied contexts when authenticating a reasonless global fence.
+SerializedExecutor* PrivateFenceTurnAuthority::find_current_global_fence_executor(
+    const PrivateAdmissionOwner& owner, const GlobalPrivateFenceTurn& fence,
+    const ControlTurnContext& context) noexcept {
+  return current_ != nullptr && current_->owner_ == &owner && current_->global_fence_ == &fence &&
+                 current_->account_fence_ == nullptr && current_->context_ == &context
+             ? current_->executor_
+             : nullptr;
+}
+
+// --------------------------------------------------------
+
 // ########################################################################
 // Internal validation classification distinguishes a claimed disposition mismatch from a malformed
 // retained completion before fixed failure storage is selected.
@@ -976,9 +1018,13 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
               receipt->attempt_ordinal);
     }
   } else if (account_fence_turn.has_value()) {
+    PrivateFenceTurnAuthority authority{*this, *private_owner_, control_context.value(),
+                                        &account_fence_turn.value(), nullptr};
     handler_result = private_owner_->apply_account_safety_fence(account_fence_turn.value(),
                                                                 control_context.value());
   } else {
+    PrivateFenceTurnAuthority authority{*this, *private_owner_, control_context.value(), nullptr,
+                                        &global_fence_turn.value()};
     handler_result = private_owner_->apply_global_private_fence(global_fence_turn.value(),
                                                                 control_context.value());
   }

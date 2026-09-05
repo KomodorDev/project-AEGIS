@@ -23,6 +23,20 @@ types exist. Claiming byte-exact schema one now would force tests to invent miss
 preimages. This ADR therefore accepts the policy bytes and semantic record contracts, reserves the
 evidence names, and requires a separate accepted schema ADR before any evidence encoder exists.
 
+## Current implementation boundary
+
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) sizes separate
+preparation tables from `max_event_identity_records`, `max_trade_identity_records`, and
+`max_exchange_order_mappings`; their records and mapping candidates confer no canonical identity or
+correlation authority. Complete retained turns use a fixed `max_private_event_records` prefix. One
+dedicated overflow slot preserves the first additional admitted source fact while a terminal
+executor fault prevents further growth. All required preparation capacity is checked before any
+table changes. These stores and the lane-specific retained completion oracles are volatile staging
+evidence, separate from the semantic private-event, audit-span, journal, and recovery records fixed
+below. Quiescent runtime evidence reports prepared and canonical counts separately. ADR-0014 has
+not been created; no new canonical M4 evidence encoder, decoder, byte golden, or schema-version
+claim is introduced. The accepted `AEGISM4P` policy bytes and prior M1-M3 goldens remain unchanged.
+
 ## Decision
 
 The following subsections define the accepted M4 capacity policy, provenance, semantic evidence, and

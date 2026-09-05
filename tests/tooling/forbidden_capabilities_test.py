@@ -746,6 +746,21 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         """Pin current offline files and prove M4 owner production receives direct-path checks."""
 
         required = {
+            "src/aegis/runtime/private_identity_preparation.cpp",
+            "src/aegis/runtime/private_identity_preparation.hpp",
+            "src/aegis/runtime/private_identity_retention.cpp",
+            "src/aegis/runtime/private_identity_retention.hpp",
+            "src/aegis/runtime/submission_coordinator.cpp",
+            "src/aegis/runtime/submission_coordinator.hpp",
+            "src/aegis/runtime/submission_diagnostics.cpp",
+            "src/aegis/trace/submission_trace.cpp",
+            "include/aegis/execution/submit_result.hpp",
+            "include/aegis/runtime/market_runtime.hpp",
+            "src/aegis/runtime/market_runtime.cpp",
+            "tests/unit/runtime/private_identity_preparation_test.cpp",
+            "tests/unit/runtime/private_identity_retention_owner_test.cpp",
+            "tests/unit/runtime/private_identity_retention_runtime_test.cpp",
+            "tests/unit/runtime/private_submission_safety_gate_test.cpp",
             "include/aegis/configuration/startup_configuration.hpp",
             "include/aegis/market_data/subscription.hpp",
             "include/aegis/model/bounded_identity.hpp",
@@ -790,6 +805,15 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/trace/m4_semantic_evidence_test.cpp",
         }
         required_owner = {
+            "src/aegis/runtime/private_identity_preparation.cpp",
+            "src/aegis/runtime/private_identity_preparation.hpp",
+            "src/aegis/runtime/private_identity_retention.cpp",
+            "src/aegis/runtime/private_identity_retention.hpp",
+            "src/aegis/runtime/submission_coordinator.cpp",
+            "src/aegis/runtime/submission_coordinator.hpp",
+            "src/aegis/runtime/submission_diagnostics.cpp",
+            "src/aegis/trace/submission_trace.cpp",
+            "include/aegis/execution/submit_result.hpp",
             "include/aegis/configuration/startup_configuration.hpp",
             "include/aegis/market_data/subscription.hpp",
             "include/aegis/model/bounded_identity.hpp",
@@ -867,6 +891,15 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "include/aegis/runtime/private_order_admission.hpp",
                 "namespace aegis::runtime {\n"
                 "class SerializedExecutor;\n"
+                "class PrivateFenceTurnAuthority final {\n"
+                "private:\n"
+                "  PrivateFenceTurnAuthority(SerializedExecutor& executor, "
+                "PrivateAdmissionOwner& owner, int context);\n"
+                "  static SerializedExecutor* find_current_account_fence_executor();\n"
+                "  static SerializedExecutor* find_current_global_fence_executor();\n"
+                "  SerializedExecutor* executor_;\n"
+                "  friend class SerializedExecutor;\n"
+                "};\n"
                 "class AdmittedPrivateOrderSlot final {\n"
                 "private:\n"
                 "  AdmittedPrivateOrderSlot(SerializedExecutor& owner);\n"
@@ -894,6 +927,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 private_header.read_text(encoding="utf-8")
                 + "class Unrelated { friend class SerializedExecutor; };\n"
                 + "class PointerLookalike { SerializedExecutor* owner_; };\n"
+                + "class FenceLookalike { SerializedExecutor* executor_; };\n"
                 + "void forbidden_ordinary_handoff(SerializedExecutor& executor);\n"
                 + "void forbidden_reconciliation_handoff(SerializedExecutor& executor);\n",
                 encoding="utf-8",
@@ -906,8 +940,67 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                     "executor handoff",
                     "executor handoff",
                     "executor handoff",
+                    "executor handoff",
                 ],
             )
+
+    # --------------------------------------------------------
+    # The production retention owner may borrow only its exact existing executor identity;
+    # adding a constructor or arbitrary parameter remains a forbidden owner handoff.
+    def test_retention_owner_executor_exceptions_are_narrow(self) -> None:
+        """Permit exact non-owning declarations without permitting execution capability."""
+
+        declarations = {
+            "src/aegis/runtime/private_order_reconciler.hpp": (
+                "PrivateTurnCompletion retain_admitted_identity_turn("
+                "SerializedExecutor& executor, int value);\n"
+                "bool bind_private_executor(SerializedExecutor& executor) noexcept;"
+            ),
+            "src/aegis/runtime/private_identity_retention.cpp": (
+                "PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn("
+                "SerializedExecutor& executor, int value) {}\n"
+                "bool PrivateOrderReconciler::bind_private_executor("
+                "SerializedExecutor& executor) noexcept {}"
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            for path, declaration in declarations.items():
+                with self.subTest(path=path):
+                    source = self.write_repository_file(repository, path, declaration + "\n")
+                    self.assertEqual(
+                        scanner.scan_repository_paths_or_raise(repository, [source]), []
+                    )
+                    source.write_text(
+                        declaration + "\nvoid inject(SerializedExecutor& unrelated) { "
+                        "SerializedExecutor another; try_admit(); }\n",
+                        encoding="utf-8",
+                    )
+                    findings = scanner.scan_repository_paths_or_raise(repository, [source])
+                    self.assertEqual([item.rule for item in findings], ["executor handoff"] * 3)
+
+                    # An existing borrowed pointer cannot evade the scanner through its methods.
+                    for operation in (
+                        "try_admit_private",
+                        "try_admit_reconciliation_event",
+                        "execute_next_turn",
+                        "execute_pending_turns",
+                        "bind_to_current_thread",
+                        "create_inline_command_work_item",
+                    ):
+                        source.write_text(
+                            declaration + f"\nvoid inject() {{ executor.{operation}(); }}\n",
+                            encoding="utf-8",
+                        )
+                        self.assertEqual(
+                            [
+                                item.rule
+                                for item in scanner.scan_repository_paths_or_raise(
+                                    repository, [source]
+                                )
+                            ],
+                            ["executor handoff"],
+                        )
 
     # --------------------------------------------------------
     # Default scans must not silently succeed after an explicitly assigned artifact disappears.

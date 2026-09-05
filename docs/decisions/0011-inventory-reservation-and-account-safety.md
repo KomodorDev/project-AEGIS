@@ -25,6 +25,23 @@ Nevertheless, discarding it or leaving the account enabled would understate risk
 requires account quarantine and forbids silent adoption, cancellation, retry, or flattening. M4 must
 turn that rule into bounded owner-local state without importing M5's later dynamic risk modes.
 
+## Current implementation boundary
+
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) retains complete
+private inputs and monotonic account/global containment before the joint business reducer exists.
+The concrete `PrivateAdmissionOwner` returns only retained completions; successful account/global
+fence handling records bounded retention and submission gating, not the complete journal/audit
+publication required for a finished M4 owner. No safety clear, reservation conversion, inventory
+mutation, or canonical safety audit is implemented by this staging path.
+
+When that owner is explicitly installed, the submission path enforces the accepted account gate
+after local identity generation and before reservation arithmetic, including reasons
+`AccountReconciliationRequired = 58` and `AccountQuarantined = 59`. A known `SubmissionUnknown`
+records its account cause before another submission can reach risk. Configured-account causes block
+that account; an unattributable source activates the reasonless global block. The M3-only composition
+keeps its existing behavior. These implemented gates do not complete the inventory or reconciliation
+requirements below.
+
 ## Decision
 
 The following subsections define the accepted reservation conversion, signed inventory, unattributed

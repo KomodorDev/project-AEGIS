@@ -256,12 +256,50 @@ conversion, signed seven-scope inventory and account quarantine.
 journal/snapshot ordering, complete reconciliation proof, restart identities, safe convergence and
 the one-shot reference intent. [ADR-0013](decisions/0013-m4-policy-and-canonical-evidence.md) fixes
 the immutable M4 capacity policy, stable evidence semantics, provenance scopes and fail-closed
-headroom. The current baseline integrates policy/identity, normalized-ingress, the ordinary-private
-and reconciliation-event critical-admission lane foundations, first-admission resolution,
-owner-bound correlation, fake-recovery authority, provenance, audit-span, and typed
-semantic-evidence foundations. A required ADR-0014 must still fix exact new evidence bytes before any
-M4 encoder or byte golden. Inventory, reservation conversion, full reconciliation, the crash matrix,
-and exit-evidence work remain deferred and keep the complete M4 gate open.
+headroom. The current baseline integrates policy/identity, normalized ingress, separate ordinary
+private and reconciliation admission lanes, owner-bound correlation, transactional identity
+preparations, a concrete private-admission owner, opt-in `MarketRuntime` composition, monotonic
+account/global containment, fake recovery namespace authority, provenance, audit spans, and typed
+semantic evidence. None of the seven M4 Exit Gate conditions below is fully proven end to end.
+
+### Current implementation boundary
+
+The accepted joint commit requires the prepared business journal input, the complete OMS and
+reservation/inventory plan, and the required audit/callback capacity before canonical identities or
+exchange mappings can become application authority. Those dependencies remain incomplete. The
+current slice therefore commits only bounded **preparations**: immutable event comparisons and
+first-admission resolutions, trade comparisons, and diagnostic mapping candidates. It preflights
+every required preparation capacity and conflict before insertion, and either retains all required
+new records or changes none. Repeated event keys reuse their original resolution before looking at
+later owner state. A prepared mapping never becomes a correlation source; the canonical event,
+trade, and exchange-mapping tables remain empty.
+
+`MarketRuntime::create_with_fake_private_identity_retention` installs this owner before bot callback
+authority can escape and composes both policy-sized private lanes under the existing shared attempt
+and turn ordering. Ordinary source admission has a production caller; authoritative reconciliation
+input remains behind its trusted internal factory and separate lane/completion oracle. Every
+admitted private fact completes as `RetainedForReconciliation`, including repeated facts. Its
+preparation classification is separate from `PrivateEventDisposition` and cannot acknowledge
+economic consumption. The owner retains complete inputs and monotonic account/global safety causes;
+successful fence handling proves this bounded retention, not business journal/audit publication.
+The normal retained-turn prefix is bounded by `max_private_event_records`. One dedicated overflow
+record preserves the first additional admitted fact and faults the executor, preventing the prefix
+from growing indefinitely. Rejected source attempts remain the source's responsibility.
+
+With the M4 owner installed, account safety rejects subsequent submissions after local identity
+generation and before reservation arithmetic. `SubmissionReason::AccountReconciliationRequired = 58`
+and `AccountQuarantined = 59` extend the existing result vocabulary; earlier assignments and M1-M3
+goldens are unchanged. The M3-only composition retains its existing behavior. Private preparation
+does not apply an OMS transition, convert reservations, change inventory, or invoke an order-event
+callback. Runtime evidence copies canonical and prepared counts separately after every unsuppressed
+lane and fence has become quiescent.
+
+Full OMS lifecycle application, fill-gap handling, inventory, reservation conversion, order-event
+callbacks, full authoritative reconciliation, the one-shot reference driver, business
+journal/snapshot/replay and catch-up, the 55-point crash matrix, and final exit evidence remain M4
+work. ADR-0014 still does not exist and must accept exact canonical M4 evidence bytes before an
+encoder or byte golden is implemented. Namespace-only fake recovery and retained preparations do
+not prove crash recovery or complete unknown/external-order containment.
 
 ### Outcome
 

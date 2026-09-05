@@ -1,5 +1,5 @@
-// Purpose: define recovery-bound fixed-capacity private-identity storage for one pristine
-// submission owner and derive detached first-seen plans without mutating owner state.
+// Purpose: bind private identity planning, bounded retained preparations, and production admission
+// containment to one submission owner without claiming canonical or economic consumption.
 
 #pragma once
 
@@ -11,6 +11,7 @@
 #include "aegis/oms/private_order_resolution.hpp"
 #include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 #include "aegis/runtime/m4_policy.hpp"
+#include "private_identity_retention.hpp"
 #include "private_order_event_factory.hpp"
 
 #include <cstdint>
@@ -28,7 +29,7 @@ namespace aegis::runtime {
 class SubmissionCoordinator;
 
 // ########################################################################
-// One event-identity slot schema pairs timestamp-free ingress semantics with an immutable
+// One event-identity slot schema pairs receive-time-free ingress semantics with an immutable
 // resolution and original disposition. This slice allocates slots but never populates them.
 struct PrivateEventIdentityRecord {
   oms::PrivateEventRegistryKey key;
@@ -243,14 +244,13 @@ private:
 };
 
 // ########################################################################
-// The pre-application child is permanently bound to one nonmoving coordinator, one acknowledged
-// recovery namespace/runtime epoch, and fully preallocated empty identity tables. Every slot
-// remains empty and every count remains zero; its sole semantic operation derives detached
-// read-only first-seen plans from genuine owner state. Planning performs no synchronization and
-// therefore requires either the coordinator's serialized owner context or externally guaranteed
-// quiescence for the complete call. Its opaque lease keeps cold medium inspection fenced for the
-// child's complete lifetime but grants no journal mutation operation.
-class PrivateOrderReconciler final {
+// The child binds one nonmoving coordinator and acknowledged recovery incarnation. Token-gated
+// owner turns retain preparations and containment; canonical identity tables remain empty until
+// the later joint business reducer exists. Read-only planning and account/table inspection require
+// owner serialization or quiescence. Completion-error and immutable retained-turn queries support
+// concurrent access through release/acquire publication.
+// The opaque lease keeps cold medium inspection fenced and grants no journal mutation operation.
+class PrivateOrderReconciler final : public PrivateAdmissionOwner {
 public:
 
   // --------------------------------------------------------
@@ -259,6 +259,82 @@ public:
   PrivateOrderReconciler& operator=(const PrivateOrderReconciler&) = delete;
   PrivateOrderReconciler(PrivateOrderReconciler&&) = delete;
   PrivateOrderReconciler& operator=(PrivateOrderReconciler&&) = delete;
+
+  // --------------------------------------------------------
+  // Release preparation and containment storage before the borrowed submission owner disappears.
+  ~PrivateOrderReconciler() override = default;
+
+  // --------------------------------------------------------
+  // Retain one genuine ordinary or reconciliation token without claiming economic consumption.
+  // Wrong-owner, moved, stale, or recursive authority changes no preparation or account state.
+  [[nodiscard]] PrivateTurnCompletion
+  commit_private_order_turn(AdmittedPrivateOrderSlot admitted) noexcept override;
+  [[nodiscard]] PrivateTurnCompletion
+  commit_reconciliation_event_turn(AdmittedReconciliationEventSlot admitted) noexcept override;
+
+  // --------------------------------------------------------
+  // No canonical disposition exists in this preparation-only owner, in either admission lane.
+  [[nodiscard]] std::optional<oms::PrivateEventDisposition>
+  find_committed_private_event_disposition(model::AdmissionOrdinal) const noexcept override {
+    return std::nullopt;
+  }
+  [[nodiscard]] std::optional<oms::PrivateEventDisposition>
+  find_committed_reconciliation_event_disposition(model::AdmissionOrdinal) const noexcept override {
+    return std::nullopt;
+  }
+
+  // --------------------------------------------------------
+  // Acquire the matching lane's immutable published error; returned pointers survive later appends
+  // and remain valid until this owner is destroyed.
+  [[nodiscard]] const model::DomainError* find_committed_retained_private_event_error(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept override;
+  [[nodiscard]] const model::DomainError* find_committed_retained_reconciliation_event_error(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept override;
+
+  // --------------------------------------------------------
+  // Preserve complete fence causes and apply monotonic submission containment. These trusted
+  // executor control calls publish retained preparation evidence, not a business journal/audit.
+  [[nodiscard]] model::Result<void>
+  apply_account_safety_fence(const AccountSafetyFenceTurn& fence,
+                             const ControlTurnContext& context) noexcept override;
+  [[nodiscard]] model::Result<void>
+  apply_global_private_fence(const GlobalPrivateFenceTurn& fence,
+                             const ControlTurnContext& context) noexcept override;
+
+  // --------------------------------------------------------
+  // Query owner-local submission containment; unknown accounts conservatively return Quarantined.
+  [[nodiscard]] risk::AccountSafetyState
+  account_safety_state(model::LogicalAccountId account_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Query the reasonless global block without attributing it to any configured account.
+  [[nodiscard]] bool is_private_consumption_globally_blocked() const noexcept {
+    return retention_.globally_blocked;
+  }
+
+  // --------------------------------------------------------
+  // Preserve authentic uncertain submission provenance before a later owner-local risk decision.
+  void record_submission_uncertainty(const oms::OutboundOrderRecord& order) noexcept;
+
+  // --------------------------------------------------------
+  // Borrow preparation-only tables under owner serialization or quiescence; candidates confer no
+  // exchange-order ownership, and retained comparisons confer no consumption acknowledgement.
+  [[nodiscard]] const PrivateIdentityPreparationStore& identity_preparations() const noexcept {
+    return retention_.preparations;
+  }
+
+  // --------------------------------------------------------
+  // Acquire the immutable complete retained turn for the exact ordinal and lane, including the
+  // dedicated first-overflow fact after evidence saturation faults the executor.
+  [[nodiscard]] const RetainedPrivateIdentityTurn*
+  find_retained_identity_turn(model::AdmissionOrdinal attempt_ordinal,
+                              bool reconciliation) const noexcept;
+
+  // --------------------------------------------------------
+  // Observe the retained normal prefix without counting the dedicated fail-stop overflow record.
+  [[nodiscard]] std::size_t retained_identity_turn_count() const noexcept {
+    return retention_.published_turn_count.load(std::memory_order_acquire);
+  }
 
   // --------------------------------------------------------
   // Return the fixed number of preallocated event-identity slots.
@@ -279,19 +355,19 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return zero because this read-only planning boundary cannot populate an event-identity slot.
+  // Return the canonical event count, which remains zero until the joint business reducer exists.
   [[nodiscard]] std::uint32_t event_identity_record_count() const noexcept {
     return event_identity_record_count_;
   }
 
   // --------------------------------------------------------
-  // Return zero because this read-only planning boundary cannot populate a trade-identity slot.
+  // Return the canonical trade count, which remains zero until the joint business reducer exists.
   [[nodiscard]] std::uint32_t trade_identity_record_count() const noexcept {
     return trade_identity_record_count_;
   }
 
   // --------------------------------------------------------
-  // Return zero because this read-only planning boundary cannot populate an exchange-order slot.
+  // Return the active mapping count; pending preparation candidates are deliberately excluded.
   [[nodiscard]] std::uint32_t exchange_order_mapping_count() const noexcept {
     return exchange_order_mapping_count_;
   }
@@ -417,11 +493,26 @@ private:
       std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
       std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
       std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
-      std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease) noexcept;
+      std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease,
+      const configuration::StartupConfiguration& configuration);
 
   // --------------------------------------------------------
-  // Retain one-way read authority, recovery identity, fixed storage, and the last-declared lease;
-  // no operation in this slice changes members or reaches journal mutation.
+  // Jointly retain one admitted source, its optional preparation, and containment before releasing
+  // the matching completion error. All allocation belongs to cold construction.
+  [[nodiscard]] PrivateTurnCompletion
+  retain_admitted_identity_turn(SerializedExecutor& executor, CriticalPrivateEventAttempt attempt,
+                                const AdmissionReceipt& receipt,
+                                model::TurnOrdinal turn_ordinal) noexcept;
+
+  // --------------------------------------------------------
+  // Bind the first authenticated event/fence executor only when its installed policy matches;
+  // later foreign incarnations return false without changing owner state. The caller must hold
+  // the retention turn guard; the retained opaque lease prevents same-address executor reuse.
+  [[nodiscard]] bool bind_private_executor(SerializedExecutor& executor) noexcept;
+
+  // --------------------------------------------------------
+  // Retain immutable owner/recovery authority, empty canonical tables, and the opaque live lease.
+  // The last-declared retention state owns the independently mutable preparations and gates.
   const SubmissionCoordinator* owner_;
   M4Policy m4_policy_;
   recovery::RecoveryLineageId recovery_lineage_id_;
@@ -435,6 +526,7 @@ private:
   std::uint32_t trade_identity_record_count_{0U};
   std::uint32_t exchange_order_mapping_count_{0U};
   std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease_;
+  PrivateIdentityRetentionState retention_;
 
   // ########################################################################
   // Interesting syntax: friendship lets only the owning coordinator invoke the private validating
