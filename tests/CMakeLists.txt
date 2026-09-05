@@ -77,6 +77,8 @@ add_executable(
   unit/runtime/reconciliation_private_event_admission_test.cpp
   # Reconciler tests pin exact owner binding, empty identity tables, and longitudinal submissions.
   unit/runtime/private_order_reconciler_test.cpp
+  # Preparation tests prove bounded all-or-none insertion without canonical publication.
+  unit/runtime/private_identity_preparation_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
   unit/runtime/submission_coordinator_test.cpp

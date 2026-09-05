@@ -93,6 +93,8 @@ add_library(
   src/aegis/runtime/m4_provenance_resolver.cpp
   src/aegis/runtime/private_order_event_factory.cpp
   src/aegis/runtime/private_order_reconciler.cpp
+  # Preparations remain separate from canonical identities and economic application.
+  src/aegis/runtime/private_identity_preparation.cpp
   # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
   src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.

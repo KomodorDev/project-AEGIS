@@ -145,6 +145,9 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
 # M4 paths remain an explicit credential-free/offline manifest so later connectivity milestones
 # cannot silently make identity planning, OMS, inventory, recovery, tests, or evidence helpers live.
 M4_GENERAL_FILE_PATTERNS = (
+    "src/aegis/runtime/private_identity_preparation.cpp",
+    "src/aegis/runtime/private_identity_preparation.hpp",
+    "tests/unit/runtime/private_identity_preparation_test.cpp",
     "include/aegis/configuration/startup_configuration.hpp",
     "include/aegis/market_data/subscription.hpp",
     "include/aegis/model/bounded_identity.hpp",
@@ -190,8 +193,10 @@ M4_GENERAL_FILE_PATTERNS = (
 )
 
 # These current M4 production files can execute during private owner construction, normalization,
-# and read-only planning and therefore inherit the M3 direct path's direct-path restrictions.
+# planning, and retained preparation and therefore inherit the M3 direct-path restrictions.
 M4_OWNER_PATH_FILE_PATTERNS = (
+    "src/aegis/runtime/private_identity_preparation.cpp",
+    "src/aegis/runtime/private_identity_preparation.hpp",
     "include/aegis/configuration/startup_configuration.hpp",
     "include/aegis/market_data/subscription.hpp",
     "include/aegis/model/bounded_identity.hpp",
