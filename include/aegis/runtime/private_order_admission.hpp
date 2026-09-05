@@ -1,5 +1,6 @@
-// Purpose: define sealed M4 private-admission configuration, lifecycle observations, owner-only
-// slot authority, completion values, and account/global loss-fence turns without executor storage.
+// Purpose: define sealed M4 private/reconciliation admission configuration, lifecycle observations,
+// owner-only slot authority, completion values, and shared loss-fence turns without executor
+// storage.
 
 #pragma once
 
@@ -195,7 +196,7 @@ public:
   }
 
   // --------------------------------------------------------
-  // Expose the reserved reconciliation capacity without enabling its deferred ingress lane.
+  // Expose the fixed reconciliation-event reserve selected by the sealed M4 policy.
   [[nodiscard]] std::uint32_t reconciliation_admission_capacity() const noexcept {
     return reconciliation_capacity_;
   }
@@ -268,6 +269,26 @@ struct PrivateAdmissionDecision {
   // Structural equality compares every producer-visible admission consequence.
   friend bool operator==(const PrivateAdmissionDecision&,
                          const PrivateAdmissionDecision&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+// One reconciliation decision reports its shared attempt identity, isolated reserve observation,
+// optional accepted receipt/state, and whether a configured-account loss fence was recorded.
+struct ReconciliationAdmissionDecision {
+  AdmissionOutcome outcome;
+  model::AdmissionOrdinal attempt_ordinal;
+  std::size_t pending_depth;
+  std::size_t pending_capacity;
+  std::optional<AdmissionReceipt> receipt;
+  bool account_fence_recorded;
+  std::optional<CriticalPrivateAdmissionState> state;
+
+  // --------------------------------------------------------
+  // Structural equality compares every trusted reconciliation admission consequence.
+  friend bool operator==(const ReconciliationAdmissionDecision&,
+                         const ReconciliationAdmissionDecision&) = default;
 
   // --------------------------------------------------------
 };
@@ -405,6 +426,120 @@ private:
 };
 
 // ########################################################################
+// A reconciliation-token inspection copies its trusted source event and owner-turn authority, so
+// the result remains valid without exposing the executor's distinct reconciliation ring.
+class AdmittedReconciliationEventSlotView final {
+public:
+
+  // --------------------------------------------------------
+  // Borrow the token-owned immutable reconciliation event without touching executor slot storage.
+  [[nodiscard]] const oms::ReconciliationPrivateEventIngressAttempt&
+  ingress_attempt() const noexcept {
+    return attempt_;
+  }
+
+  // --------------------------------------------------------
+  // Borrow the complete accepted receipt copied into this lifetime-safe view.
+  [[nodiscard]] const AdmissionReceipt& admission_receipt() const noexcept {
+    return context_.receipt;
+  }
+
+  // --------------------------------------------------------
+  // Return the exact shared owner-turn identity attached by the executor.
+  [[nodiscard]] model::TurnOrdinal turn_ordinal() const noexcept { return context_.turn_ordinal; }
+
+  // --------------------------------------------------------
+  // Return the sole processing-time observation for this reconciliation owner turn.
+  [[nodiscard]] model::ProcessingTimestamp processing_timestamp() const noexcept {
+    return context_.processing_timestamp;
+  }
+
+  // --------------------------------------------------------
+  // Return the checked receive-to-processing delay retained by accepted authority.
+  [[nodiscard]] model::ElapsedNanoseconds queue_age() const noexcept { return context_.queue_age; }
+
+  // --------------------------------------------------------
+  // Structural equality pins the complete copied reconciliation view.
+  friend bool operator==(const AdmittedReconciliationEventSlotView&,
+                         const AdmittedReconciliationEventSlotView&) = default;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Only a validated reconciliation token may publish its immutable local copies.
+  AdmittedReconciliationEventSlotView(oms::ReconciliationPrivateEventIngressAttempt attempt,
+                                      AcceptedTurnContext context) noexcept
+      : attempt_{std::move(attempt)}, context_{std::move(context)} {}
+
+  // --------------------------------------------------------
+  oms::ReconciliationPrivateEventIngressAttempt attempt_;
+  AcceptedTurnContext context_;
+
+  // ########################################################################
+  // The move-only reconciliation token validates owner metadata before copying this view.
+  friend class AdmittedReconciliationEventSlot;
+
+  // ########################################################################
+};
+
+// ########################################################################
+// The move-only reconciliation capability is nominally distinct from ordinary-private authority.
+// Moving invalidates the source token, and inspection never dereferences pending ring storage.
+class AdmittedReconciliationEventSlot final {
+public:
+
+  // --------------------------------------------------------
+  // Copying would duplicate the sole reconciliation owner capability.
+  AdmittedReconciliationEventSlot(const AdmittedReconciliationEventSlot&) = delete;
+  AdmittedReconciliationEventSlot& operator=(const AdmittedReconciliationEventSlot&) = delete;
+
+  // --------------------------------------------------------
+  // Transfer the sole token authority while invalidating the moved-from owner pointer.
+  AdmittedReconciliationEventSlot(AdmittedReconciliationEventSlot&& other) noexcept
+      : owner_{std::exchange(other.owner_, nullptr)}, generation_{other.generation_},
+        lifetime_{std::move(other.lifetime_)}, attempt_{std::move(other.attempt_)},
+        context_{std::move(other.context_)} {}
+
+  // --------------------------------------------------------
+  // Move assignment and implicit lifetime extension are forbidden; destruction only drops
+  // authority.
+  AdmittedReconciliationEventSlot& operator=(AdmittedReconciliationEventSlot&&) = delete;
+  ~AdmittedReconciliationEventSlot() = default;
+
+  // --------------------------------------------------------
+  // Validate lifetime, lane, generation, and active turn before publishing immutable copies;
+  // stale, moved-from, or out-of-turn authority returns a DomainError without a view.
+  [[nodiscard]] model::Result<AdmittedReconciliationEventSlotView>
+  inspect_admitted_reconciliation_event_slot() const;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Only the executor may bind one token to an exact reconciliation generation and owner turn.
+  AdmittedReconciliationEventSlot(SerializedExecutor& owner, model::AdmissionOrdinal generation,
+                                  std::weak_ptr<PrivateAdmissionLease> lifetime,
+                                  oms::ReconciliationPrivateEventIngressAttempt attempt,
+                                  AcceptedTurnContext context) noexcept
+      : owner_{&owner}, generation_{generation}, lifetime_{std::move(lifetime)},
+        attempt_{std::move(attempt)}, context_{std::move(context)} {}
+
+  // --------------------------------------------------------
+  SerializedExecutor* owner_;
+  model::AdmissionOrdinal generation_;
+  std::weak_ptr<PrivateAdmissionLease> lifetime_;
+  oms::ReconciliationPrivateEventIngressAttempt attempt_;
+  AcceptedTurnContext context_;
+
+  // ########################################################################
+  // The non-relocatable executor is the sole capability minting and validation authority.
+  friend class SerializedExecutor;
+
+  // ########################################################################
+};
+
+// ########################################################################
 // A consumed owner result names the exact append-only committed event disposition it observed.
 struct ConsumedPrivateTurn {
   oms::PrivateEventDisposition disposition;
@@ -516,6 +651,12 @@ using PrivateTurnCompletion =
     std::variant<ConsumedPrivateTurn, BufferedPrivateTurn, RetainedPrivateTurn>;
 
 // ########################################################################
+// Shared loss fencing retains the complete nominal source fact while preserving which isolated
+// critical-admission lane originally failed.
+using CriticalPrivateEventAttempt =
+    std::variant<oms::PrivateOrderIngressAttempt, oms::ReconciliationPrivateEventIngressAttempt>;
+
+// ########################################################################
 // The stable AccountSafetyReason vocabulary has nineteen assigned values, so one fixed occurrence
 // array can retain every unique reason without allocating or dropping an escalation.
 inline constexpr std::size_t account_safety_reason_occurrence_capacity = 19U;
@@ -525,7 +666,7 @@ inline constexpr std::size_t account_safety_reason_occurrence_capacity = 19U;
 // an ordered array therefore preserves first-overall and first-quarantine provenance.
 struct AccountSafetyReasonOccurrence {
   risk::AccountSafetyReason reason;
-  oms::PrivateOrderIngressAttempt first_attempt;
+  CriticalPrivateEventAttempt first_attempt;
   model::AdmissionOrdinal first_attempt_ordinal;
 
   // --------------------------------------------------------
@@ -593,10 +734,10 @@ struct AccountSafetyFenceSnapshot {
 };
 
 // ########################################################################
-// The global fence retains the first unattributable fact and earliest attempt without selecting or
-// inventing any logical account or account-safety reason.
+// The global fence retains the first unattributable ordinary or reconciliation fact and earliest
+// attempt without selecting or inventing any logical account or account-safety reason.
 struct GlobalPrivateFenceTurn {
-  oms::PrivateOrderIngressAttempt first_attempt;
+  CriticalPrivateEventAttempt first_attempt;
   model::AdmissionOrdinal earliest_attempt_ordinal;
   std::uint64_t lost_attempt_count;
 
@@ -608,9 +749,10 @@ struct GlobalPrivateFenceTurn {
 };
 
 // ########################################################################
-// Private-lane diagnostics expose counts and the global gate only; no slot, token, or mutable fence
-// storage is published. private_capacity bounds queued_slots, while occupied_slots includes the at
-// most one additional in-flight owner turn and may therefore reach private_capacity plus one.
+// Private-lane diagnostics expose ordinary and reconciliation counts plus the shared gates only;
+// no slot, token, or mutable fence storage is published. Each lane's capacity bounds its queued
+// count, while its occupied count includes the at most one additional in-flight owner turn and may
+// therefore reach that lane's capacity plus one.
 struct PrivateLaneSnapshot {
   std::size_t occupied_slots{0U};
   std::size_t queued_slots{0U};
@@ -622,6 +764,10 @@ struct PrivateLaneSnapshot {
   bool global_fence_active{false};
   bool global_fence_in_flight{false};
   bool global_fence_owner_applied{false};
+  std::size_t reconciliation_occupied_slots{0U};
+  std::size_t reconciliation_queued_slots{0U};
+  std::size_t reconciliation_in_flight_slots{0U};
+  std::size_t reconciliation_capacity{0U};
 
   // --------------------------------------------------------
   // Structural equality compares every bounded private-lane count and gate observation.
@@ -649,6 +795,12 @@ public:
   commit_private_order_turn(AdmittedPrivateOrderSlot admitted) noexcept = 0;
 
   // --------------------------------------------------------
+  // Commit one move-only reconciliation event turn through the same private-event semantics and
+  // return only after publishing its matching evidence or retained recovery fact.
+  [[nodiscard]] virtual PrivateTurnCompletion
+  commit_reconciliation_event_turn(AdmittedReconciliationEventSlot admitted) noexcept = 0;
+
+  // --------------------------------------------------------
   // Find the latest pre-callback disposition committed for the exact admission ordinal, or return
   // an empty optional when none exists. This query must be linearizable with concurrent publication
   // and lookup. BufferedGap may advance exactly once to AppliedFromBuffer; every other published
@@ -658,10 +810,24 @@ public:
       model::AdmissionOrdinal attempt_ordinal) const noexcept = 0;
 
   // --------------------------------------------------------
+  // Find the latest reconciliation-event disposition committed for the exact shared ordinal.
+  // This separate oracle prevents an ordinary-private ordinal from satisfying the wrong lane.
+  [[nodiscard]] virtual std::optional<oms::PrivateEventDisposition>
+  find_committed_reconciliation_event_disposition(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept = 0;
+
+  // --------------------------------------------------------
   // Find the stable error for an append-only retained recovery fact. The lookup must be
   // linearizable with concurrent owner publication/appends and concurrent lookups; a returned
   // pointer remains immutable and valid for this owner's lifetime.
   [[nodiscard]] virtual const model::DomainError* find_committed_retained_private_event_error(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept = 0;
+
+  // --------------------------------------------------------
+  // Find the stable retained error for one reconciliation-event ordinal without consulting the
+  // ordinary-private evidence namespace.
+  [[nodiscard]] virtual const model::DomainError*
+  find_committed_retained_reconciliation_event_error(
       model::AdmissionOrdinal attempt_ordinal) const noexcept = 0;
 
   // --------------------------------------------------------

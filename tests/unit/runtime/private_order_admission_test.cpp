@@ -228,6 +228,47 @@ public:
   }
 
   // --------------------------------------------------------
+  // Apply the same authored completion script to a nominal reconciliation token while publishing
+  // evidence only through the reconciliation oracle namespace.
+  [[nodiscard]] runtime::PrivateTurnCompletion commit_reconciliation_event_turn(
+      runtime::AdmittedReconciliationEventSlot admitted) noexcept override {
+    auto inspected = admitted.inspect_admitted_reconciliation_event_slot();
+    if (!inspected) {
+      return runtime::RetainedPrivateTurn::create_retained_private_turn_for_global_containment(
+          inspected.error());
+    }
+    const auto attempt_ordinal = inspected.value().admission_receipt().attempt_ordinal;
+    switch (mode_) {
+    case Mode::Consume:
+      if (committed_disposition_.has_value()) {
+        publish_committed_reconciliation_disposition(attempt_ordinal,
+                                                     committed_disposition_.value());
+      }
+      return runtime::ConsumedPrivateTurn{completion_disposition_};
+    case Mode::Buffer:
+      if (committed_disposition_.has_value()) {
+        publish_committed_reconciliation_disposition(attempt_ordinal,
+                                                     committed_disposition_.value());
+      }
+      return runtime::BufferedPrivateTurn{};
+    case Mode::RetainAccount: {
+      auto error = retention_error();
+      publish_committed_reconciliation_retention_error(attempt_ordinal, error);
+      return runtime::RetainedPrivateTurn::create_retained_private_turn_for_account(
+          std::move(error), retention_reason_);
+    }
+    case Mode::RetainGlobal: {
+      auto error = retention_error();
+      publish_committed_reconciliation_retention_error(attempt_ordinal, error);
+      return runtime::RetainedPrivateTurn::create_retained_private_turn_for_global_containment(
+          std::move(error));
+    }
+    }
+    return runtime::RetainedPrivateTurn::create_retained_private_turn_for_global_containment(
+        retention_error());
+  }
+
+  // --------------------------------------------------------
   // Answer only for the exact inspected admission ordinal, including its one lawful buffered
   // advance.
   [[nodiscard]] std::optional<oms::PrivateEventDisposition>
@@ -243,6 +284,20 @@ public:
   }
 
   // --------------------------------------------------------
+  // Answer reconciliation evidence only from its nominally separate fixed history.
+  [[nodiscard]] std::optional<oms::PrivateEventDisposition>
+  find_committed_reconciliation_event_disposition(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept override {
+    std::lock_guard lock{evidence_mutex_};
+    for (std::size_t index = 0U; index < reconciliation_disposition_evidence_count_; ++index) {
+      if (reconciliation_disposition_evidence_ordinals_[index] == attempt_ordinal) {
+        return reconciliation_disposition_evidence_[index];
+      }
+    }
+    return std::nullopt;
+  }
+
+  // --------------------------------------------------------
   // Find one immutable retained-error value in stable fixed storage synchronized with publication.
   [[nodiscard]] const model::DomainError* find_committed_retained_private_event_error(
       model::AdmissionOrdinal attempt_ordinal) const noexcept override {
@@ -250,6 +305,19 @@ public:
     for (std::size_t index = 0U; index < retention_evidence_count_; ++index) {
       if (retention_evidence_ordinals_[index] == attempt_ordinal) {
         return &retention_evidence_[index].value();
+      }
+    }
+    return nullptr;
+  }
+
+  // --------------------------------------------------------
+  // Find one immutable reconciliation retention error without consulting ordinary-private rows.
+  [[nodiscard]] const model::DomainError* find_committed_retained_reconciliation_event_error(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept override {
+    std::lock_guard lock{evidence_mutex_};
+    for (std::size_t index = 0U; index < reconciliation_retention_evidence_count_; ++index) {
+      if (reconciliation_retention_evidence_ordinals_[index] == attempt_ordinal) {
+        return &reconciliation_retention_evidence_[index].value();
       }
     }
     return nullptr;
@@ -446,6 +514,36 @@ private:
   }
 
   // --------------------------------------------------------
+  // Publish one reconciliation disposition without allowing an ordinary ordinal to satisfy it.
+  void
+  publish_committed_reconciliation_disposition(model::AdmissionOrdinal attempt_ordinal,
+                                               oms::PrivateEventDisposition disposition) noexcept {
+    std::lock_guard lock{evidence_mutex_};
+    if (reconciliation_disposition_evidence_count_ == history_capacity) {
+      return;
+    }
+    reconciliation_disposition_evidence_ordinals_[reconciliation_disposition_evidence_count_]
+        .emplace(attempt_ordinal);
+    reconciliation_disposition_evidence_[reconciliation_disposition_evidence_count_].emplace(
+        disposition);
+    ++reconciliation_disposition_evidence_count_;
+  }
+
+  // --------------------------------------------------------
+  // Publish one stable reconciliation retention error before returning its retained completion.
+  void publish_committed_reconciliation_retention_error(model::AdmissionOrdinal attempt_ordinal,
+                                                        const model::DomainError& error) noexcept {
+    std::lock_guard lock{evidence_mutex_};
+    if (reconciliation_retention_evidence_count_ == history_capacity) {
+      return;
+    }
+    reconciliation_retention_evidence_ordinals_[reconciliation_retention_evidence_count_].emplace(
+        attempt_ordinal);
+    reconciliation_retention_evidence_[reconciliation_retention_evidence_count_].emplace(error);
+    ++reconciliation_retention_evidence_count_;
+  }
+
+  // --------------------------------------------------------
   // Use one stable nominal error for every authored retention branch.
   [[nodiscard]] static model::DomainError retention_error() {
     return model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
@@ -466,9 +564,19 @@ private:
   std::array<std::optional<model::AdmissionOrdinal>, history_capacity>
       retention_evidence_ordinals_{};
   std::array<std::optional<model::DomainError>, history_capacity> retention_evidence_{};
+  std::array<std::optional<model::AdmissionOrdinal>, history_capacity>
+      reconciliation_disposition_evidence_ordinals_{};
+  std::array<std::optional<oms::PrivateEventDisposition>, history_capacity>
+      reconciliation_disposition_evidence_{};
+  std::array<std::optional<model::AdmissionOrdinal>, history_capacity>
+      reconciliation_retention_evidence_ordinals_{};
+  std::array<std::optional<model::DomainError>, history_capacity>
+      reconciliation_retention_evidence_{};
   std::size_t view_count_{0U};
   std::size_t disposition_evidence_count_{0U};
   std::size_t retention_evidence_count_{0U};
+  std::size_t reconciliation_disposition_evidence_count_{0U};
+  std::size_t reconciliation_retention_evidence_count_{0U};
   bool retain_token_{false};
   std::optional<runtime::AdmittedPrivateOrderSlot> retained_token_;
   const std::optional<runtime::AdmittedPrivateOrderSlotView> empty_view_;
@@ -623,8 +731,9 @@ TEST_CASE("private admission shares counters and reuses only evidenced slots",
             runtime::AdmissionOutcome::CapacityExceeded,
             test_support::create_m4_ordinal_or_throw<model::AdmissionOrdinal>(4U), 1U, 1U,
             std::nullopt, true, std::nullopt});
-  CHECK(executor.private_lane_snapshot() ==
-        runtime::PrivateLaneSnapshot{1U, 1U, 0U, 1U, 1U, 0U, 2U, false, false, false});
+  CHECK(executor.private_lane_snapshot() == runtime::PrivateLaneSnapshot{1U, 1U, 0U, 1U, 1U, 0U, 2U,
+                                                                         false, false, false, 0U,
+                                                                         0U, 0U, 32U});
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The merge executes attempts one, two, and four; the rejected public attempt owns no turn.
@@ -685,11 +794,15 @@ TEST_CASE("private admission shares counters and reuses only evidenced slots",
   REQUIRE(owner.latest_account_fence()->ordered_unique_reason_occurrences[0U].has_value());
   const auto& loss_occurrence =
       owner.latest_account_fence()->ordered_unique_reason_occurrences[0U].value();
-  CHECK(loss_occurrence.first_attempt == second_attempt);
+  const auto* loss_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&loss_occurrence.first_attempt);
+  REQUIRE(loss_ordinary_attempt != nullptr);
+  CHECK(*loss_ordinary_attempt == second_attempt);
   CHECK(loss_occurrence.first_attempt_ordinal.value() == 4U);
   CHECK(loss_occurrence.reason == risk::AccountSafetyReason::CriticalAdmissionLoss);
-  CHECK(executor.private_lane_snapshot() ==
-        runtime::PrivateLaneSnapshot{0U, 0U, 0U, 1U, 0U, 0U, 2U, false, false, false});
+  CHECK(executor.private_lane_snapshot() == runtime::PrivateLaneSnapshot{0U, 0U, 0U, 1U, 0U, 0U, 2U,
+                                                                         false, false, false, 0U,
+                                                                         0U, 0U, 32U});
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reusing the only physical slot cannot erase old evidence or revive its stale capability.
@@ -961,8 +1074,9 @@ TEST_CASE("private admission values preserve exact lifecycle presence",
 
   // ++++++++++++++++++++++++++++++++++++++++
   // The diagnostic snapshot begins at the exact disabled/empty boundary without hidden capacity.
-  CHECK(runtime::PrivateLaneSnapshot{} ==
-        runtime::PrivateLaneSnapshot{0U, 0U, 0U, 0U, 0U, 0U, 0U, false, false, false});
+  CHECK(runtime::PrivateLaneSnapshot{} == runtime::PrivateLaneSnapshot{0U, 0U, 0U, 0U, 0U, 0U, 0U,
+                                                                       false, false, false, 0U, 0U,
+                                                                       0U, 0U});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -1041,8 +1155,9 @@ TEST_CASE("retained private turns stay observable and fence their exact account"
   CHECK(retained->retention_error ==
         model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
                                             "test_private_retention"));
-  CHECK(executor.private_lane_snapshot() ==
-        runtime::PrivateLaneSnapshot{0U, 0U, 0U, 32U, 1U, 0U, 2U, false, false, false});
+  CHECK(executor.private_lane_snapshot() == runtime::PrivateLaneSnapshot{0U, 0U, 0U, 32U, 1U, 0U,
+                                                                         2U, false, false, false,
+                                                                         0U, 0U, 0U, 32U});
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Successful owner evidence clears the summary fence while append-only retained evidence remains.
@@ -1059,7 +1174,10 @@ TEST_CASE("retained private turns stay observable and fence their exact account"
   REQUIRE(owner.latest_account_fence()->ordered_unique_reason_occurrences[0U].has_value());
   const auto& retained_occurrence =
       owner.latest_account_fence()->ordered_unique_reason_occurrences[0U].value();
-  CHECK(retained_occurrence.first_attempt == attempt);
+  const auto* retained_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&retained_occurrence.first_attempt);
+  REQUIRE(retained_ordinary_attempt != nullptr);
+  CHECK(*retained_ordinary_attempt == attempt);
   CHECK(retained_occurrence.first_attempt_ordinal == admitted.value().attempt_ordinal);
   REQUIRE(owner.account_fence_context().has_value());
   CHECK(owner.account_fence_context()->turn_ordinal.value() == 2U);
@@ -1113,7 +1231,10 @@ TEST_CASE("account fences preserve producer races and isolate their configured a
   REQUIRE(owner.account_fence_at(0U).ordered_unique_reason_occurrences[0U].has_value());
   const auto& first_loss_occurrence =
       owner.account_fence_at(0U).ordered_unique_reason_occurrences[0U].value();
-  CHECK(first_loss_occurrence.first_attempt == first_lost_attempt);
+  const auto* first_lost_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&first_loss_occurrence.first_attempt);
+  REQUIRE(first_lost_ordinary_attempt != nullptr);
+  CHECK(*first_lost_ordinary_attempt == first_lost_attempt);
   CHECK(first_loss_occurrence.first_attempt_ordinal.value() == 2U);
   REQUIRE(owner.fence_race_decision().has_value());
   CHECK(owner.fence_race_decision()->outcome == runtime::AdmissionOutcome::CapacityExceeded);
@@ -1158,7 +1279,10 @@ TEST_CASE("account fences preserve producer races and isolate their configured a
   const auto& successor_loss_occurrence =
       owner.account_fence_at(1U).ordered_unique_reason_occurrences[0U].value();
   CHECK(successor_loss_occurrence.reason == risk::AccountSafetyReason::CriticalAdmissionLoss);
-  CHECK(successor_loss_occurrence.first_attempt == successor_attempt);
+  const auto* successor_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&successor_loss_occurrence.first_attempt);
+  REQUIRE(successor_ordinary_attempt != nullptr);
+  CHECK(*successor_ordinary_attempt == successor_attempt);
   CHECK(successor_loss_occurrence.first_attempt_ordinal.value() == 4U);
   CHECK(executor.private_lane_snapshot().pending_account_fences == 0U);
   const auto peer_turn = driver.execute_next_turn();
@@ -1221,7 +1345,10 @@ TEST_CASE("unattributable private loss activates and preserves the global gate",
   CHECK_FALSE(global_turn.value()->receive_sequence.has_value());
   CHECK_FALSE(global_turn.value()->received_at.has_value());
   REQUIRE(owner.global_fence().has_value());
-  CHECK(owner.global_fence()->first_attempt == unconfigured_attempt);
+  const auto* global_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&owner.global_fence()->first_attempt);
+  REQUIRE(global_ordinary_attempt != nullptr);
+  CHECK(*global_ordinary_attempt == unconfigured_attempt);
   CHECK(owner.global_fence()->earliest_attempt_ordinal.value() == 1U);
   CHECK(owner.global_fence()->lost_attempt_count == 1U);
   REQUIRE(owner.global_fence_context().has_value());
@@ -1467,8 +1594,10 @@ TEST_CASE("private failures preserve exact containment and returned errors",
     CHECK(owner.latest_account_fence()->lost_attempt_count == 1U);
     REQUIRE(owner.latest_account_fence()->reason_occurrence_count == 1U);
     REQUIRE(owner.latest_account_fence()->ordered_unique_reason_occurrences[0U].has_value());
-    CHECK(owner.latest_account_fence()->ordered_unique_reason_occurrences[0U]->first_attempt ==
-          retained_attempt);
+    const auto* failed_fence_ordinary_attempt = std::get_if<oms::PrivateOrderIngressAttempt>(
+        &owner.latest_account_fence()->ordered_unique_reason_occurrences[0U]->first_attempt);
+    REQUIRE(failed_fence_ordinary_attempt != nullptr);
+    CHECK(*failed_fence_ordinary_attempt == retained_attempt);
     const auto later_attempt = create_private_timeout_attempt_or_throw(fixture, authority, 48U);
     const auto later = executor.try_admit_private(later_attempt);
     REQUIRE_FALSE(later);
@@ -1745,10 +1874,14 @@ TEST_CASE("active private retention orders an earlier reason before a pending pr
   CHECK(fence_turn.value()->kind == runtime::TurnKind::AccountSafetyFence);
   REQUIRE(owner.latest_account_fence().has_value());
   REQUIRE(owner.latest_account_fence()->reason_occurrence_count == 2U);
-  CHECK(owner.latest_account_fence()->ordered_unique_reason_occurrences[0U]->first_attempt ==
-        active_attempt);
-  CHECK(owner.latest_account_fence()->ordered_unique_reason_occurrences[1U]->first_attempt ==
-        later_loss_attempt);
+  const auto* active_ordinary_attempt = std::get_if<oms::PrivateOrderIngressAttempt>(
+      &owner.latest_account_fence()->ordered_unique_reason_occurrences[0U]->first_attempt);
+  const auto* later_lost_ordinary_attempt = std::get_if<oms::PrivateOrderIngressAttempt>(
+      &owner.latest_account_fence()->ordered_unique_reason_occurrences[1U]->first_attempt);
+  REQUIRE(active_ordinary_attempt != nullptr);
+  REQUIRE(later_lost_ordinary_attempt != nullptr);
+  CHECK(*active_ordinary_attempt == active_attempt);
+  CHECK(*later_lost_ordinary_attempt == later_loss_attempt);
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -1853,12 +1986,18 @@ TEST_CASE("active private turns free pending capacity and account fences fold al
   const auto& timeout_occurrence =
       owner.account_fence_at(0U).ordered_unique_reason_occurrences[0U].value();
   CHECK(timeout_occurrence.reason == risk::AccountSafetyReason::TimeoutObserved);
-  CHECK(timeout_occurrence.first_attempt == retained_attempt);
+  const auto* timeout_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&timeout_occurrence.first_attempt);
+  REQUIRE(timeout_ordinary_attempt != nullptr);
+  CHECK(*timeout_ordinary_attempt == retained_attempt);
   CHECK(timeout_occurrence.first_attempt_ordinal.value() == 1U);
   const auto& quarantine_occurrence =
       owner.account_fence_at(0U).ordered_unique_reason_occurrences[1U].value();
   CHECK(quarantine_occurrence.reason == risk::AccountSafetyReason::CriticalAdmissionLoss);
-  CHECK(quarantine_occurrence.first_attempt == later_loss_attempt);
+  const auto* quarantine_ordinary_attempt =
+      std::get_if<oms::PrivateOrderIngressAttempt>(&quarantine_occurrence.first_attempt);
+  REQUIRE(quarantine_ordinary_attempt != nullptr);
+  CHECK(*quarantine_ordinary_attempt == later_loss_attempt);
   CHECK(quarantine_occurrence.first_attempt_ordinal.value() == 3U);
   CHECK(executor.private_lane_snapshot().pending_account_fences == 0U);
 

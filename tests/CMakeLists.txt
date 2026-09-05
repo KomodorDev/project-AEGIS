@@ -73,6 +73,8 @@ add_executable(
   # Critical private-admission tests pin isolated capacity, global ordering, owner capabilities,
   # retained lifecycle evidence, and conservative account/global loss fencing.
   unit/runtime/private_order_admission_test.cpp
+  # Reconciliation admission tests pin its distinct reserve and token plus shared ordering/fences.
+  unit/runtime/reconciliation_private_event_admission_test.cpp
   # Reconciler tests pin exact owner binding, empty identity tables, and longitudinal submissions.
   unit/runtime/private_order_reconciler_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.

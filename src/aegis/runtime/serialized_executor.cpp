@@ -1,5 +1,5 @@
-// Purpose: implement fixed-capacity public/private admission, globally ordered command/fence turns,
-// terminal fail-closed timing and handlers, and bounded deterministic owner progression.
+// Purpose: implement fixed-capacity public, ordinary-private, and reconciliation admission with
+// globally ordered command/fence turns, terminal fail-closed timing, and bounded owner progression.
 
 #include "aegis/runtime/serialized_executor.hpp"
 
@@ -31,6 +31,8 @@ enum class PrivateReservedFailure : std::uint8_t {
   RetainedCompletion = 2,
   AccountLossCount = 3,
   GlobalLossCount = 4,
+  ReconciliationCommittedDisposition = 5,
+  ReconciliationRetainedCompletion = 6,
 };
 
 // ########################################################################
@@ -40,6 +42,9 @@ enum class PrivateReservedFailure : std::uint8_t {
 static_assert(std::is_nothrow_move_constructible_v<model::DomainError>);
 static_assert(std::is_nothrow_copy_constructible_v<oms::PrivateOrderIngressAttempt>);
 static_assert(std::is_nothrow_copy_assignable_v<oms::PrivateOrderIngressAttempt>);
+static_assert(std::is_nothrow_copy_constructible_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_nothrow_copy_assignable_v<oms::ReconciliationPrivateEventIngressAttempt>);
+static_assert(std::is_nothrow_copy_constructible_v<CriticalPrivateEventAttempt>);
 static_assert(std::is_nothrow_move_assignable_v<std::optional<AccountSafetyReasonOccurrence>>);
 static_assert(std::is_nothrow_swappable_v<std::optional<AccountSafetyReasonOccurrence>>);
 static_assert(std::is_nothrow_copy_constructible_v<AccountSafetyFenceTurn>);
@@ -94,9 +99,10 @@ is_account_safety_reason_assigned(risk::AccountSafetyReason reason) noexcept {
 // --------------------------------------------------------
 // Validate retained progress against the exact admitted source and receipt. The projection is
 // currently allocation-free, while catch-all containment keeps that invariant safe if it changes.
-[[nodiscard]] static bool is_retained_progress_valid(const RetainedPrivateTurn& retained,
-                                                     const oms::PrivateOrderIngressAttempt& attempt,
-                                                     const AdmissionReceipt& receipt) noexcept {
+[[nodiscard]] static bool
+is_retained_progress_valid(const RetainedPrivateTurn& retained,
+                           const oms::PrivateEventIngressSemanticValue& admitted_semantic,
+                           const AdmissionReceipt& receipt) noexcept {
   try {
     if (retained.first_admission_resolution().has_value() &&
         !retained.normalized_input().has_value()) {
@@ -107,7 +113,7 @@ is_account_safety_reason_assigned(risk::AccountSafetyReason reason) noexcept {
     }
     return retained.normalized_input()->receive_time() == receipt.received_at &&
            oms::PrivateEventIngressSemanticValue::from_normalized_input(
-               retained.normalized_input().value()) == attempt.semantic_value();
+               retained.normalized_input().value()) == admitted_semantic;
   } catch (...) {
     return false;
   }
@@ -152,6 +158,29 @@ SerializedExecutor::create_private_reserved_errors(bool private_enabled) {
                                           "private_admission.global_fence_loss_count"),
       model::DomainError::create_at_field(model::DomainErrorCode::ExecutorCounterExhausted,
                                           "private_admission.global_fence_loss_count"),
+      model::DomainError::create_at_field(
+          model::DomainErrorCode::InvalidPrivateEvent,
+          "reconciliation_admission.find_committed_reconciliation_event_disposition"),
+      model::DomainError::create_at_field(
+          model::DomainErrorCode::InvalidPrivateEvent,
+          "reconciliation_admission.find_committed_reconciliation_event_disposition"),
+      model::DomainError::create_at_field(
+          model::DomainErrorCode::InvalidPrivateEvent,
+          "reconciliation_admission.find_committed_reconciliation_event_disposition"),
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                          "reconciliation_admission.retained_completion"),
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                          "reconciliation_admission.retained_completion"),
+      model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                          "reconciliation_admission.retained_completion"),
+      model::DomainError::create_at_field(model::DomainErrorCode::ExecutorCounterExhausted,
+                                          "reconciliation_admission.account_fence_loss_count"),
+      model::DomainError::create_at_field(model::DomainErrorCode::ExecutorCounterExhausted,
+                                          "reconciliation_admission.account_fence_loss_count"),
+      model::DomainError::create_at_field(model::DomainErrorCode::ExecutorCounterExhausted,
+                                          "reconciliation_admission.global_fence_loss_count"),
+      model::DomainError::create_at_field(model::DomainErrorCode::ExecutorCounterExhausted,
+                                          "reconciliation_admission.global_fence_loss_count"),
   };
 }
 
@@ -228,6 +257,10 @@ SerializedExecutor::SerializedExecutor(
           private_configuration_.has_value()
               ? static_cast<std::size_t>(private_configuration_->private_admission_capacity())
               : 0U),
+      reconciliation_slots_(private_configuration_.has_value()
+                                ? static_cast<std::size_t>(
+                                      private_configuration_->reconciliation_admission_capacity())
+                                : 0U),
       maximum_drive_turns_{maximum_drive_turns},
       last_admission_ordinal_{counter_seed.last_admission_ordinal},
       last_receive_sequence_{counter_seed.last_receive_sequence},
@@ -288,6 +321,36 @@ AdmittedPrivateOrderSlot::inspect_admitted_private_order_slot() const {
   }
   return model::Result<AdmittedPrivateOrderSlotView>::create_success(
       AdmittedPrivateOrderSlotView{attempt_, context_});
+}
+
+// --------------------------------------------------------
+// Publish immutable reconciliation-token copies only while its lease and exact active owner turn
+// remain valid; moved, stale, cross-executor, and post-destruction tokens fail without dereference.
+model::Result<AdmittedReconciliationEventSlotView>
+AdmittedReconciliationEventSlot::inspect_admitted_reconciliation_event_slot() const {
+  if (owner_ == nullptr) {
+    return model::Result<AdmittedReconciliationEventSlotView>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::ExecutionNotPermitted,
+                                            "reconciliation_admission.moved_token"));
+  }
+  auto lifetime = lifetime_.lock();
+  if (lifetime == nullptr) {
+    return model::Result<AdmittedReconciliationEventSlotView>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::ExecutionNotPermitted,
+                                            "reconciliation_admission.expired_token"));
+  }
+  std::lock_guard lifetime_lock{lifetime->mutex_};
+  if (lifetime->owner_ != owner_) {
+    return model::Result<AdmittedReconciliationEventSlotView>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::ExecutionNotPermitted,
+                                            "reconciliation_admission.expired_token"));
+  }
+  auto validation = owner_->validate_admitted_reconciliation_event_slot(*this);
+  if (!validation) {
+    return model::Result<AdmittedReconciliationEventSlotView>::create_failure(validation.error());
+  }
+  return model::Result<AdmittedReconciliationEventSlotView>::create_success(
+      AdmittedReconciliationEventSlotView{attempt_, context_});
 }
 
 // --------------------------------------------------------
@@ -429,7 +492,7 @@ SerializedExecutor::try_admit_private(const oms::PrivateOrderIngressAttempt& att
   // ++++++++++++++++++++++++++++++++++++++++
   // Resolve only an exact sealed root plus account/venue pair. A global gate takes precedence
   // because no ordinary private fact may cross it, even when this source pair is configured.
-  auto* account_fence = find_configured_account_fence_locked(attempt);
+  auto* account_fence = find_configured_account_fence_locked(attempt.semantic_value());
   const bool global_is_gated = global_fence_.first_attempt.has_value();
   const bool account_is_gated =
       account_fence != nullptr && (account_fence->pending.has_value() || account_fence->in_flight);
@@ -437,10 +500,12 @@ SerializedExecutor::try_admit_private(const oms::PrivateOrderIngressAttempt& att
   if (requires_global_fence || account_is_gated ||
       pending_private_commands_ == private_slots_.size()) {
     const bool use_account_fence = !requires_global_fence && account_fence != nullptr;
-    auto loss = use_account_fence
-                    ? record_account_loss_locked(*account_fence, attempt, next_attempt.value(),
-                                                 risk::AccountSafetyReason::CriticalAdmissionLoss)
-                    : record_global_loss_locked(attempt, next_attempt.value());
+    const auto critical_attempt = CriticalPrivateEventAttempt{attempt};
+    auto loss =
+        use_account_fence
+            ? record_account_loss_locked(*account_fence, critical_attempt, next_attempt.value(),
+                                         risk::AccountSafetyReason::CriticalAdmissionLoss)
+            : record_global_loss_locked(critical_attempt, next_attempt.value());
     if (loss.has_value()) {
       // The attempted ordinal is valid and therefore becomes the published high-water even though
       // checked loss-count exhaustion cannot create a decision or observation.
@@ -501,6 +566,129 @@ SerializedExecutor::try_admit_private(const oms::PrivateOrderIngressAttempt& att
   return model::Result<PrivateAdmissionDecision>::create_success(PrivateAdmissionDecision{
       AdmissionOutcome::Accepted, next_attempt.value(), receipt.pending_depth,
       receipt.pending_capacity, receipt, false, CriticalPrivateAdmissionState::CopiedAndAdmitted});
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Assign one shared attempt and either copy an authoritative row into the reconciliation reserve or
+// retain source ownership behind its exact configured-account or reasonless global loss fence.
+model::Result<ReconciliationAdmissionDecision> SerializedExecutor::try_admit_reconciliation_event(
+    const oms::ReconciliationPrivateEventIngressAttempt& attempt) {
+  std::unique_lock lock{mutex_};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Legacy executors have no trusted reconciliation authority and reject before assigning an
+  // ordinal that they cannot safely own.
+  if (!private_configuration_.has_value() || private_owner_ == nullptr) {
+    return model::Result<ReconciliationAdmissionDecision>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::ExecutionNotPermitted,
+                                            "reconciliation_admission.disabled"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Terminal state and global ordinal exhaustion precede every reconciliation decision or copy.
+  if (terminal_error_.has_value()) {
+    return model::Result<ReconciliationAdmissionDecision>::create_failure(terminal_error_.value());
+  }
+  auto next_attempt = derive_next_admission_ordinal_locked();
+  if (!next_attempt) {
+    const auto error = next_attempt.error();
+    fail_closed_locked(error);
+    return model::Result<ReconciliationAdmissionDecision>::create_failure(error);
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Explicit closure consumes its shared attempt identity without reading the clock or fencing.
+  if (closed_) {
+    last_admission_ordinal_.emplace(next_attempt.value());
+    return model::Result<ReconciliationAdmissionDecision>::create_success(
+        ReconciliationAdmissionDecision{
+            AdmissionOutcome::Closed, next_attempt.value(), pending_reconciliation_commands_,
+            reconciliation_slots_.size(), std::nullopt, false, std::nullopt});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A pending account interval must become owner-local before later reconciliation for that
+  // account. The permanent global-private gate is deliberately absent here: trusted reconciliation
+  // is the only lane that may eventually resolve its source.
+  auto* account_fence = find_configured_account_fence_locked(attempt.semantic_value());
+  const bool account_is_gated =
+      account_fence != nullptr && (account_fence->pending.has_value() || account_fence->in_flight);
+  const bool requires_global_fence = account_fence == nullptr;
+  if (requires_global_fence || account_is_gated ||
+      pending_reconciliation_commands_ == reconciliation_slots_.size()) {
+    const bool use_account_fence = !requires_global_fence && account_fence != nullptr;
+    const auto critical_attempt = CriticalPrivateEventAttempt{attempt};
+    auto loss =
+        use_account_fence
+            ? record_account_loss_locked(*account_fence, critical_attempt, next_attempt.value(),
+                                         risk::AccountSafetyReason::CriticalAdmissionLoss)
+            : record_global_loss_locked(critical_attempt, next_attempt.value());
+    if (loss.has_value()) {
+      auto& errors = private_reserved_errors_.value();
+      auto terminal_error = use_account_fence
+                                ? std::move(errors.reconciliation_account_ingress_loss_terminal)
+                                : std::move(errors.reconciliation_global_ingress_loss_terminal);
+      auto result_error = use_account_fence
+                              ? std::move(errors.reconciliation_account_ingress_loss_result)
+                              : std::move(errors.reconciliation_global_ingress_loss_result);
+      last_admission_ordinal_.emplace(next_attempt.value());
+      fail_closed_locked(std::move(terminal_error));
+      return model::Result<ReconciliationAdmissionDecision>::create_failure(
+          std::move(result_error));
+    }
+    last_admission_ordinal_.emplace(next_attempt.value());
+    const auto observed_pending_depth = pending_reconciliation_commands_;
+    const auto observed_pending_capacity = reconciliation_slots_.size();
+
+    lock.unlock();
+    work_available_.notify_one();
+    return model::Result<ReconciliationAdmissionDecision>::create_success(
+        ReconciliationAdmissionDecision{AdmissionOutcome::CapacityExceeded, next_attempt.value(),
+                                        observed_pending_depth, observed_pending_capacity,
+                                        std::nullopt, use_account_fence, std::nullopt});
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Derive accepted-only receive identity and time before publishing any slot or shared counter.
+  auto next_receive = derive_next_receive_sequence_locked();
+  if (!next_receive) {
+    const auto error = next_receive.error();
+    fail_closed_locked(error);
+    return model::Result<ReconciliationAdmissionDecision>::create_failure(error);
+  }
+  const auto received_at = clock_.receive_timestamp_now();
+  auto clock_observation =
+      observe_clock_locked(received_at.nanoseconds(), "reconciliation_admission_clock");
+  if (!clock_observation) {
+    const auto error = clock_observation.error();
+    fail_closed_locked(error);
+    return model::Result<ReconciliationAdmissionDecision>::create_failure(error);
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Publish the bounded authoritative copy, receipt, and shared counters as one synchronized ring
+  // transition; neither ordinary private nor public capacity participates in this depth.
+  const auto receipt =
+      AdmissionReceipt{next_attempt.value(), next_receive.value(), received_at,
+                       pending_reconciliation_commands_ + 1U, reconciliation_slots_.size()};
+  auto& slot = reconciliation_slots_[reconciliation_tail_];
+  slot.attempt.emplace(attempt);
+  slot.receipt.emplace(receipt);
+  reconciliation_tail_ = (reconciliation_tail_ + 1U) % reconciliation_slots_.size();
+  ++pending_reconciliation_commands_;
+  last_admission_ordinal_.emplace(next_attempt.value());
+  last_receive_sequence_.emplace(next_receive.value());
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Wake only after the complete trusted event, receipt, and lifecycle state are jointly visible.
+  lock.unlock();
+  work_available_.notify_one();
+  return model::Result<ReconciliationAdmissionDecision>::create_success(
+      ReconciliationAdmissionDecision{AdmissionOutcome::Accepted, next_attempt.value(),
+                                      receipt.pending_depth, receipt.pending_capacity, receipt,
+                                      false, CriticalPrivateAdmissionState::CopiedAndAdmitted});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
@@ -594,6 +782,7 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
   std::optional<AcceptedTurnContext> accepted_context;
   std::optional<ControlTurnContext> control_context;
   std::optional<oms::PrivateOrderIngressAttempt> private_attempt;
+  std::optional<oms::ReconciliationPrivateEventIngressAttempt> reconciliation_attempt;
   std::size_t pending_commands_at_start = 0U;
   std::size_t pending_fences_at_start = 0U;
   TurnKind turn_kind = TurnKind::Command;
@@ -687,6 +876,22 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
       slot.receipt.reset();
       private_head_ = (private_head_ + 1U) % private_slots_.size();
       --pending_private_commands_;
+    } else if (candidate->source == RunnableSource::ReconciliationCommand) {
+      turn_kind = TurnKind::ReconciliationCommand;
+      auto& slot = reconciliation_slots_[candidate->index];
+      const auto processing_delay =
+          processing_start.nanoseconds() - slot.receipt->received_at.nanoseconds();
+      receipt.emplace(slot.receipt.value());
+      reconciliation_attempt.emplace(slot.attempt.value());
+      accepted_context.emplace(AcceptedTurnContext{slot.receipt.value(), next_turn.value(),
+                                                   processing_start,
+                                                   model::ElapsedNanoseconds{processing_delay}});
+      active_reconciliation_turn_.emplace(ActiveReconciliationTurnState{
+          slot.attempt.value(), slot.receipt.value(), next_turn.value()});
+      slot.attempt.reset();
+      slot.receipt.reset();
+      reconciliation_head_ = (reconciliation_head_ + 1U) % reconciliation_slots_.size();
+      --pending_reconciliation_commands_;
     } else if (candidate->source == RunnableSource::AccountFence) {
       turn_kind = TurnKind::AccountSafetyFence;
       auto& fence = account_fences_[candidate->index];
@@ -748,6 +953,28 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
       committed_retention_error =
           private_owner_->find_committed_retained_private_event_error(receipt->attempt_ordinal);
     }
+  } else if (turn_kind == TurnKind::ReconciliationCommand) {
+    private_completion.emplace(private_owner_->commit_reconciliation_event_turn(
+        AdmittedReconciliationEventSlot{*this, receipt->attempt_ordinal, private_admission_lease_,
+                                        reconciliation_attempt.value(), accepted_context.value()}));
+    if (const auto* consumed = std::get_if<ConsumedPrivateTurn>(&private_completion.value())) {
+      find_committed_private_event_disposition =
+          private_owner_->find_committed_reconciliation_event_disposition(receipt->attempt_ordinal);
+      if (!is_directly_consumed_private_disposition(consumed->disposition) ||
+          find_committed_private_event_disposition != consumed->disposition) {
+        private_completion_failure = PrivateCompletionFailure::CommittedDisposition;
+      }
+    } else if (std::holds_alternative<BufferedPrivateTurn>(private_completion.value())) {
+      find_committed_private_event_disposition =
+          private_owner_->find_committed_reconciliation_event_disposition(receipt->attempt_ordinal);
+      if (find_committed_private_event_disposition != oms::PrivateEventDisposition::BufferedGap) {
+        private_completion_failure = PrivateCompletionFailure::CommittedDisposition;
+      }
+    } else {
+      committed_retention_error =
+          private_owner_->find_committed_retained_reconciliation_event_error(
+              receipt->attempt_ordinal);
+    }
   } else if (account_fence_turn.has_value()) {
     handler_result = private_owner_->apply_account_safety_fence(account_fence_turn.value(),
                                                                 control_context.value());
@@ -767,14 +994,23 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
       fences_[selected_candidate->index].in_flight = false;
       --in_flight_fences_;
     }
-  } else if (turn_kind == TurnKind::PrivateCommand) {
-    const auto& active = active_private_turn_.value();
+  } else if (turn_kind == TurnKind::PrivateCommand ||
+             turn_kind == TurnKind::ReconciliationCommand) {
+    const bool reconciliation_turn = turn_kind == TurnKind::ReconciliationCommand;
+    const auto active_attempt =
+        reconciliation_turn ? CriticalPrivateEventAttempt{active_reconciliation_turn_->attempt}
+                            : CriticalPrivateEventAttempt{active_private_turn_->attempt};
+    const auto& active_receipt =
+        reconciliation_turn ? active_reconciliation_turn_->receipt : active_private_turn_->receipt;
+    const auto* active_semantic = reconciliation_turn
+                                      ? &active_reconciliation_turn_->attempt.semantic_value()
+                                      : &active_private_turn_->attempt.semantic_value();
     if (private_completion_failure == PrivateCompletionFailure::None &&
         std::holds_alternative<RetainedPrivateTurn>(private_completion.value())) {
       auto& retained = std::get<RetainedPrivateTurn>(private_completion.value());
-      auto* configured = find_configured_account_fence_locked(active.attempt);
+      auto* configured = find_configured_account_fence_locked(*active_semantic);
       const bool progress_is_valid =
-          is_retained_progress_valid(retained, active.attempt, active.receipt);
+          is_retained_progress_valid(retained, *active_semantic, active_receipt);
       const bool reason_shape_is_valid =
           configured != nullptr
               ? retained.account_safety_reason().has_value() &&
@@ -789,9 +1025,9 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
         const auto account_reason = retained.account_reason_;
         auto containment =
             configured != nullptr
-                ? record_account_loss_locked(*configured, active.attempt,
-                                             active.receipt.attempt_ordinal, account_reason.value())
-                : record_global_loss_locked(active.attempt, active.receipt.attempt_ordinal);
+                ? record_account_loss_locked(*configured, active_attempt,
+                                             active_receipt.attempt_ordinal, account_reason.value())
+                : record_global_loss_locked(active_attempt, active_receipt.attempt_ordinal);
         if (containment.has_value()) {
           reserved_failure = configured != nullptr ? PrivateReservedFailure::AccountLossCount
                                                    : PrivateReservedFailure::GlobalLossCount;
@@ -804,32 +1040,47 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
     // conservative containment before faulting, never falsely publishing a terminal observation.
     if (private_completion_failure != PrivateCompletionFailure::None) {
       auto& errors = private_reserved_errors_.value();
+      auto& invalid_observation = reconciliation_turn
+                                      ? invalid_reconciliation_completion_observation_
+                                      : invalid_private_completion_observation_;
       if (private_completion_failure == PrivateCompletionFailure::CommittedDisposition) {
-        invalid_private_completion_observation_.emplace(
-            PrivateAdmissionObservation{active.receipt.attempt_ordinal,
+        auto& observation_error = reconciliation_turn ? errors.reconciliation_committed_observation
+                                                      : errors.committed_observation;
+        invalid_observation.emplace(
+            PrivateAdmissionObservation{active_receipt.attempt_ordinal,
                                         CriticalPrivateAdmissionState::RetainedForReconciliation,
-                                        std::nullopt, std::move(errors.committed_observation)});
-        reserved_failure = PrivateReservedFailure::CommittedDisposition;
+                                        std::nullopt, std::move(observation_error)});
+        reserved_failure = reconciliation_turn
+                               ? PrivateReservedFailure::ReconciliationCommittedDisposition
+                               : PrivateReservedFailure::CommittedDisposition;
       } else {
-        invalid_private_completion_observation_.emplace(
-            PrivateAdmissionObservation{active.receipt.attempt_ordinal,
+        auto& observation_error = reconciliation_turn ? errors.reconciliation_retained_observation
+                                                      : errors.retained_observation;
+        invalid_observation.emplace(
+            PrivateAdmissionObservation{active_receipt.attempt_ordinal,
                                         CriticalPrivateAdmissionState::RetainedForReconciliation,
-                                        std::nullopt, std::move(errors.retained_observation)});
-        reserved_failure = PrivateReservedFailure::RetainedCompletion;
+                                        std::nullopt, std::move(observation_error)});
+        reserved_failure = reconciliation_turn
+                               ? PrivateReservedFailure::ReconciliationRetainedCompletion
+                               : PrivateReservedFailure::RetainedCompletion;
       }
-      auto* configured = find_configured_account_fence_locked(active.attempt);
+      auto* configured = find_configured_account_fence_locked(*active_semantic);
       auto containment =
           configured != nullptr
-              ? record_account_loss_locked(*configured, active.attempt,
-                                           active.receipt.attempt_ordinal,
+              ? record_account_loss_locked(*configured, active_attempt,
+                                           active_receipt.attempt_ordinal,
                                            risk::AccountSafetyReason::CriticalAdmissionLoss)
-              : record_global_loss_locked(active.attempt, active.receipt.attempt_ordinal);
+              : record_global_loss_locked(active_attempt, active_receipt.attempt_ordinal);
       if (containment.has_value()) {
         reserved_failure = configured != nullptr ? PrivateReservedFailure::AccountLossCount
                                                  : PrivateReservedFailure::GlobalLossCount;
       }
     }
-    active_private_turn_.reset();
+    if (reconciliation_turn) {
+      active_reconciliation_turn_.reset();
+    } else {
+      active_private_turn_.reset();
+    }
   } else if (turn_kind == TurnKind::AccountSafetyFence && account_fence_turn.has_value()) {
     auto& fence = account_fences_[selected_candidate->index];
     if (handler_result) {
@@ -872,6 +1123,14 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
       terminal_error = &errors.global_owner_loss_terminal;
       result_error = &errors.global_owner_loss_result;
       break;
+    case PrivateReservedFailure::ReconciliationCommittedDisposition:
+      terminal_error = &errors.reconciliation_committed_terminal;
+      result_error = &errors.reconciliation_committed_result;
+      break;
+    case PrivateReservedFailure::ReconciliationRetainedCompletion:
+      terminal_error = &errors.reconciliation_retained_terminal;
+      result_error = &errors.reconciliation_retained_result;
+      break;
     case PrivateReservedFailure::None:
       break;
     }
@@ -897,8 +1156,9 @@ SerializedExecutor::execute_next_turn_impl(const std::atomic_bool* stop_requeste
   // Successful applied work always advances and reports, even when a producer published a terminal
   // admission fault during the active handler. That stored fault remains closed and is returned by
   // the next progression boundary rather than erasing evidence for this completed turn.
-  const bool accepted_turn =
-      turn_kind == TurnKind::Command || turn_kind == TurnKind::PrivateCommand;
+  const bool accepted_turn = turn_kind == TurnKind::Command ||
+                             turn_kind == TurnKind::PrivateCommand ||
+                             turn_kind == TurnKind::ReconciliationCommand;
   const auto turn_ordinal =
       accepted_turn ? accepted_context->turn_ordinal : control_context->turn_ordinal;
   const auto started_at = accepted_turn ? accepted_context->processing_timestamp
@@ -1055,6 +1315,59 @@ SerializedExecutor::private_admission_observation(model::AdmissionOrdinal attemp
     }
     const auto* retention_error =
         private_owner->find_committed_retained_private_event_error(attempt_ordinal);
+    if (retention_error != nullptr) {
+      return PrivateAdmissionObservation{attempt_ordinal,
+                                         CriticalPrivateAdmissionState::RetainedForReconciliation,
+                                         std::nullopt, *retention_error};
+    }
+  }
+  return std::nullopt;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Prefer the reconciliation ring or active token over its lane-specific append-only owner evidence,
+// preventing cross-lane ordinal matches during concurrent extraction and publication.
+std::optional<PrivateAdmissionObservation> SerializedExecutor::reconciliation_admission_observation(
+    model::AdmissionOrdinal attempt_ordinal) const {
+  PrivateAdmissionOwner* private_owner = nullptr;
+  {
+    std::lock_guard lock{mutex_};
+    for (const auto& slot : reconciliation_slots_) {
+      if (!slot.receipt.has_value() || slot.receipt->attempt_ordinal != attempt_ordinal) {
+        continue;
+      }
+      return PrivateAdmissionObservation{attempt_ordinal,
+                                         CriticalPrivateAdmissionState::CopiedAndAdmitted,
+                                         std::nullopt, std::nullopt};
+    }
+    if (active_reconciliation_turn_.has_value() &&
+        active_reconciliation_turn_->receipt.attempt_ordinal == attempt_ordinal) {
+      return PrivateAdmissionObservation{attempt_ordinal,
+                                         CriticalPrivateAdmissionState::CopiedAndAdmitted,
+                                         std::nullopt, std::nullopt};
+    }
+    if (invalid_reconciliation_completion_observation_.has_value() &&
+        invalid_reconciliation_completion_observation_->attempt_ordinal == attempt_ordinal) {
+      return invalid_reconciliation_completion_observation_;
+    }
+    private_owner = private_owner_;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The reconciliation oracle is consulted only after executor ownership has ended for this
+  // ordinal; it cannot borrow a disposition or error from the ordinary-private namespace.
+  if (private_owner != nullptr) {
+    auto disposition =
+        private_owner->find_committed_reconciliation_event_disposition(attempt_ordinal);
+    if (disposition.has_value() && is_terminal_private_disposition(disposition.value())) {
+      return PrivateAdmissionObservation{attempt_ordinal,
+                                         CriticalPrivateAdmissionState::EconomicallyConsumed,
+                                         disposition, std::nullopt};
+    }
+    const auto* retention_error =
+        private_owner->find_committed_retained_reconciliation_event_error(attempt_ordinal);
     if (retention_error != nullptr) {
       return PrivateAdmissionObservation{attempt_ordinal,
                                          CriticalPrivateAdmissionState::RetainedForReconciliation,
@@ -1273,8 +1586,7 @@ SerializedExecutor::record_source_loss_locked(SourceFenceState& fence,
 // Resolve only an exact sealed root plus canonical account/venue pair. Any mismatch is
 // intentionally unattributable and must use the reasonless global fence.
 SerializedExecutor::AccountFenceState* SerializedExecutor::find_configured_account_fence_locked(
-    const oms::PrivateOrderIngressAttempt& attempt) noexcept {
-  const auto& semantic = attempt.semantic_value();
+    const oms::PrivateEventIngressSemanticValue& semantic) noexcept {
   if (!private_configuration_.has_value() ||
       semantic.provenance().root() != private_configuration_->root_provenance()) {
     return nullptr;
@@ -1292,8 +1604,7 @@ SerializedExecutor::AccountFenceState* SerializedExecutor::find_configured_accou
 // Preserve const observation of the same exact root/account/venue tuple used by loss recording.
 const SerializedExecutor::AccountFenceState*
 SerializedExecutor::find_configured_account_fence_locked(
-    const oms::PrivateOrderIngressAttempt& attempt) const noexcept {
-  const auto& semantic = attempt.semantic_value();
+    const oms::PrivateEventIngressSemanticValue& semantic) const noexcept {
   if (!private_configuration_.has_value() ||
       semantic.provenance().root() != private_configuration_->root_provenance()) {
     return nullptr;
@@ -1367,7 +1678,7 @@ bool SerializedExecutor::record_earliest_account_reason_occurrence(
 // complete occurrence of every distinct cause.
 std::optional<SerializedExecutor::PrivateLossFailure>
 SerializedExecutor::record_account_loss_locked(AccountFenceState& fence,
-                                               const oms::PrivateOrderIngressAttempt& attempt,
+                                               const CriticalPrivateEventAttempt& attempt,
                                                model::AdmissionOrdinal attempt_ordinal,
                                                risk::AccountSafetyReason reason) noexcept {
 
@@ -1405,7 +1716,7 @@ SerializedExecutor::record_account_loss_locked(AccountFenceState& fence,
 // Retain the first complete unattributable value permanently while checked folding reports every
 // later global admission loss without selecting an account or reason.
 std::optional<SerializedExecutor::PrivateLossFailure>
-SerializedExecutor::record_global_loss_locked(const oms::PrivateOrderIngressAttempt& attempt,
+SerializedExecutor::record_global_loss_locked(const CriticalPrivateEventAttempt& attempt,
                                               model::AdmissionOrdinal attempt_ordinal) noexcept {
   if (!global_fence_.first_attempt.has_value()) {
     global_fence_.first_attempt.emplace(attempt);
@@ -1457,6 +1768,39 @@ model::Result<void> SerializedExecutor::validate_admitted_private_order_slot(
 }
 
 // --------------------------------------------------------
+// Reject reconciliation authority that is moved-from, cross-executor, off-owner, stale, or detached
+// from the exact active reconciliation call stack before publishing any copied view.
+model::Result<void> SerializedExecutor::validate_admitted_reconciliation_event_slot(
+    const AdmittedReconciliationEventSlot& admitted) const {
+  if (admitted.owner_ != this) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutionNotPermitted, "reconciliation_admission.token_owner"));
+  }
+  std::lock_guard lock{mutex_};
+  if (!owner_thread_.has_value()) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorNotBound, "executor_owner"));
+  }
+  if (owner_thread_.value() != std::this_thread::get_id()) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutorWrongOwner, "executor_owner"));
+  }
+  if (!turn_active_ || !active_reconciliation_turn_.has_value() ||
+      admitted.context_.turn_ordinal != active_reconciliation_turn_->turn_ordinal) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::ExecutionNotPermitted, "reconciliation_admission.token_turn"));
+  }
+  if (active_reconciliation_turn_->receipt.attempt_ordinal != admitted.generation_ ||
+      active_reconciliation_turn_->receipt != admitted.context_.receipt ||
+      active_reconciliation_turn_->attempt != admitted.attempt_) {
+    return model::Result<void>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::ExecutionNotPermitted,
+                                            "reconciliation_admission.token_generation"));
+  }
+  return model::Result<void>::create_success();
+}
+
+// --------------------------------------------------------
 // Derive diagnostics from the ring count, sole active turn, and one fixed fence slot per account.
 PrivateLaneSnapshot SerializedExecutor::private_lane_snapshot_locked() const noexcept {
   PrivateLaneSnapshot private_lane;
@@ -1476,6 +1820,11 @@ PrivateLaneSnapshot SerializedExecutor::private_lane_snapshot_locked() const noe
   private_lane.global_fence_active = global_fence_.first_attempt.has_value();
   private_lane.global_fence_in_flight = global_fence_.in_flight;
   private_lane.global_fence_owner_applied = global_fence_.owner_applied;
+  private_lane.reconciliation_capacity = reconciliation_slots_.size();
+  private_lane.reconciliation_queued_slots = pending_reconciliation_commands_;
+  private_lane.reconciliation_in_flight_slots = active_reconciliation_turn_.has_value() ? 1U : 0U;
+  private_lane.reconciliation_occupied_slots =
+      private_lane.reconciliation_queued_slots + private_lane.reconciliation_in_flight_slots;
   return private_lane;
 }
 
@@ -1543,8 +1892,8 @@ SerializedExecutor::restore_failed_account_fence_locked(AccountFenceState& fence
 }
 
 // --------------------------------------------------------
-// Merge all public, ordinary-private, and fence stores by their shared unique attempt ordinals
-// while the owner-applied global gate suppresses later private work.
+// Merge all public, ordinary-private, reconciliation, and fence stores by their shared unique
+// attempt ordinals while the owner-applied global gate suppresses only ordinary-private work.
 std::optional<SerializedExecutor::RunnableTurnCandidate>
 SerializedExecutor::find_oldest_runnable_turn_locked() const noexcept {
   std::optional<RunnableTurnCandidate> oldest;
@@ -1581,6 +1930,15 @@ SerializedExecutor::find_oldest_runnable_turn_locked() const noexcept {
   if (!global_fence_.owner_applied && pending_private_commands_ > 0U) {
     const auto& slot = private_slots_[private_head_];
     consider(RunnableSource::PrivateCommand, private_head_, slot.receipt->attempt_ordinal);
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The reconciliation FIFO contributes its head even after the permanent global-private gate is
+  // owner-applied, because only trusted reconciliation may eventually resolve that condition.
+  if (pending_reconciliation_commands_ > 0U) {
+    const auto& slot = reconciliation_slots_[reconciliation_head_];
+    consider(RunnableSource::ReconciliationCommand, reconciliation_head_,
+             slot.receipt->attempt_ordinal);
   }
 
   // ++++++++++++++++++++++++++++++++++++++++

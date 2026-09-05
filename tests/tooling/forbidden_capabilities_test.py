@@ -786,6 +786,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/runtime/private_order_admission_test.cpp",
             "tests/unit/runtime/private_order_correlation_planner_test.cpp",
             "tests/unit/runtime/private_order_reconciler_test.cpp",
+            "tests/unit/runtime/reconciliation_private_event_admission_test.cpp",
             "tests/unit/trace/m4_semantic_evidence_test.cpp",
         }
         required_owner = {
@@ -859,16 +860,23 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                         ["forbidden include", "executor handoff"],
                     )
 
-            # Exact private-admission declarations may name their sole executor authority, while
-            # unrelated use in the same owner path must remain visible to the scanner.
+            # Exact ordinary and reconciliation admission-token declarations may name their sole
+            # executor authority, while unrelated use in the same owner path remains visible.
             private_header = self.write_repository_file(
                 repository,
                 "include/aegis/runtime/private_order_admission.hpp",
                 "namespace aegis::runtime {\n"
                 "class SerializedExecutor;\n"
-                "class AdmittedPrivateOrderSlot {\n"
+                "class AdmittedPrivateOrderSlot final {\n"
                 "private:\n"
                 "  AdmittedPrivateOrderSlot(SerializedExecutor& owner);\n"
+                "  SerializedExecutor* owner_;\n"
+                "  AcceptedTurnContext context_;\n"
+                "  friend class SerializedExecutor;\n"
+                "};\n"
+                "class AdmittedReconciliationEventSlot final {\n"
+                "private:\n"
+                "  AdmittedReconciliationEventSlot(SerializedExecutor& owner);\n"
                 "  SerializedExecutor* owner_;\n"
                 "  AcceptedTurnContext context_;\n"
                 "  friend class SerializedExecutor;\n"
@@ -885,13 +893,20 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             private_header.write_text(
                 private_header.read_text(encoding="utf-8")
                 + "class Unrelated { friend class SerializedExecutor; };\n"
-                + "void forbidden_handoff(SerializedExecutor& executor);\n",
+                + "class PointerLookalike { SerializedExecutor* owner_; };\n"
+                + "void forbidden_ordinary_handoff(SerializedExecutor& executor);\n"
+                + "void forbidden_reconciliation_handoff(SerializedExecutor& executor);\n",
                 encoding="utf-8",
             )
             findings = scanner.scan_repository_paths_or_raise(repository, [private_header])
             self.assertEqual(
                 [finding.rule for finding in findings],
-                ["executor handoff", "executor handoff"],
+                [
+                    "executor handoff",
+                    "executor handoff",
+                    "executor handoff",
+                    "executor handoff",
+                ],
             )
 
     # --------------------------------------------------------

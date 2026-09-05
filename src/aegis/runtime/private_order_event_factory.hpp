@@ -33,7 +33,7 @@ public:
       : resolver_{std::move(resolver)} {}
 
   // --------------------------------------------------------
-  // Validate one ordinary acknowledgement into a receive-time-free attempt without inferring local
+  // Create a receive-time-free attempt for one ordinary acknowledgement without inferring local
   // ownership from its optional client locator.
   [[nodiscard]] model::Result<oms::PrivateOrderIngressAttempt>
   create_venue_acknowledgement_attempt(oms::VenuePrivateIngressOrigin origin,
@@ -49,9 +49,18 @@ public:
                                   std::optional<model::OrderId> local_order_locator) const;
 
   // --------------------------------------------------------
-  // Normalize the same authoritative acknowledgement shape from a validated reconciliation row.
-  // The row translator supplies no instrument for KnownOrderLookup/Present and supplies the exact
-  // raw instrument for OpenOrder; no other caller chooses this optional provenance field.
+  // Create a receive-time-free nominal attempt for one authoritative reconciliation
+  // acknowledgement. Only trusted runtime code can reach this internal factory boundary.
+  [[nodiscard]] model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+  create_reconciliation_acknowledgement_attempt(
+      oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+      model::VenueId venue_id, oms::ExchangeOrderId exchange_order_id,
+      std::optional<model::OrderId> local_order_locator,
+      std::optional<model::InstrumentId> source_instrument_id) const;
+
+  // --------------------------------------------------------
+  // Normalize the authoritative acknowledgement attempt by attaching only the supplied receive
+  // time. The row translator alone chooses the optional provenance instrument according to shape.
   [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
   normalize_reconciliation_acknowledgement(
       oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
@@ -74,7 +83,16 @@ public:
                             std::span<const std::byte> detail) const;
 
   // --------------------------------------------------------
-  // Normalize the same definitive rejection shape from reconciliation authority.
+  // Validate one authoritative reconciliation rejection into a receive-time-free nominal attempt.
+  [[nodiscard]] model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+  create_reconciliation_rejection_attempt(oms::ReconciliationPrivateIngressOrigin origin,
+                                          model::LogicalAccountId logical_account_id,
+                                          model::VenueId venue_id, oms::PrivateOrderLocator locator,
+                                          oms::ExchangeRejectionCategory category,
+                                          std::span<const std::byte> detail) const;
+
+  // --------------------------------------------------------
+  // Normalize the authoritative rejection attempt by attaching only the supplied receive time.
   [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput> normalize_reconciliation_rejection(
       oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
       model::VenueId venue_id, oms::PrivateOrderLocator locator,
@@ -99,7 +117,17 @@ public:
       model::Price execution_price, std::optional<execution::OrderSide> source_side) const;
 
   // --------------------------------------------------------
-  // Normalize a reconciliation execution whose authoritative source row always supplies side.
+  // Validate one authoritative reconciliation execution whose source row always supplies side.
+  [[nodiscard]] model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+  create_reconciliation_execution_attempt(
+      oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+      model::VenueId venue_id, oms::PrivateOrderLocator locator, oms::TradeId trade_id,
+      model::InstrumentId instrument_id, model::InstrumentMetadataRevision metadata_revision,
+      model::Quantity incremental_quantity, model::Quantity cumulative_quantity,
+      model::Price execution_price, execution::OrderSide source_side) const;
+
+  // --------------------------------------------------------
+  // Normalize the authoritative execution attempt by attaching only the supplied receive time.
   [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput> normalize_reconciliation_execution(
       oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
       model::VenueId venue_id, oms::PrivateOrderLocator locator, oms::TradeId trade_id,
@@ -139,7 +167,15 @@ public:
       oms::CancelAttemptId causal_cancel_attempt_id) const;
 
   // --------------------------------------------------------
-  // Normalize the same terminal/nonterminal cancellation result from reconciliation authority.
+  // Validate one authoritative reconciliation cancellation result with its exact cumulative shape.
+  [[nodiscard]] model::Result<oms::ReconciliationPrivateEventIngressAttempt>
+  create_reconciliation_cancellation_result_attempt(
+      oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+      model::VenueId venue_id, oms::PrivateOrderLocator locator, oms::CancellationResult result,
+      std::optional<model::Quantity> terminal_cumulative_quantity) const;
+
+  // --------------------------------------------------------
+  // Normalize the authoritative cancellation attempt by attaching only the supplied receive time.
   [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
   normalize_reconciliation_cancellation_result(
       oms::ReconciliationPrivateEventOrigin origin, model::LogicalAccountId logical_account_id,
@@ -202,10 +238,32 @@ private:
       oms::PrivateOrderEventPayload payload) const noexcept;
 
   // --------------------------------------------------------
-  // Attach one supplied observation time behind the private compatibility boundary.
+  // Attach independently proved reconciliation provenance to one receive-time-free nominal row.
+  [[nodiscard]] oms::ReconciliationPrivateEventIngressAttempt
+  create_authoritative_reconciliation_private_event_ingress_attempt(
+      oms::ReconciliationPrivateIngressOrigin origin, model::LogicalAccountId logical_account_id,
+      model::VenueId venue_id, const std::optional<model::InstrumentId>& instrument_id,
+      oms::PrivateOrderEventPayload payload) const noexcept;
+
+  // --------------------------------------------------------
+  // Attach one supplied observation time to an ordinary attempt behind the compatibility boundary.
   [[nodiscard]] oms::NormalizedPrivateOrderInput
   normalize_private_order_ingress_attempt(const oms::PrivateOrderIngressAttempt& attempt,
                                           model::ReceiveTimestamp received_at) const noexcept;
+
+  // --------------------------------------------------------
+  // Attach one supplied observation time to a trusted reconciliation attempt.
+  [[nodiscard]] oms::NormalizedPrivateOrderInput
+  normalize_reconciliation_private_event_ingress_attempt(
+      const oms::ReconciliationPrivateEventIngressAttempt& attempt,
+      model::ReceiveTimestamp received_at) const noexcept;
+
+  // --------------------------------------------------------
+  // Add one supplied observation to a complete receive-time-free source semantic without changing
+  // any source-owned field.
+  [[nodiscard]] oms::NormalizedPrivateOrderInput normalize_private_event_ingress_semantic_value(
+      const oms::PrivateEventIngressSemanticValue& semantic,
+      model::ReceiveTimestamp received_at) const noexcept;
 
   // --------------------------------------------------------
   // Retain the complete self-owned normalization authority.
