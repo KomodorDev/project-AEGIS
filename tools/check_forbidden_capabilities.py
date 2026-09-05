@@ -147,7 +147,19 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
 M4_GENERAL_FILE_PATTERNS = (
     "src/aegis/runtime/private_identity_preparation.cpp",
     "src/aegis/runtime/private_identity_preparation.hpp",
+    "src/aegis/runtime/private_identity_retention.cpp",
+    "src/aegis/runtime/private_identity_retention.hpp",
+    "src/aegis/runtime/submission_coordinator.cpp",
+    "src/aegis/runtime/submission_coordinator.hpp",
+    "src/aegis/runtime/submission_diagnostics.cpp",
+    "src/aegis/trace/submission_trace.cpp",
+    "include/aegis/execution/submit_result.hpp",
+    "include/aegis/runtime/market_runtime.hpp",
+    "src/aegis/runtime/market_runtime.cpp",
     "tests/unit/runtime/private_identity_preparation_test.cpp",
+    "tests/unit/runtime/private_identity_retention_owner_test.cpp",
+    "tests/unit/runtime/private_identity_retention_runtime_test.cpp",
+    "tests/unit/runtime/private_submission_safety_gate_test.cpp",
     "include/aegis/configuration/startup_configuration.hpp",
     "include/aegis/market_data/subscription.hpp",
     "include/aegis/model/bounded_identity.hpp",
@@ -197,6 +209,13 @@ M4_GENERAL_FILE_PATTERNS = (
 M4_OWNER_PATH_FILE_PATTERNS = (
     "src/aegis/runtime/private_identity_preparation.cpp",
     "src/aegis/runtime/private_identity_preparation.hpp",
+    "src/aegis/runtime/private_identity_retention.cpp",
+    "src/aegis/runtime/private_identity_retention.hpp",
+    "src/aegis/runtime/submission_coordinator.cpp",
+    "src/aegis/runtime/submission_coordinator.hpp",
+    "src/aegis/runtime/submission_diagnostics.cpp",
+    "src/aegis/trace/submission_trace.cpp",
+    "include/aegis/execution/submit_result.hpp",
     "include/aegis/configuration/startup_configuration.hpp",
     "include/aegis/market_data/subscription.hpp",
     "include/aegis/model/bounded_identity.hpp",
@@ -470,10 +489,29 @@ APPROVED_NON_CAPABILITY_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
     ),
 }
 
-# This header names its sole executor authority in eight exact declaration forms. Path-scoped span
-# masks bind token pointer/friend authority to each complete named class body and retain only the
-# separate retained-turn friendship, leaving lookalike classes and executable handoffs visible.
+# Path-scoped spans permit exact borrowed executor declarations. Token and synchronous fence proof
+# declarations remain bound to their named class bodies, leaving lookalikes and handoffs visible.
 APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
+    # The concrete owner borrows an existing executor only to validate identity and fault it;
+    # these exact declarations grant no constructor, queue, or admission handoff exception.
+    Path("src/aegis/runtime/private_order_reconciler.hpp"): (
+        re.compile(
+            r"\bretain_admitted_identity_turn\s*\(\s*(?P<identifier>SerializedExecutor)\s*&\s*executor\s*,"
+        ),
+        re.compile(
+            r"\bbind_private_executor\s*\(\s*(?P<identifier>SerializedExecutor)"
+            r"\s*&\s*executor\s*\)\s*noexcept\s*;"
+        ),
+    ),
+    Path("src/aegis/runtime/private_identity_retention.cpp"): (
+        re.compile(
+            r"\bPrivateOrderReconciler::retain_admitted_identity_turn\s*\(\s*(?P<identifier>SerializedExecutor)\s*&\s*executor\s*,"
+        ),
+        re.compile(
+            r"\bPrivateOrderReconciler::bind_private_executor\s*\(\s*"
+            r"(?P<identifier>SerializedExecutor)\s*&\s*executor\s*\)\s*noexcept\s*\{"
+        ),
+    ),
     Path("include/aegis/runtime/private_order_admission.hpp"): (
         re.compile(
             r"\bnamespace\s+aegis::runtime\s*\{\s*class\s+"
@@ -517,6 +555,22 @@ APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
             r"\bstd::optional\s*<\s*risk::AccountSafetyReason\s*>\s*account_reason_\s*;\s*"
             r"friend\s+class\s+(?P<identifier>SerializedExecutor)\s*;"
         ),
+        *(
+            re.compile(
+                r"\bclass\s+PrivateFenceTurnAuthority\s+final\s*\{"
+                r"(?:(?!\n\s*};)[\s\S])*?" + declaration + r"(?:(?!\n\s*};)[\s\S])*?\n\s*};"
+            )
+            for declaration in (
+                r"\bPrivateFenceTurnAuthority\s*\(\s*(?P<identifier>SerializedExecutor)"
+                r"\s*&\s*executor\s*,\s*PrivateAdmissionOwner\s*&\s*owner\s*,",
+                r"\bstatic\s+(?P<identifier>SerializedExecutor)\s*\*\s*"
+                r"find_current_account_fence_executor\s*\(",
+                r"\bstatic\s+(?P<identifier>SerializedExecutor)\s*\*\s*"
+                r"find_current_global_fence_executor\s*\(",
+                r"(?P<identifier>SerializedExecutor)\s*\*\s*executor_\s*;",
+                r"friend\s+class\s+(?P<identifier>SerializedExecutor)\s*;",
+            )
+        ),
     ),
 }
 
@@ -543,7 +597,11 @@ DIRECT_PATH_FORBIDDEN_IDENTIFIERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "executor handoff",
-        re.compile(r"\b(?:SerializedExecutor|InlineCommandWorkItem|try_admit)\b"),
+        re.compile(
+            r"\b(?:SerializedExecutor|InlineCommandWorkItem|try_admit|try_admit_private|"
+            r"try_admit_reconciliation_event|execute_next_turn|execute_pending_turns|"
+            r"bind_to_current_thread|create_inline_command_work_item)\b"
+        ),
     ),
 )
 

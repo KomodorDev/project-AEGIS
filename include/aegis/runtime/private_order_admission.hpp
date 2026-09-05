@@ -33,6 +33,10 @@ namespace aegis::runtime {
 class SerializedExecutor;
 
 // ########################################################################
+// The executor borrows one stable owner for its private events and authenticated fence calls.
+class PrivateAdmissionOwner;
+
+// ########################################################################
 // A construction-time lease lets a retained token reject executor destruction before touching its
 // opaque raw owner address.
 class PrivateAdmissionLease;
@@ -419,8 +423,10 @@ private:
   AcceptedTurnContext context_;
 
   // ########################################################################
-  // The non-relocatable executor is the sole capability minting and validation authority.
+  // The non-relocatable executor is the sole capability minting and validation authority; the
+  // concrete source-private consumer may check its exact executor binding after token validation.
   friend class SerializedExecutor;
+  friend class PrivateOrderReconciler;
 
   // ########################################################################
 };
@@ -535,6 +541,7 @@ private:
   // ########################################################################
   // The non-relocatable executor is the sole capability minting and validation authority.
   friend class SerializedExecutor;
+  friend class PrivateOrderReconciler;
 
   // ########################################################################
 };
@@ -777,6 +784,64 @@ struct PrivateLaneSnapshot {
 };
 
 // ########################################################################
+// A stack-scoped executor proof authenticates the exact fence reference, control context, and
+// consumer on this thread. Only the executor can construct it; the concrete private owner can
+// inspect it synchronously. Destruction restores any enclosing proof, and nothing escapes the
+// call stack or dereferences an executor after its lifetime. This is not a producer capability.
+class PrivateFenceTurnAuthority final {
+private:
+
+  // --------------------------------------------------------
+  // Bind precisely one account/global control invocation for the duration of its virtual call.
+  PrivateFenceTurnAuthority(SerializedExecutor& executor, PrivateAdmissionOwner& owner,
+                            const ControlTurnContext& context,
+                            const AccountSafetyFenceTurn* account_fence,
+                            const GlobalPrivateFenceTurn* global_fence) noexcept;
+
+  // --------------------------------------------------------
+  // Restore the enclosing call proof before the referenced stack context is destroyed.
+  ~PrivateFenceTurnAuthority();
+
+  // --------------------------------------------------------
+  // Stack ownership cannot be duplicated, moved, or extended past the authenticated call.
+  PrivateFenceTurnAuthority(const PrivateFenceTurnAuthority&) = delete;
+  PrivateFenceTurnAuthority& operator=(const PrivateFenceTurnAuthority&) = delete;
+  PrivateFenceTurnAuthority(PrivateFenceTurnAuthority&&) = delete;
+  PrivateFenceTurnAuthority& operator=(PrivateFenceTurnAuthority&&) = delete;
+
+  // --------------------------------------------------------
+  // Find the executor only for this exact current-thread account-fence invocation; mismatched,
+  // copied, forwarded, or out-of-turn references return null without touching executor storage.
+  [[nodiscard]] static SerializedExecutor*
+  find_current_account_fence_executor(const PrivateAdmissionOwner& owner,
+                                      const AccountSafetyFenceTurn& fence,
+                                      const ControlTurnContext& context) noexcept;
+
+  // --------------------------------------------------------
+  // Find the executor only for the exact current-thread reasonless global-fence invocation.
+  [[nodiscard]] static SerializedExecutor*
+  find_current_global_fence_executor(const PrivateAdmissionOwner& owner,
+                                     const GlobalPrivateFenceTurn& fence,
+                                     const ControlTurnContext& context) noexcept;
+
+  // --------------------------------------------------------
+  SerializedExecutor* executor_;
+  const PrivateAdmissionOwner* owner_;
+  const ControlTurnContext* context_;
+  const AccountSafetyFenceTurn* account_fence_;
+  const GlobalPrivateFenceTurn* global_fence_;
+  const PrivateFenceTurnAuthority* previous_;
+  static thread_local const PrivateFenceTurnAuthority* current_;
+
+  // ########################################################################
+  // Minting is executor-only; the source-private consumer receives synchronous inspection only.
+  friend class SerializedExecutor;
+  friend class PrivateOrderReconciler;
+
+  // ########################################################################
+};
+
+// ########################################################################
 // The runtime-owned handler is the sole private-turn consumer and evidence oracle. An admission
 // ordinal publishes exactly one disposition history or retained-error kind, never both; only a
 // BufferedGap disposition may advance, exactly once, to AppliedFromBuffer. The owner's lifetime
@@ -831,9 +896,10 @@ public:
       model::AdmissionOrdinal attempt_ordinal) const noexcept = 0;
 
   // --------------------------------------------------------
-  // Apply one configured-account fence after all fallible validation and evidence preflight;
-  // success means the complete owner-local journal/audit evidence was published, not durably
-  // acknowledged by the later recovery medium.
+  // Apply one configured-account fence after all fallible validation and evidence preflight.
+  // The preparation-only owner retains complete fence causes and gates submissions; a canonical
+  // consuming owner must additionally publish the complete journal/audit plan required by M4.
+  // Neither form claims durable acknowledgement by the later recovery medium.
   [[nodiscard]] virtual model::Result<void>
   apply_account_safety_fence(const AccountSafetyFenceTurn& fence,
                              const ControlTurnContext& context) noexcept = 0;

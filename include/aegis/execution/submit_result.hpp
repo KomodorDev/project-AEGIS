@@ -1,5 +1,5 @@
-// Purpose: define the closed M3 local submission result, stable stage/reason values, and exact
-// optional risk-limit evidence without implying exchange acknowledgement.
+// Purpose: define local submission results, stable M3 stage/reason values with M4 account-safety
+// reasons, and exact optional risk-limit evidence without implying exchange acknowledgement.
 
 #pragma once
 
@@ -77,6 +77,8 @@ enum class SubmissionReason : std::uint16_t {
   WorstCasePositionQuantityExceeded = 55,
   WorstCasePositionNotionalExceeded = 56,
   ReservationCapacityExceeded = 57,
+  AccountReconciliationRequired = 58,
+  AccountQuarantined = 59,
 
   DuplicateOrderIdentity = 70,
   OmsCapacityExceeded = 71,

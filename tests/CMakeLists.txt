@@ -79,6 +79,10 @@ add_executable(
   unit/runtime/private_order_reconciler_test.cpp
   # Preparation tests prove bounded all-or-none insertion without canonical publication.
   unit/runtime/private_identity_preparation_test.cpp
+  # Retention tests pin concrete owner authority, runtime composition, and submission containment.
+  unit/runtime/private_identity_retention_owner_test.cpp
+  unit/runtime/private_identity_retention_runtime_test.cpp
+  unit/runtime/private_submission_safety_gate_test.cpp
   # Runtime submission tests pin private composition, BotContext entry, diagnostics, and dispatch.
   unit/runtime/runtime_diagnostics_test.cpp
   unit/runtime/submission_coordinator_test.cpp

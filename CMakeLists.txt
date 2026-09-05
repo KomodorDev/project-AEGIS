@@ -95,6 +95,8 @@ add_library(
   src/aegis/runtime/private_order_reconciler.cpp
   # Preparations remain separate from canonical identities and economic application.
   src/aegis/runtime/private_identity_preparation.cpp
+  # The concrete private consumer owns retained facts and fail-closed submission gates.
+  src/aegis/runtime/private_identity_retention.cpp
   # Market runtime composes recorded ingress, source state, and bot dispatch on one owner.
   src/aegis/runtime/market_runtime.cpp
   # Owner-local diagnostics retain a bounded fixed-field prefix with explicit saturation counts.
