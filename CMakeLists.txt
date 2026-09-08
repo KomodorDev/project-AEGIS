@@ -83,6 +83,8 @@ add_library(
   src/aegis/organization/organization.cpp
   # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
   src/aegis/risk/exposure.cpp
+  # Cumulative allocations conserve approved exposure independently of fill-message partitioning.
+  src/aegis/risk/reservation_conversion.cpp
   src/aegis/risk/reservation_ledger.cpp
   src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
