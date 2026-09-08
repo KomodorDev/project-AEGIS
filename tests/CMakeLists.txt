@@ -60,8 +60,9 @@ add_executable(
   unit/organization/organization_test.cpp
   # Risk tests pin immutable policy bytes, conservative exposure, atomic limits, and exact release.
   unit/risk/reservation_ledger_test.cpp
-  # Independent arithmetic qualification proves exact cumulative fill allocation.
+  # Independent arithmetic and owner-level qualification prove exact joint fill conversion.
   unit/risk/reservation_conversion_test.cpp
+  unit/risk/private_fill_economics_test.cpp
   unit/risk/risk_policy_test.cpp
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.

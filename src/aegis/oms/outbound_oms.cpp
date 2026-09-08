@@ -86,7 +86,9 @@ model::Result<OutboundOms> OutboundOms::create_outbound_oms(std::uint32_t capaci
 
 // --------------------------------------------------------
 // Materialize the complete fixed slot array and admission index before any row can be published.
-OutboundOms::OutboundOms(std::uint32_t capacity) : capacity_{capacity}, slots_(capacity) {
+OutboundOms::OutboundOms(std::uint32_t capacity)
+    : capacity_{capacity}, slots_(capacity),
+      storage_incarnation_{std::make_shared<StorageIncarnation>()} {
   admission_order_.reserve(capacity);
 }
 

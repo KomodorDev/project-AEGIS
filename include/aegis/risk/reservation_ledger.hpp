@@ -1,5 +1,5 @@
-// Purpose: own the fixed-capacity M3 risk cells and held reservations, applying one atomic
-// seven-scope check-and-reserve decision and exact-once release on the serialized owner.
+// Purpose: own fixed-capacity reservation cells and optional M4 confirmed inventory, applying
+// atomic seven-scope admission and exact-once residual release on the serialized owner.
 
 #pragma once
 
@@ -24,19 +24,39 @@
 namespace aegis::risk {
 
 // ########################################################################
-// Reservation state is intentionally minimal until private events add lifecycle transitions in M4.
+// Stable M3 states remain unchanged; a complete fill appends its distinct terminal closure.
 enum class ReservationState : std::uint8_t {
   Held = 1,
   Released = 2,
+  ConsumedByFill = 3,
 };
 
 // ########################################################################
-// ReservationEvidence retains the exact creating identity, side, and once-calculated economics.
+// A terminal reservation records the definitive fact that removed its final live remainder.
+enum class ReservationClosureCause : std::uint8_t {
+  Unassigned = 0,
+  DefiniteLocalFailure = 1,
+  ExchangeRejected = 2,
+  DefinitiveCancellation = 3,
+  CompleteAuthoritativeNegative = 4,
+  FullFill = 5,
+};
+
+// ########################################################################
+// The source-private inventory owner alone can prepare and commit joint economic replacements.
+class InventoryLedger;
+
+// ########################################################################
+// ReservationEvidence preserves original M3 exposure and separately reports residual and cumulative
+// economics; closure never reinterprets the immutable original approval.
 struct ReservationEvidence {
   model::ReservationId reservation_id;
   ReservationState state;
   execution::OrderSide side;
   OrderExposure exposure;
+  OrderExposure remaining_exposure;
+  OrderExposure cumulative_confirmed_exposure;
+  ReservationClosureCause closure_cause;
 
   // --------------------------------------------------------
   // Structural equality compares the complete reservation identity, state, side, and economics.
@@ -46,8 +66,9 @@ struct ReservationEvidence {
 };
 
 // ########################################################################
-// RiskScopeExposure is a read-only coherent view of the five mutable cells used by one complete
-// scope/instrument/currency projection.
+// RiskScopeExposure is one coherent residual and confirmed view. Quantity spans the scope's
+// normalized instrument; notional keeps its exact quote-currency key. Confirmed values come from
+// the sole inventory owner.
 struct RiskScopeExposure {
   std::uint64_t open_order_count;
   model::Notional gross_reserved_quote_notional;
@@ -58,6 +79,8 @@ struct RiskScopeExposure {
   model::Notional reserved_sell_quote_notional;
   model::Notional instrument_worst_case_quote_notional;
   model::Notional worst_case_position_quote_notional;
+  model::Quantity confirmed_quantity;
+  model::Notional confirmed_quote_notional;
 
   // --------------------------------------------------------
   // Structural equality compares every coherent mutable exposure cell in the scope projection.
@@ -184,7 +207,8 @@ public:
                     const execution::CanonicalOrderEconomics& economics);
 
   // --------------------------------------------------------
-  // Apply stored inverse deltas and transition one matching Held reservation exactly once.
+  // Subtract the stored mutable remainder and close one matching Held reservation exactly once
+  // with DefiniteLocalFailure; the submission rollback path owns that definitive local authority.
   [[nodiscard]] model::Result<void> release_reservation(model::ReservationId reservation_id);
 
   // --------------------------------------------------------
@@ -227,6 +251,10 @@ public:
                            std::string_view quote_currency) const noexcept;
 
 private:
+
+  // ########################################################################
+  // The closed inventory component accesses reservation storage only for atomic joint plans.
+  friend class InventoryLedger;
 
   // ########################################################################
   // Hide the fixed risk-cell and reservation-slot representation behind one stable owner handle.

@@ -146,8 +146,13 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
 # cannot silently make identity planning, OMS, inventory, recovery, tests, or evidence helpers live.
 M4_GENERAL_FILE_PATTERNS = (
     "include/aegis/risk/reservation_conversion.hpp",
+    "include/aegis/risk/reservation_ledger.hpp",
     "src/aegis/risk/reservation_conversion.cpp",
+    "src/aegis/risk/reservation_ledger.cpp",
+    "src/aegis/risk/inventory_ledger.hpp",
+    "src/aegis/risk/inventory_ledger.cpp",
     "tests/unit/risk/reservation_conversion_test.cpp",
+    "tests/unit/risk/private_fill_economics_test.cpp",
     "src/aegis/runtime/private_identity_preparation.cpp",
     "src/aegis/runtime/private_identity_preparation.hpp",
     "src/aegis/runtime/private_identity_retention.cpp",
@@ -211,7 +216,11 @@ M4_GENERAL_FILE_PATTERNS = (
 # planning, and retained preparation and therefore inherit the M3 direct-path restrictions.
 M4_OWNER_PATH_FILE_PATTERNS = (
     "include/aegis/risk/reservation_conversion.hpp",
+    "include/aegis/risk/reservation_ledger.hpp",
     "src/aegis/risk/reservation_conversion.cpp",
+    "src/aegis/risk/reservation_ledger.cpp",
+    "src/aegis/risk/inventory_ledger.hpp",
+    "src/aegis/risk/inventory_ledger.cpp",
     "src/aegis/runtime/private_identity_preparation.cpp",
     "src/aegis/runtime/private_identity_preparation.hpp",
     "src/aegis/runtime/private_identity_retention.cpp",

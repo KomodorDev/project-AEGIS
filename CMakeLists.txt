@@ -85,6 +85,8 @@ add_library(
   src/aegis/risk/exposure.cpp
   # Cumulative allocations conserve approved exposure independently of fill-message partitioning.
   src/aegis/risk/reservation_conversion.cpp
+  # Confirmed inventory is the sole signed source read by joint economics and admission risk.
+  src/aegis/risk/inventory_ledger.cpp
   src/aegis/risk/reservation_ledger.cpp
   src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
