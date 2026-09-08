@@ -1,6 +1,8 @@
 // Purpose: qualify the production private-admission owner's genuine token authority, immutable
-// lane-specific retained evidence, transactional preparation capacity, and concurrent publication.
+// lane-specific retained evidence, transactional preparation capacity, and separation from
+// inventory.
 
+#include "aegis/risk/inventory_ledger.hpp"
 #include "aegis/runtime/private_order_reconciler.hpp"
 #include "aegis/runtime/serialized_executor.hpp"
 #include "m4_private_event_fixture.hpp"
@@ -330,6 +332,19 @@ TEST_CASE("production identity owner retains ordinary and reconciliation turns s
   CHECK(fixture.owner().event_identity_record_count() == 0U);
   CHECK(fixture.owner().trade_identity_record_count() == 0U);
   CHECK(fixture.owner().exchange_order_mapping_count() == 0U);
+
+  // Both execution lanes retain complete input while the future joint business reducer is absent.
+  // Cold inventory installation must not turn preparation into an economic side effect.
+  const auto* const inventory =
+      risk::InventoryLedger::installed_inventory(fixture.authority.submission->reservations());
+  REQUIRE(inventory != nullptr);
+  CHECK(inventory->source_row_count() == 0U);
+  const auto* const reservation = fixture.authority.submission->reservations().find_reservation(
+      fixture.order_or_throw().reservation_id());
+  REQUIRE(reservation != nullptr);
+  CHECK(reservation->state == risk::ReservationState::Held);
+  CHECK(fixture.order_or_throw().private_projection().cumulative_filled_quantity.coefficient() ==
+        0);
 
   const auto ordinary_terminal =
       fixture.executor->private_admission_observation(admitted.attempt_ordinal);

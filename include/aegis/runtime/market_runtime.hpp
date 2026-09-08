@@ -155,9 +155,9 @@ struct SubmissionRuntimeEvidence {
 };
 
 // ########################################################################
-// Detached M4 installation evidence identifies the live namespace and fixed registry bounds;
-// canonical counts remain distinct from prepared counts and certify no economic consumption or
-// durability. A mapping candidate is provisional evidence, never active correlation authority.
+// Detached M4 installation evidence identifies the live namespace and fixed registry/inventory
+// bounds; canonical counts remain distinct from prepared counts and certify no economic consumption
+// or durability. A mapping candidate is provisional evidence, never active correlation authority.
 struct PrivateIdentityRetentionRuntimeEvidence {
   M4PolicyFingerprint policy_fingerprint;
   recovery::RecoveryLineageId recovery_lineage_id;
@@ -173,9 +173,13 @@ struct PrivateIdentityRetentionRuntimeEvidence {
   std::uint32_t prepared_trade_identity_record_count;
   std::uint32_t prepared_exchange_order_mapping_candidate_count;
   std::size_t retained_identity_turn_count;
+  std::uint32_t inventory_source_row_capacity;
+  std::uint32_t inventory_source_row_count;
+  std::uint32_t inventory_aggregate_cell_capacity;
+  std::size_t inventory_aggregate_cell_count;
 
   // --------------------------------------------------------
-  // Structural equality compares complete detached installation and registry observations.
+  // Structural equality compares complete detached installation, registry, and inventory bounds.
   friend bool operator==(const PrivateIdentityRetentionRuntimeEvidence&,
                          const PrivateIdentityRetentionRuntimeEvidence&) = default;
 

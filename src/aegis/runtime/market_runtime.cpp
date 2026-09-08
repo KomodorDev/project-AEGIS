@@ -1,8 +1,9 @@
 // Purpose: compose bounded recorded ingress, transactional market state, canonical strategy
-// dispatch, and optional fake submission/private retention on either serialized executor driver.
+// dispatch, and optional fake submission/private retention with bounded inventory ownership.
 
 #include "aegis/runtime/market_runtime.hpp"
 
+#include "../risk/inventory_ledger.hpp"
 #include "aegis/market_data/market_state_machine.hpp"
 #include "aegis/model/domain_error.hpp"
 #include "private_order_reconciler.hpp"
@@ -910,6 +911,13 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::collect_quiescent_evidence()
   if (submission_coordinator_) {
     const auto* const reconciler = submission_coordinator_->private_order_reconciler();
     if (reconciler != nullptr) {
+      const auto* const inventory =
+          risk::InventoryLedger::installed_inventory(submission_coordinator_->reservations());
+      if (inventory == nullptr) {
+        return model::Result<MarketRuntimeEvidence>::create_failure(
+            model::DomainError::create_at_field(model::DomainErrorCode::InvalidInventoryState,
+                                                "market_runtime.inventory_owner"));
+      }
       private_identity_retention.emplace(PrivateIdentityRetentionRuntimeEvidence{
           reconciler->m4_policy().fingerprint(), reconciler->recovery_lineage_id(),
           reconciler->runtime_epoch_id(), reconciler->registered_order_namespace(),
@@ -919,7 +927,9 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::collect_quiescent_evidence()
           reconciler->identity_preparations().event_record_count(),
           reconciler->identity_preparations().trade_record_count(),
           reconciler->identity_preparations().mapping_candidate_count(),
-          reconciler->retained_identity_turn_count()});
+          reconciler->retained_identity_turn_count(), inventory->source_row_capacity(),
+          inventory->source_row_count(), inventory->aggregate_cell_capacity(),
+          inventory->aggregate_cell_count()});
     }
   }
 

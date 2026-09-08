@@ -92,7 +92,7 @@ add_library(
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
   # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain; trusted
-  # runtime composition may install read-only owner-bound identity storage before any M3 activity.
+  # runtime composition installs bounded private and inventory owners before any M3 activity.
   src/aegis/runtime/m4_policy.cpp
   src/aegis/runtime/m4_provenance_resolver.cpp
   src/aegis/runtime/private_order_event_factory.cpp
