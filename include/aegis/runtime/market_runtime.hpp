@@ -1,11 +1,12 @@
 // Purpose: compose recorded fixture ingress, transactional source state, canonical bot dispatch,
-// and an optional concrete fake-only submission stack behind one bounded serialized owner.
+// and optional fake submission/private-identity retention behind one bounded serialized owner.
 
 #pragma once
 
 #include "aegis/configuration/startup_configuration.hpp"
 #include "aegis/market_data/recorded_fixture.hpp"
 #include "aegis/oms/outbound_oms.hpp"
+#include "aegis/recovery/recovery_identity.hpp"
 #include "aegis/risk/reservation_ledger.hpp"
 #include "aegis/runtime/bot_runtime.hpp"
 #include "aegis/runtime/dedicated_executor_driver.hpp"
@@ -22,6 +23,16 @@
 #include <mutex>
 #include <optional>
 #include <vector>
+
+namespace aegis::recovery {
+
+// ########################################################################
+// A namespace-acknowledged bootstrap transfers its live lease only during opt-in M4 installation.
+class RecoveryBootstrap;
+
+// ########################################################################
+
+} // namespace aegis::recovery
 
 namespace aegis::runtime {
 
@@ -144,7 +155,35 @@ struct SubmissionRuntimeEvidence {
 };
 
 // ########################################################################
-// Final evidence owns M2 canonical replay state plus the optional M3 fake-submission bundle so it
+// Detached M4 installation evidence identifies the live namespace and fixed registry bounds;
+// canonical counts remain distinct from prepared counts and certify no economic consumption or
+// durability. A mapping candidate is provisional evidence, never active correlation authority.
+struct PrivateIdentityRetentionRuntimeEvidence {
+  M4PolicyFingerprint policy_fingerprint;
+  recovery::RecoveryLineageId recovery_lineage_id;
+  recovery::RuntimeEpochId runtime_epoch_id;
+  model::OrderNamespace registered_order_namespace;
+  std::uint32_t event_identity_record_capacity;
+  std::uint32_t event_identity_record_count;
+  std::uint32_t trade_identity_record_capacity;
+  std::uint32_t trade_identity_record_count;
+  std::uint32_t exchange_order_mapping_capacity;
+  std::uint32_t exchange_order_mapping_count;
+  std::uint32_t prepared_event_identity_record_count;
+  std::uint32_t prepared_trade_identity_record_count;
+  std::uint32_t prepared_exchange_order_mapping_candidate_count;
+  std::size_t retained_identity_turn_count;
+
+  // --------------------------------------------------------
+  // Structural equality compares complete detached installation and registry observations.
+  friend bool operator==(const PrivateIdentityRetentionRuntimeEvidence&,
+                         const PrivateIdentityRetentionRuntimeEvidence&) = default;
+
+  // --------------------------------------------------------
+};
+
+// ########################################################################
+// Final evidence owns M2 canonical replay state plus optional M3 and M4 owner observations so it
 // remains valid independently of the runtime object's later destruction.
 struct MarketRuntimeEvidence {
   configuration::ConfigurationFingerprint configuration_fingerprint;
@@ -160,6 +199,7 @@ struct MarketRuntimeEvidence {
   std::optional<model::DomainError> fault;
   std::optional<TurnReport> last_completed_turn;
   std::optional<SubmissionRuntimeEvidence> submission;
+  std::optional<PrivateIdentityRetentionRuntimeEvidence> private_identity_retention;
 
   // --------------------------------------------------------
   // Structural equality makes whole cold replay bundles directly comparable across drivers.
@@ -169,8 +209,9 @@ struct MarketRuntimeEvidence {
 };
 
 // ########################################################################
-// MarketRuntime is the stable heap-owned composition root and the sole handler allowed to mutate
-// source state or install direct fake submission in accepted owner turns.
+// MarketRuntime owns stable source state, bot dispatch, and optional concrete fake submission and
+// private-retention owners. Its executor serializes every mutation and is destroyed before the
+// coordinator whose private owner it borrows; injected clocks must outlive the complete runtime.
 class MarketRuntime final : public SourceDiscontinuityHandler {
 public:
 
@@ -192,6 +233,21 @@ public:
                               FakeSubmissionRuntimeParams submission_params);
 
   // --------------------------------------------------------
+  // Install bounded M4 identity preparation before callback authority becomes reachable. Admitted
+  // private facts are retained for later reconciliation; this composition cannot acknowledge
+  // economic consumption. Installation consumes the bootstrap before callback/executor setup,
+  // so a failure after installation releases that incarnation and requires a fresh bootstrap.
+  [[nodiscard]] static model::Result<std::unique_ptr<MarketRuntime>>
+  create_with_fake_private_identity_retention(configuration::StartupConfiguration configuration,
+                                              RuntimePolicy policy,
+                                              model::ClockProvider& executor_clock,
+                                              model::ClockProvider& callback_measurement_clock,
+                                              std::vector<BotStrategyRegistration> strategies,
+                                              FakeSubmissionRuntimeParams submission_params,
+                                              const M4Policy& m4_policy,
+                                              recovery::RecoveryBootstrap&& recovery_bootstrap);
+
+  // --------------------------------------------------------
   // Stop a dedicated owner, if present, before borrowed clocks and owned executor state disappear.
   ~MarketRuntime() override;
 
@@ -208,6 +264,26 @@ public:
   // attribution names a loss fence only when it resolves in the sealed runtime policy.
   [[nodiscard]] model::Result<AdmissionDecision>
   try_admit(market_data::IngressFrameAttempt attempt);
+
+  // --------------------------------------------------------
+  // Copy one trusted ordinary private attempt into its isolated reserve after source bootstrap.
+  // A rejected attempt remains the source's responsibility; successful copying is observable
+  // separately from the owner's eventual retained completion.
+  [[nodiscard]] model::Result<PrivateAdmissionDecision>
+  try_admit_private(const oms::PrivateOrderIngressAttempt& attempt);
+
+  // --------------------------------------------------------
+  // Interesting syntax: deleted rvalue overloads require the source to keep rejected facts alive.
+  [[nodiscard]] model::Result<PrivateAdmissionDecision>
+  try_admit_private(oms::PrivateOrderIngressAttempt&& attempt) = delete;
+  [[nodiscard]] model::Result<PrivateAdmissionDecision>
+  try_admit_private(const oms::PrivateOrderIngressAttempt&& attempt) = delete;
+
+  // --------------------------------------------------------
+  // Copy the executor's ordinary-lane observation for one attempted source fact; reconciliation
+  // completion remains behind its distinct internal oracle and cannot satisfy this query.
+  [[nodiscard]] std::optional<PrivateAdmissionObservation>
+  private_admission_observation(model::AdmissionOrdinal attempt_ordinal) const;
 
   // --------------------------------------------------------
   // Admit one explicit owner-local continuity reset without fabricating recorded-frame identity.
@@ -315,7 +391,9 @@ private:
                                     RuntimePolicy policy, model::ClockProvider& executor_clock,
                                     model::ClockProvider& callback_measurement_clock,
                                     std::vector<BotStrategyRegistration> strategies,
-                                    std::optional<FakeSubmissionRuntimeParams> submission_params);
+                                    std::optional<FakeSubmissionRuntimeParams> submission_params,
+                                    const M4Policy* m4_policy = nullptr,
+                                    recovery::RecoveryBootstrap* recovery_bootstrap = nullptr);
 
   // --------------------------------------------------------
   // Copy the complete optional submission owner only after the enclosing runtime is quiescent.

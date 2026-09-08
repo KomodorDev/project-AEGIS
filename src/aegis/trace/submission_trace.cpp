@@ -1,5 +1,5 @@
-// Purpose: validate exact M3 submission evidence shapes and causal sequences, then encode the
-// accepted bounded prefix as portable positional AEGISSTS schema-one bytes.
+// Purpose: validate M3 submission evidence and M4 account-safety rejection sequences, then encode
+// the accepted bounded prefix as portable positional AEGISSTS schema-one bytes.
 
 #include "aegis/trace/submission_trace.hpp"
 
@@ -300,6 +300,8 @@ private:
   switch (result.reason) {
   case execution::SubmissionReason::RiskArithmeticFailure:
   case execution::SubmissionReason::ReservationCapacityExceeded:
+  case execution::SubmissionReason::AccountReconciliationRequired:
+  case execution::SubmissionReason::AccountQuarantined:
     return !evidence.has_value();
   case execution::SubmissionReason::SingleOrderQuantityExceeded:
   case execution::SubmissionReason::WorstCasePositionQuantityExceeded:

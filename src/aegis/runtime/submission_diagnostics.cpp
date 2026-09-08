@@ -1,5 +1,5 @@
-// Purpose: validate M3 submission diagnostic profiles and preserve their bounded owner-local
-// prefix with explicit saturating loss accounting.
+// Purpose: validate submission diagnostics including M4 account-safety reasons and preserve their
+// bounded owner-local prefix with explicit saturating loss accounting.
 
 #include "aegis/runtime/submission_diagnostics.hpp"
 
@@ -88,6 +88,8 @@ using model::DomainErrorCode;
   case execution::SubmissionReason::WorstCasePositionQuantityExceeded:
   case execution::SubmissionReason::WorstCasePositionNotionalExceeded:
   case execution::SubmissionReason::ReservationCapacityExceeded:
+  case execution::SubmissionReason::AccountReconciliationRequired:
+  case execution::SubmissionReason::AccountQuarantined:
   case execution::SubmissionReason::DuplicateOrderIdentity:
   case execution::SubmissionReason::OmsCapacityExceeded:
   case execution::SubmissionReason::EncodingFailed:

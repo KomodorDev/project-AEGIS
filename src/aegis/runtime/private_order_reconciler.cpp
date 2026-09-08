@@ -1,5 +1,5 @@
-// Purpose: validate one submission-owner/M4-policy/recovery relationship, preallocate empty
-// identity storage, and derive detached first-seen plans without mutation.
+// Purpose: validate one submission-owner/M4-policy/recovery relationship, preallocate canonical
+// and preparation storage, and derive detached first-seen plans without canonical mutation.
 
 #include "private_order_reconciler.hpp"
 
@@ -209,8 +209,8 @@ PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Materialize every slot as empty local state; this boundary provides no operation that can
-  // populate an event, trade, or mapping record.
+  // Materialize empty canonical slots; the independently allocated retention state owns pending
+  // preparations without populating these event, trade, or active mapping records.
   auto event_identity_records = std::vector<std::optional<PrivateEventIdentityRecord>>(
       static_cast<std::size_t>(capacities.max_event_identity_records));
   auto trade_identity_records = std::vector<std::optional<PrivateTradeIdentityRecord>>(
@@ -241,7 +241,7 @@ PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
       owner, std::move(owned_m4_policy), recovery_lineage_id, runtime_epoch_id,
       registered_order_namespace, std::move(event_factory), std::move(event_identity_records),
       std::move(trade_identity_records), std::move(exchange_order_mappings),
-      std::move(recovery_identity_lease)}};
+      std::move(recovery_identity_lease), configuration}};
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Wrap the fully allocated child before consuming either bootstrap authority. The returned
@@ -486,8 +486,8 @@ PrivateOrderReconciler::derive_first_seen_authoritative_identity_plan(
 }
 
 // --------------------------------------------------------
-// Retain the stable owner, recovery identities, empty tables, and live lease; unique ownership
-// destroys the lease-bearing child before the coordinator or any inspected M3 component.
+// Retain the stable owner, recovery identities, empty canonical tables, and live lease, then
+// allocate preparation and containment storage before bootstrap authority can be consumed.
 PrivateOrderReconciler::PrivateOrderReconciler(
     const SubmissionCoordinator& owner, M4Policy m4_policy,
     recovery::RecoveryLineageId recovery_lineage_id, recovery::RuntimeEpochId runtime_epoch_id,
@@ -495,14 +495,15 @@ PrivateOrderReconciler::PrivateOrderReconciler(
     std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
     std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
     std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
-    std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease) noexcept
+    std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease,
+    const configuration::StartupConfiguration& configuration)
     : owner_{&owner}, m4_policy_{std::move(m4_policy)}, recovery_lineage_id_{recovery_lineage_id},
       runtime_epoch_id_{runtime_epoch_id}, registered_order_namespace_{registered_order_namespace},
       event_factory_{std::move(event_factory)},
       event_identity_records_{std::move(event_identity_records)},
       trade_identity_records_{std::move(trade_identity_records)},
       exchange_order_mappings_{std::move(exchange_order_mappings)},
-      recovery_lease_{std::move(recovery_lease)} {
+      recovery_lease_{std::move(recovery_lease)}, retention_{configuration, m4_policy_} {
   if (!recovery_lease_) {
     std::terminate();
   }

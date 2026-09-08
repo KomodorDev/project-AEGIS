@@ -9,8 +9,9 @@ adds a bounded serialized owner, recorded fixture playback, transactional market
 Ready-only strategy dispatch. M3 adds route authorization, exact fixed risk, outbound OMS
 admission, exact fake encoding, and an in-memory fake write-initiation boundary. The integrated M4
 foundation adds bounded private-order identities and events, deterministic first-seen correlation,
-owner-bound reconciliation planning, fake recovery authority, and typed semantic evidence. The
-reference slice remains deliberately narrow: one Deribit testnet account alias, one BTC inverse
+transactional identity preparation, a concrete private-retention owner, fake recovery namespace
+authority, and typed semantic evidence. The reference slice remains deliberately narrow: one Deribit
+testnet account alias, one BTC inverse
 perpetual, one active subscribed bot, and no exchange connectivity.
 
 M3's canonical order, fixed startup risk, outbound OMS, and conservative fake-initiation contracts
@@ -104,15 +105,23 @@ durable external journal.
   succeed before private or recovery authority can be installed.
 - Receive-time-free normalized private-order events and immutable first-admission resolutions whose
   correlation-independent fields can be compared without losing the original event identity.
-- Owner-local first-seen correlation planning and a dormant private-event reconciler boundary that
-  cannot accept events before its authority and empty identity tables are installed.
+- Owner-local first-seen correlation and atomic bounded preparation of event/trade comparisons and
+  provisional mapping candidates. Repeated event keys preserve their first resolution; candidates
+  cannot establish order ownership, and canonical identity/mapping tables remain empty.
+- An opt-in `MarketRuntime` composition with a concrete private-admission owner, separate ordinary
+  and reconciliation reserves, complete admitted-fact retention, and account/global safety gates.
+  Its private completion is always `RetainedForReconciliation`; it cannot acknowledge economic
+  consumption. Exhausted retained-fact capacity preserves one final fact and stops the executor.
 - A bounded deterministic fake recovery medium that acknowledges namespace publication before the
   runtime exposes recovery-backed identity authority.
 - Typed M4 semantic evidence and audit-span relationships that remain storage-free until a later
   accepted canonical byte schema and durable implementation are added.
 
-This foundation does not claim completion of the full M4 inventory, reservation-conversion,
-reconciliation, crash-matrix, or exit-evidence gate.
+The [current M4 implementation boundary](docs/implementation-roadmap.md#current-implementation-boundary)
+explains why canonical identity publication still requires the joint business journal, OMS,
+reservation/inventory, and callback work. None of M4's seven exit conditions is fully proven end to
+end. Full lifecycle application, inventory, reservation conversion, authoritative reconciliation,
+business recovery, ADR-0014 evidence bytes, the crash matrix, and final exit evidence remain open.
 
 ## Quick start
 

@@ -760,9 +760,15 @@ private:
   std::optional<PrivateAdmissionObservation> invalid_reconciliation_completion_observation_;
   std::shared_ptr<PrivateAdmissionLease> private_admission_lease_;
 
+  // ########################################################################
+  // Drivers and tokens validate their owner state; the concrete private consumer may additionally
+  // compare the installed consumer pointer after a token proves the live owner call stack.
   friend class DedicatedExecutorDriver;
   friend class AdmittedPrivateOrderSlot;
   friend class AdmittedReconciliationEventSlot;
+  friend class PrivateOrderReconciler;
+
+  // ########################################################################
 };
 
 // ########################################################################

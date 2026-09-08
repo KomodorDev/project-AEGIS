@@ -28,6 +28,18 @@ M4 therefore needs an honest safe-convergence contract, explicit asynchronous cr
 closed deterministic fakes that prove the protocol without pretending to provide disk, process,
 machine, or power-loss durability.
 
+## Current implementation boundary
+
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) installs the
+production private-retention owner from an acknowledged namespace bootstrap before bot callback
+authority becomes available. Its lease keeps the namespace-only fake medium unavailable for cold
+inspection until the runtime is destroyed. Private facts, comparison preparations, and safety
+causes retained by that owner are volatile and are not published or acknowledged business journal
+records. The medium still contains only namespace registrations. Business journal records,
+snapshots, replay, authoritative reconciliation, live catch-up, recovered-owner publication,
+`SubmitReferenceIntent`, and the 55-point crash matrix remain unimplemented. The accepted recovery
+and durability requirements below are unchanged, and this composition proves no recovery exit gate.
+
 ## Decision
 
 The following subsections define the accepted recovery authority, journal/snapshot ordering, replay

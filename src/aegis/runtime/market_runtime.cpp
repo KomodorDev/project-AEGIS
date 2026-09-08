@@ -1,10 +1,11 @@
 // Purpose: compose bounded recorded ingress, transactional market state, canonical strategy
-// dispatch, and optional direct fake submission on the deterministic or dedicated serialized owner.
+// dispatch, and optional fake submission/private retention on either serialized executor driver.
 
 #include "aegis/runtime/market_runtime.hpp"
 
 #include "aegis/market_data/market_state_machine.hpp"
 #include "aegis/model/domain_error.hpp"
+#include "private_order_reconciler.hpp"
 #include "submission_coordinator.hpp"
 
 #include <algorithm>
@@ -243,12 +244,28 @@ model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_with_fake_su
 }
 
 // --------------------------------------------------------
+// Opt into recovery-bound private preparation without publishing an economic-consumption claim.
+model::Result<std::unique_ptr<MarketRuntime>>
+MarketRuntime::create_with_fake_private_identity_retention(
+    configuration::StartupConfiguration configuration, RuntimePolicy policy,
+    model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
+    std::vector<BotStrategyRegistration> strategies, FakeSubmissionRuntimeParams submission_params,
+    const M4Policy& m4_policy, recovery::RecoveryBootstrap&& recovery_bootstrap) {
+  return create_market_runtime_composition(
+      std::move(configuration), std::move(policy), executor_clock, callback_measurement_clock,
+      std::move(strategies),
+      std::optional<FakeSubmissionRuntimeParams>{std::move(submission_params)}, &m4_policy,
+      &recovery_bootstrap);
+}
+
+// --------------------------------------------------------
 // Validate the complete composition, preallocate owner state, and enqueue only the first bootstrap.
 model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_market_runtime_composition(
     configuration::StartupConfiguration configuration, RuntimePolicy policy,
     model::ClockProvider& executor_clock, model::ClockProvider& callback_measurement_clock,
     std::vector<BotStrategyRegistration> strategies,
-    std::optional<FakeSubmissionRuntimeParams> submission_params) {
+    std::optional<FakeSubmissionRuntimeParams> submission_params, const M4Policy* m4_policy,
+    recovery::RecoveryBootstrap* recovery_bootstrap) {
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject mixed startup and runtime provenance before constructing any mutable subsystem.
@@ -260,6 +277,23 @@ model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_market_runti
       static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
     return create_market_runtime_failure_result<std::unique_ptr<MarketRuntime>>(
         DomainErrorCode::InvalidRuntimePolicy, "market_runtime.source_capacity");
+  }
+  if ((m4_policy == nullptr) != (recovery_bootstrap == nullptr) ||
+      (m4_policy != nullptr && !submission_params)) {
+    return create_market_runtime_failure_result<std::unique_ptr<MarketRuntime>>(
+        DomainErrorCode::InvalidM4Policy, "market_runtime.private_identity_composition");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Validate private lane capacities while the caller's acknowledged bootstrap remains intact.
+  std::optional<PrivateAdmissionConfiguration> private_configuration;
+  if (m4_policy != nullptr) {
+    auto created = PrivateAdmissionConfiguration::create_private_admission_configuration(
+        configuration, *m4_policy);
+    if (!created) {
+      return model::Result<std::unique_ptr<MarketRuntime>>::create_failure(created.error());
+    }
+    private_configuration.emplace(std::move(created).value());
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
@@ -297,6 +331,25 @@ model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_market_runti
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Prepare transfer slots before consuming recovery authority; extra slots permit a producer to
+  // reuse released storage while the active command retains its detached immutable input.
+  const auto ingress_capacity =
+      static_cast<std::size_t>(runtime->policy_.limits().ingress_capacity);
+  runtime->frame_slots_.resize(ingress_capacity + 2U);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Install the private owner only after ordinary source preparations and before BotRuntime closes
+  // the recovery installation seam. The executor later borrows this nonmoving coordinator child.
+  if (m4_policy != nullptr) {
+    auto installed =
+        runtime->submission_coordinator_->install_recovery_bound_private_order_reconciler(
+            runtime->configuration_, *m4_policy, std::move(*recovery_bootstrap));
+    if (!installed) {
+      return model::Result<std::unique_ptr<MarketRuntime>>::create_failure(installed.error());
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Seal exact strategy coverage before creating the executor that can make callbacks reachable.
   auto bots = BotRuntime::create_bot_runtime(
       runtime->configuration_, runtime->policy_, callback_measurement_clock, runtime->trace_sink_,
@@ -307,14 +360,19 @@ model::Result<std::unique_ptr<MarketRuntime>> MarketRuntime::create_market_runti
   runtime->bot_runtime_ = std::make_unique<BotRuntime>(std::move(bots).value());
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Preallocate more transfer slots than pending commands so an active owner can release and a
-  // producer can reuse a slot without aliasing the consumed command.
-  const auto ingress_capacity =
-      static_cast<std::size_t>(runtime->policy_.limits().ingress_capacity);
-  runtime->frame_slots_.resize(ingress_capacity + 2U);
-  runtime->executor_ = std::make_unique<SerializedExecutor>(
-      ingress_capacity, runtime->policy_.source_capacity(), executor_clock, *runtime,
-      static_cast<std::size_t>(runtime->policy_.limits().maximum_drive_turns));
+  // Borrow the installed owner only after callback composition validates; reverse destruction
+  // releases the executor and every callback context before the owning coordinator disappears.
+  if (private_configuration) {
+    runtime->executor_ = std::make_unique<SerializedExecutor>(
+        ingress_capacity, runtime->policy_.source_capacity(), executor_clock, *runtime,
+        std::move(*private_configuration),
+        *runtime->submission_coordinator_->private_admission_owner(),
+        static_cast<std::size_t>(runtime->policy_.limits().maximum_drive_turns));
+  } else {
+    runtime->executor_ = std::make_unique<SerializedExecutor>(
+        ingress_capacity, runtime->policy_.source_capacity(), executor_clock, *runtime,
+        static_cast<std::size_t>(runtime->policy_.limits().maximum_drive_turns));
+  }
   runtime->deterministic_driver_ =
       std::make_unique<DeterministicExecutorDriver>(*runtime->executor_);
 
@@ -396,6 +454,39 @@ MarketRuntime::try_admit(market_data::IngressFrameAttempt attempt) {
   return decision;
 
   // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Preserve source ownership until the executor copies one fact and track nominal admission faults.
+model::Result<PrivateAdmissionDecision>
+MarketRuntime::try_admit_private(const oms::PrivateOrderIngressAttempt& attempt) {
+  std::lock_guard lock{ingress_mutex_};
+  if (lifecycle_ == MarketRuntimeLifecycle::Starting) {
+    return create_market_runtime_failure_result<PrivateAdmissionDecision>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.starting");
+  }
+  if (!submission_coordinator_ || submission_coordinator_->private_order_reconciler() == nullptr) {
+    return create_market_runtime_failure_result<PrivateAdmissionDecision>(
+        DomainErrorCode::ExecutionNotPermitted, "market_runtime.private_identity_composition");
+  }
+  auto decision = executor_->try_admit_private(attempt);
+  if (!decision) {
+    if (auto terminal = executor_->terminal_error()) {
+      if (!fault_) {
+        fault_.emplace(std::move(*terminal));
+      }
+      lifecycle_ = MarketRuntimeLifecycle::Faulted;
+    }
+  }
+  return decision;
+}
+
+// --------------------------------------------------------
+// Delegate ordinary copied/retained observation to the executor's synchronized lane-specific
+// oracle.
+std::optional<PrivateAdmissionObservation>
+MarketRuntime::private_admission_observation(model::AdmissionOrdinal attempt_ordinal) const {
+  return executor_->private_admission_observation(attempt_ordinal);
 }
 
 // --------------------------------------------------------
@@ -743,10 +834,16 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::collect_quiescent_evidence()
   std::lock_guard ingress_lock{ingress_mutex_};
   const auto executor_state = executor_->queue_snapshot();
   const bool suppresses_pending_prefix = executor_state.faulted;
+  const auto& private_lane = executor_state.private_lane;
   if ((!executor_state.closed && !suppresses_pending_prefix) || executor_state.owner_bound ||
       executor_state.turn_active || executor_state.in_flight_fences != 0U ||
+      private_lane.in_flight_slots != 0U || private_lane.reconciliation_in_flight_slots != 0U ||
+      private_lane.in_flight_account_fences != 0U || private_lane.global_fence_in_flight ||
       (!suppresses_pending_prefix &&
-       (executor_state.pending_commands != 0U || executor_state.pending_fences != 0U))) {
+       (executor_state.pending_commands != 0U || executor_state.pending_fences != 0U ||
+        private_lane.queued_slots != 0U || private_lane.reconciliation_queued_slots != 0U ||
+        private_lane.pending_account_fences != 0U ||
+        (private_lane.global_fence_active && !private_lane.global_fence_owner_applied)))) {
     return create_market_runtime_failure_result<MarketRuntimeEvidence>(
         DomainErrorCode::ExecutionNotPermitted, "market_runtime.evidence_quiescence");
   }
@@ -807,12 +904,32 @@ model::Result<MarketRuntimeEvidence> MarketRuntime::collect_quiescent_evidence()
     submission.emplace(std::move(copied).value());
   }
 
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Copy fixed registry observations only after the shared owner and every unsuppressed lane stop.
+  std::optional<PrivateIdentityRetentionRuntimeEvidence> private_identity_retention;
+  if (submission_coordinator_) {
+    const auto* const reconciler = submission_coordinator_->private_order_reconciler();
+    if (reconciler != nullptr) {
+      private_identity_retention.emplace(PrivateIdentityRetentionRuntimeEvidence{
+          reconciler->m4_policy().fingerprint(), reconciler->recovery_lineage_id(),
+          reconciler->runtime_epoch_id(), reconciler->registered_order_namespace(),
+          reconciler->event_identity_record_capacity(), reconciler->event_identity_record_count(),
+          reconciler->trade_identity_record_capacity(), reconciler->trade_identity_record_count(),
+          reconciler->exchange_order_mapping_capacity(), reconciler->exchange_order_mapping_count(),
+          reconciler->identity_preparations().event_record_count(),
+          reconciler->identity_preparations().trade_record_count(),
+          reconciler->identity_preparations().mapping_candidate_count(),
+          reconciler->retained_identity_turn_count()});
+    }
+  }
+
   return model::Result<MarketRuntimeEvidence>::create_success(MarketRuntimeEvidence{
       configuration_.fingerprint(), policy_.fingerprint(), std::move(trace_records),
       std::move(canonical_bytes).value(), std::move(canonical_digest).value(),
       std::move(diagnostic_records), diagnostics_.dropped_count(), std::move(sources),
       executor_state, published_last_dispatch_, std::move(reported_fault),
-      newer_report(last_completed_turn_, dedicated_report), std::move(submission)});
+      newer_report(last_completed_turn_, dedicated_report), std::move(submission),
+      std::move(private_identity_retention)});
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

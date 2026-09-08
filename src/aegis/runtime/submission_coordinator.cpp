@@ -1,5 +1,5 @@
-// Purpose: construct the credential-free M3 submission stack, recovery-bind one read-only M4
-// planning child while pristine, and preserve the unchanged synchronous path and bounded evidence.
+// Purpose: construct the credential-free M3 submission stack, recovery-bind one M4 private owner
+// while pristine, and reject unsafe accounts before synchronous risk reservation.
 
 #include "submission_coordinator.hpp"
 
@@ -336,8 +336,14 @@ SubmissionCoordinator::SubmissionCoordinator(
                    policy_.capacities().submission_diagnostic_capacity} {}
 
 // --------------------------------------------------------
-// Destroy the last-declared planning child before the M3 components it may inspect unwind.
+// Destroy the last-declared private owner before the M3 components it may inspect unwind.
 SubmissionCoordinator::~SubmissionCoordinator() = default;
+
+// --------------------------------------------------------
+// Expose only the token-gated admission interface while retaining ownership at this stable address.
+PrivateAdmissionOwner* SubmissionCoordinator::private_admission_owner() noexcept {
+  return private_order_reconciler_.get();
+}
 
 // --------------------------------------------------------
 // Consume one sealed recovery bootstrap only after the pristine coordinator and every child
@@ -348,7 +354,7 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Reject callback attachment, reinstallation, and every prior, active, faulted, evidenced, or
-  // instrumented M3 state before inspecting authority or allocating the planning child.
+  // instrumented M3 state before inspecting authority or allocating the private owner.
   if (recovery_installation_closed_ || private_order_reconciler_ || submit_active_ ||
       attempts_consumed_ != 0U || reentry_traced_ || runtime_faulted_ ||
       terminal_error_.has_value() || active_trace_context_.has_value() ||
@@ -690,6 +696,9 @@ SubmitResult SubmissionCoordinator::fail_internal(
     }
 
     if (unknown_state_established) {
+      if (private_order_reconciler_) {
+        private_order_reconciler_->record_submission_uncertainty(*retained_order);
+      }
       fields.oms_state = oms::OutboundOrderState::SubmissionUnknown;
       fields.release_transition = trace::SubmissionReleaseTransition::Retained;
       fields.final_result.reset();
@@ -913,6 +922,27 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve route, canonical validation, and fresh-identity precedence while blocking every route
+  // sharing an unsafe account before reservation arithmetic or any outbound side effect.
+  if (private_order_reconciler_) {
+    const auto globally_blocked =
+        private_order_reconciler_->is_private_consumption_globally_blocked();
+    const auto account_state =
+        private_order_reconciler_->account_safety_state(installed.route().logical_account_id);
+    if (globally_blocked || account_state != risk::AccountSafetyState::Synchronized) {
+      const auto reason =
+          !globally_blocked && account_state == risk::AccountSafetyState::ReconciliationRequired
+              ? SubmissionReason::AccountReconciliationRequired
+              : SubmissionReason::AccountQuarantined;
+      if (!append_trace(trace::SubmissionTraceEventKind::RiskRejected, fields)) {
+        return fail_internal(fields, nullptr, fields.order_id, binding, entry_started, true);
+      }
+      return complete_rejection(fields, SubmissionStage::Risk, reason, fields.order_id,
+                                std::nullopt, binding, entry_started);
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Compute, check, and atomically reserve every fixed scope or record the first exact risk limit.
   const auto risk_decision = ledger_.check_and_reserve(attempt_id.value(), installed, economics);
   if (!risk_decision.is_reserved()) {
@@ -1068,6 +1098,9 @@ SubmissionCoordinator::submit_order(const CallbackBinding& binding, const OrderR
       latch_runtime_fault(std::move(marked).error());
       return fail_internal(fields, &rollback, fields.order_id, binding, entry_started, false,
                            &initiation_finished);
+    }
+    if (private_order_reconciler_) {
+      private_order_reconciler_->record_submission_uncertainty(*record);
     }
     fields.oms_state = oms::OutboundOrderState::SubmissionUnknown;
     fields.release_transition = trace::SubmissionReleaseTransition::Retained;

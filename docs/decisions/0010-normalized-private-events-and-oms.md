@@ -28,6 +28,18 @@ identities, and make every accepted economic transition idempotent.
 M4 remains venue-neutral and credential-free. It does not select a Deribit private protocol,
 authenticated account mapping, venue-native order ID encoding, or live cancellation primitive.
 
+## Current implementation boundary
+
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) installs a
+concrete owner that retains private facts and transactionally prepares event/trade comparisons and
+mapping candidates. Repeated event keys reuse the first immutable resolution before correlation;
+candidate mappings never authorize another event's ownership. Canonical event/trade registries and
+exchange mappings remain empty because the joint journal, lifecycle, economics, audit, and callback
+commit specified below is incomplete. Preparation classifications are internal observations, not
+`PrivateEventDisposition` values: even an exact repeat remains `RetainedForReconciliation` until the
+complete business reducer exists. This staging boundary does not implement lifecycle transitions,
+fill-gap application, or order-event callbacks, and changes none of their accepted requirements.
+
 ## Decision
 
 The following subsections define the accepted private-event vocabulary, correlation, lifecycle,
