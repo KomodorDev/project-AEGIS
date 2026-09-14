@@ -47,7 +47,8 @@ bounded side-table changes. It does not deduplicate or consume an event/trade, a
 mapping, or mutate live ownership. Its proposed execution/mapping caches describe only the state a
 future complete canonical commit would publish; canonical cache truth still requires the registry
 evidence defined below. Account/source fan-out and complete-negative reconciliation are outside this
-per-order planner.
+per-order planner. A trusted initial-row wrapper obtains correlation and the genuine M3 snapshot
+from the private owner, but repeated queries do not advance that row.
 
 ## Decision
 

@@ -118,7 +118,8 @@ durable external journal.
   awaits the complete business transaction before applying these economic plans.
 - A source-private known-order lifecycle planner for acknowledgements, rejections, fill gaps and
   drains, cancellation history, local failures, and timeouts. It returns detached state and economic
-  proposals without applying a private event or advancing a live order.
+  proposals. An owner-bound query can plan against a genuine initial M3 row; neither interface
+  applies a private event or advances a live order.
 - A bounded deterministic fake recovery medium that acknowledges namespace publication before the
   runtime exposes recovery-backed identity authority.
 - Typed M4 semantic evidence and audit-span relationships that remain storage-free until a later

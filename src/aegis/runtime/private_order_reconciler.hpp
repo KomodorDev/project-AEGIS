@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "../oms/private_oms_transition.hpp"
 #include "aegis/configuration/startup_configuration.hpp"
 #include "aegis/model/order_id.hpp"
 #include "aegis/model/result.hpp"
@@ -404,6 +405,15 @@ public:
   [[nodiscard]] model::Result<FirstSeenAuthoritativePrivateIdentityPlan>
   derive_first_seen_authoritative_identity_plan(
       const oms::PrivateEventIngressSemanticValue& ingress_semantic_value) const;
+
+  // --------------------------------------------------------
+  // Derive a detached authoritative lifecycle proposal from this owner's genuine M3 row and empty
+  // canonical side tables. Unknown/conflicting correlation returns PrivateCorrelationFailed.
+  // No proposed state becomes live, and no dedupe, callback, journal, or commit authority escapes.
+  // Reads require owner serialization or quiescence for the complete call.
+  [[nodiscard]] model::Result<oms::PrivateOmsTransitionPlan>
+  derive_initial_known_authoritative_oms_transition(
+      const oms::NormalizedPrivateOrderInput& input) const;
 
   // --------------------------------------------------------
 private:

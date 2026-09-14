@@ -84,6 +84,8 @@ add_executable(
   unit/runtime/reconciliation_private_event_admission_test.cpp
   # Reconciler tests pin exact owner binding, empty identity tables, and longitudinal submissions.
   unit/runtime/private_order_reconciler_test.cpp
+  # Genuine owner binding must not turn planning into canonical or economic mutation.
+  unit/runtime/private_oms_transition_owner_test.cpp
   # Preparation tests prove bounded all-or-none insertion without canonical publication.
   unit/runtime/private_identity_preparation_test.cpp
   # Retention tests pin concrete owner authority, runtime composition, and submission containment.

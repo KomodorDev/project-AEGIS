@@ -318,10 +318,13 @@ values confer no commit authority and do not publish canonical identity, cache, 
 records. Source-side conflicts and local/authoritative invalid transitions retain their distinct
 proposed classifications.
 
-Trusted source-private local normalizers require exact live OMS storage membership; equal detached
-records cannot mint local provenance. Independent transition matrices, cancel-race tables, and all
-120 arrival permutations of a five-fill model qualify proposals. These component tests do not
-complete the lifecycle Exit Gate.
+The existing private owner exposes an initial known-authoritative-order query that derives its
+snapshot from its own genuine M3 row and requires empty canonical identity tables and side tables.
+Repeated calls describe the same unchanged baseline. Trusted source-private local normalizers also
+require exact live OMS storage membership; equal detached records cannot mint local provenance.
+Independent transition matrices, cancel-race tables, and all 120 arrival permutations of a five-fill
+model qualify proposals, while owner tests prove live orders and economics remain unchanged. These
+component tests do not complete the lifecycle Exit Gate.
 
 The next joint reducer must validate OMS and economic plans against one unchanged owner before any
 mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
