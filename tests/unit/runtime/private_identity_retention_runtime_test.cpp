@@ -1,5 +1,5 @@
 // Purpose: prove opt-in MarketRuntime ownership, bounded private retention, bootstrap lease
-// lifetime, and detached evidence without claiming economic application or journal durability.
+// lifetime, bounded inventory installation, and detached evidence without economic application.
 
 #include "aegis/runtime/market_runtime.hpp"
 #include "m4_private_event_fixture.hpp"
@@ -228,6 +228,13 @@ TEST_CASE("private identity runtime installs bounded owner before callback autho
   CHECK(detached.prepared_trade_identity_record_count == 0U);
   CHECK(detached.prepared_exchange_order_mapping_candidate_count == 0U);
   CHECK(detached.retained_identity_turn_count == 0U);
+  CHECK(detached.inventory_source_row_capacity ==
+        authority.m4_policy.capacities().max_inventory_source_rows);
+  CHECK(detached.inventory_source_row_count == 0U);
+  CHECK(detached.inventory_aggregate_cell_capacity ==
+        authority.m4_policy.capacities().max_inventory_aggregate_cells);
+  CHECK(detached.inventory_aggregate_cell_count ==
+        authority.submission->reservations().scope_evidence_count());
   runtime.reset();
   REQUIRE(recovery.medium->registered_namespace_count());
   CHECK(recovery.medium->registered_namespace_count().value() == 1U);
@@ -296,6 +303,7 @@ TEST_CASE("private identity runtime retains admitted source facts behind quiesce
   CHECK(evidence.value()
             .private_identity_retention->prepared_exchange_order_mapping_candidate_count == 1U);
   CHECK(evidence.value().private_identity_retention->retained_identity_turn_count == 1U);
+  CHECK(evidence.value().private_identity_retention->inventory_source_row_count == 0U);
 }
 
 // --------------------------------------------------------

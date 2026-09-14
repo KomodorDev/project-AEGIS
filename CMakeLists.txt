@@ -83,12 +83,16 @@ add_library(
   src/aegis/organization/organization.cpp
   # Fixed risk seals complete scope limits, computes exact exposure, and atomically reserves/releases.
   src/aegis/risk/exposure.cpp
+  # Cumulative allocations conserve approved exposure independently of fill-message partitioning.
+  src/aegis/risk/reservation_conversion.cpp
+  # Confirmed inventory is the sole signed source read by joint economics and admission risk.
+  src/aegis/risk/inventory_ledger.cpp
   src/aegis/risk/reservation_ledger.cpp
   src/aegis/risk/risk_policy.cpp
   # Runtime policy seals all M2 capacities, freshness rules, and configured public-market sources.
   src/aegis/runtime/runtime_policy.cpp
   # M4 policy binds every private/recovery capacity to the unchanged M1-M3 authority chain; trusted
-  # runtime composition may install read-only owner-bound identity storage before any M3 activity.
+  # runtime composition installs bounded private and inventory owners before any M3 activity.
   src/aegis/runtime/m4_policy.cpp
   src/aegis/runtime/m4_provenance_resolver.cpp
   src/aegis/runtime/private_order_event_factory.cpp

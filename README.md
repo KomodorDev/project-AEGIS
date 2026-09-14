@@ -112,6 +112,10 @@ durable external journal.
   and reconciliation reserves, complete admitted-fact retention, and account/global safety gates.
   Its private completion is always `RetainedForReconciliation`; it cannot acknowledge economic
   consumption. Exhausted retained-fact capacity preserves one final fact and stops the executor.
+- A bounded known-order inventory component and transactional reservation conversion. Cumulative
+  allocation avoids fill-partition rounding drift; confirmed inventory survives reservation-slot
+  reuse, and all seven risk scopes read the same confirmed source. The private-retention path
+  awaits the complete business transaction before applying these economic plans.
 - A bounded deterministic fake recovery medium that acknowledges namespace publication before the
   runtime exposes recovery-backed identity authority.
 - Typed M4 semantic evidence and audit-span relationships that remain storage-free until a later
@@ -120,8 +124,9 @@ durable external journal.
 The [current M4 implementation boundary](docs/implementation-roadmap.md#current-implementation-boundary)
 explains why canonical identity publication still requires the joint business journal, OMS,
 reservation/inventory, and callback work. None of M4's seven exit conditions is fully proven end to
-end. Full lifecycle application, inventory, reservation conversion, authoritative reconciliation,
-business recovery, ADR-0014 evidence bytes, the crash matrix, and final exit evidence remain open.
+end. Full lifecycle application, integration of known-order economics, unknown inventory,
+authoritative reconciliation, business recovery, ADR-0014 evidence bytes, the crash matrix, and
+final exit evidence remain open.
 
 ## Quick start
 

@@ -83,8 +83,10 @@ enum class TraceAppendFaultPointForTest : std::uint8_t {
 // ########################################################################
 // SubmissionCoordinator owns every mutable M3 component and is the sole direct-path entry below
 // BotContext. Before any M3 activity or callback-capable BotRuntime exists, it may consume one
-// acknowledged recovery bootstrap into the active identity stream and one bounded M4 private owner,
-// which is destroyed first. Only that installed child's correctness state gates M4 submissions;
+// acknowledged recovery bootstrap into the active identity stream, a bounded M4 private owner,
+// and the reservation ledger's sole confirmed-inventory owner. The private child is destroyed
+// first; the reservation/inventory owner is destroyed before its borrowed OMS and route catalog.
+// Only that installed child's correctness state gates M4 submissions;
 // the source-private admission interface accepts executor-issued authority alone.
 class SubmissionCoordinator final {
 public:
@@ -110,11 +112,11 @@ public:
   ~SubmissionCoordinator();
 
   // --------------------------------------------------------
-  // Consume one namespace-acknowledged recovery bootstrap and install a fully allocated private
-  // owner only before callback authority attaches and while every M3 activity, evidence, fault,
-  // and test-probe field remains pristine. Any reported failure leaves both owner and bootstrap
-  // unchanged; success replaces the unused construction-time identity stream before publishing
-  // the private owner.
+  // Consume one namespace-acknowledged recovery bootstrap and install fully allocated private and
+  // inventory owners only before callback authority attaches and while every M3 activity, evidence,
+  // fault, and test-probe field remains pristine. Any reported failure leaves both owner and
+  // bootstrap unchanged; success replaces the unused construction-time identity stream before
+  // publishing the private owner.
   [[nodiscard]] model::Result<void> install_recovery_bound_private_order_reconciler(
       const configuration::StartupConfiguration& configuration, const M4Policy& policy,
       recovery::RecoveryBootstrap&& recovery_bootstrap);
@@ -369,9 +371,9 @@ private:
   // the lease declared before the identity stream outlives that provider during reverse-order
   // destruction, and all mutable fields remain source-private to the serialized submission path.
   execution::OwnerLocalRouteCatalog routes_;
-  risk::ReservationLedger ledger_;
   execution::SubmissionPolicy policy_;
   oms::OutboundOms outbound_oms_;
+  risk::ReservationLedger ledger_;
   execution::DeterministicFakeOrderEncoder encoder_;
   execution::DeterministicFakeWriteInitiator initiator_;
   std::unique_ptr<execution::SubmissionMeasurementClock> measurement_clock_;

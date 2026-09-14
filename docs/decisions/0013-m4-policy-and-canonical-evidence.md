@@ -37,6 +37,14 @@ below. Quiescent runtime evidence reports prepared and canonical counts separate
 not been created; no new canonical M4 evidence encoder, decoder, byte golden, or schema-version
 claim is introduced. The accepted `AEGISM4P` policy bytes and prior M1-M3 goldens remain unchanged.
 
+The known-order economics component additionally allocates exactly `max_inventory_source_rows`
+source slots and `max_inventory_aggregate_cells` aggregate slots. Complete canonical risk-policy
+keys determine the active aggregate prefix at construction. Sources retain complete local order
+attribution and the latest typed execution/audit linkage; they survive reservation closure and slot
+reuse. Joint replacement plans use fixed seven-scope scratch and retain no byte encoding or digest.
+This component's arithmetic and local commit qualification do not acknowledge a private input or
+complete its required journal/audit span.
+
 ## Decision
 
 The following subsections define the accepted M4 capacity policy, provenance, semantic evidence, and

@@ -1,5 +1,6 @@
 // Purpose: retain fixed-capacity outbound order identity, approved economics, provenance, and the
-// M3-to-M4 owner-local OMS projection without performing risk, encoding, or transport work.
+// M3-to-M4 owner-local OMS projection and storage identity without performing risk or transport
+// work.
 
 #pragma once
 
@@ -15,8 +16,19 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
+
+namespace aegis::risk {
+
+// ########################################################################
+// Joint economics may compare the bound OMS storage identity without receiving row mutation rights.
+class InventoryLedger;
+
+// ########################################################################
+
+} // namespace aegis::risk
 
 namespace aegis::oms {
 
@@ -370,6 +382,20 @@ private:
   std::vector<std::uint32_t> admission_order_;
 
   // --------------------------------------------------------
+
+  // ########################################################################
+  // One cold identity belongs to the complete slot storage. Borrowers retain it so destruction or
+  // allocator reuse cannot make replacement storage satisfy an earlier lifetime binding.
+  struct StorageIncarnation final {};
+
+  // ########################################################################
+  std::shared_ptr<const StorageIncarnation> storage_incarnation_;
+
+  // ########################################################################
+  // The source-private economics owner receives identity comparison only, never OMS mutation.
+  friend class risk::InventoryLedger;
+
+  // ########################################################################
 };
 
 // ########################################################################

@@ -1,8 +1,9 @@
-// Purpose: construct the credential-free M3 submission stack, recovery-bind one M4 private owner
+// Purpose: construct the credential-free submission stack, install M4 private and inventory owners
 // while pristine, and reject unsafe accounts before synchronous risk reservation.
 
 #include "submission_coordinator.hpp"
 
+#include "../risk/inventory_ledger.hpp"
 #include "aegis/execution/order_validation.hpp"
 #include "aegis/model/domain_error.hpp"
 #include "aegis/model/sha256.hpp"
@@ -327,10 +328,10 @@ SubmissionCoordinator::SubmissionCoordinator(
     std::unique_ptr<SubmissionMeasurementClock> measurement_clock,
     model::DeterministicOrderIdSource order_ids, trace::SubmissionTraceProvenance trace_provenance,
     SubmissionDiagnosticProvenance diagnostic_provenance)
-    : routes_{std::move(routes)}, ledger_{std::move(ledger)}, policy_{std::move(policy)},
-      outbound_oms_{std::move(outbound_oms)}, encoder_{std::move(encoder)},
-      initiator_{std::move(initiator)}, measurement_clock_{std::move(measurement_clock)},
-      order_ids_{std::move(order_ids)},
+    : routes_{std::move(routes)}, policy_{std::move(policy)},
+      outbound_oms_{std::move(outbound_oms)}, ledger_{std::move(ledger)},
+      encoder_{std::move(encoder)}, initiator_{std::move(initiator)},
+      measurement_clock_{std::move(measurement_clock)}, order_ids_{std::move(order_ids)},
       trace_sink_{std::move(trace_provenance), policy_.capacities().submission_trace_capacity},
       diagnostics_{std::move(diagnostic_provenance),
                    policy_.capacities().submission_diagnostic_capacity} {}
@@ -375,11 +376,16 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
   if (!prepared) {
     return model::Result<void>::create_failure(std::move(prepared).error());
   }
+  auto inventory = risk::InventoryLedger::install_on_pristine_reservations(ledger_, outbound_oms_,
+                                                                           routes_, policy);
+  if (!inventory) {
+    return model::Result<void>::create_failure(std::move(inventory).error());
+  }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Interesting syntax: the fully allocated child is extracted from its successful Result before
-  // bootstrap consumption; every operation after consumption is statically no-throw, so the
-  // acknowledged provider replaces the unused construction stream before the child becomes
+  // bootstrap consumption; every operation after inventory installation is statically no-throw, so
+  // the acknowledged provider replaces the unused construction stream before the child becomes
   // visible.
   using PreparedReconciler = PrivateOrderReconciler::PreparedRecoveryBoundPrivateOrderReconciler;
   using ConsumedAuthority = PrivateOrderReconciler::ConsumedRecoveryIdentityAuthority;

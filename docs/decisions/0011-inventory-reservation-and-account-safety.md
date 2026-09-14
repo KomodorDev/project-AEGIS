@@ -42,6 +42,21 @@ that account; an unattributable source activates the reasonless global block. Th
 keeps its existing behavior. These implemented gates do not complete the inventory or reconciliation
 requirements below.
 
+The independently qualified known-order economics component now implements the cumulative
+allocation formula, `ConsumedByFill`, exact closure causes, residual-only release, permanent signed
+inventory source rows, and joint seven-scope replacement plans. `InventoryLedger` is source-private
+and is the single mutable confirmed-position source read by `ReservationLedger`. It derives
+attribution from the exact bound OMS row and installed route catalog. Plan derivation changes no
+state; commit rejects foreign, stale, moved-from, or consumed plans before changing either ledger.
+All source and aggregate storage is preallocated from the installed M4 policy. Reservation slot
+reuse cannot discard an earlier order's confirmed source contribution.
+
+The opt-in M4 runtime installs this component together with its private owner before callback
+authority exists. The current retention reducer does not call the economics commit interface.
+Consequently these component tests prove arithmetic, capacity, and atomic owner-local behavior;
+they do not prove the joint OMS/journal/audit/callback transaction, authoritative reconciliation,
+unknown exposure, or crash recovery. The accepted decision below remains the end-to-end contract.
+
 ## Decision
 
 The following subsections define the accepted reservation conversion, signed inventory, unattributed

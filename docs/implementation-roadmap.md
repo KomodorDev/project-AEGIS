@@ -260,7 +260,9 @@ headroom. The current baseline integrates policy/identity, normalized ingress, s
 private and reconciliation admission lanes, owner-bound correlation, transactional identity
 preparations, a concrete private-admission owner, opt-in `MarketRuntime` composition, monotonic
 account/global containment, fake recovery namespace authority, provenance, audit spans, and typed
-semantic evidence. None of the seven M4 Exit Gate conditions below is fully proven end to end.
+semantic evidence. Known-order economics now has cumulative reservation conversion and a single
+bounded confirmed-inventory owner with joint seven-scope plans. None of the seven M4 Exit Gate
+conditions below is fully proven end to end.
 
 ### Current implementation boundary
 
@@ -294,12 +296,23 @@ does not apply an OMS transition, convert reservations, change inventory, or inv
 callback. Runtime evidence copies canonical and prepared counts separately after every unsuppressed
 lane and fence has become quiescent.
 
-Full OMS lifecycle application, fill-gap handling, inventory, reservation conversion, order-event
-callbacks, full authoritative reconciliation, the one-shot reference driver, business
-journal/snapshot/replay and catch-up, the 55-point crash matrix, and final exit evidence remain M4
-work. ADR-0014 still does not exist and must accept exact canonical M4 evidence bytes before an
-encoder or byte golden is implemented. Namespace-only fake recovery and retained preparations do
-not prove crash recovery or complete unknown/external-order containment.
+The installed inventory component owns confirmed source rows and canonical aggregate cells sized
+from the M4 policy. Its source-private planning interface borrows genuine retained OMS orders and
+installed metadata; it calculates complete reservation/inventory replacements without mutation.
+Only the original unchanged owner can commit a plan. Partial fills conservatively round the
+remaining contracts, full fills consume the reservation exactly once, and definitive releases remove
+only the remainder. Confirmed source rows survive reusable reservation slots. Risk admission,
+release, and observation all read that same confirmed-inventory owner; no independent confirmed
+copy exists in the reservation cells. Component tests apply these plans directly, while the
+production private-retention path continues to leave economics unchanged until the joint business
+commit exists. Quiescent runtime evidence reports the installed source and aggregate bounds.
+
+Full OMS lifecycle application, fill-gap handling, integration of known-order economics, unknown
+and unattributed inventory, order-event callbacks, full authoritative reconciliation, the one-shot
+reference driver, business journal/snapshot/replay and catch-up, the 55-point crash matrix, and final
+exit evidence remain M4 work. ADR-0014 still does not exist and must accept exact canonical M4
+evidence bytes before an encoder or byte golden is implemented. Namespace-only fake recovery and
+retained preparations do not prove crash recovery or complete unknown/external-order containment.
 
 ### Outcome
 
