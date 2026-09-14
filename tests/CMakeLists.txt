@@ -53,6 +53,10 @@ add_executable(
   unit/oms/private_order_event_test.cpp
   # Resolution tests pin stable outcomes, origin-tagged registry keys, and sealed construction.
   unit/oms/private_order_resolution_test.cpp
+  # Independent state partitions and interval oracles qualify detached lifecycle proposals.
+  unit/oms/private_oms_transition_test.cpp
+  unit/oms/private_oms_fill_plan_test.cpp
+  unit/oms/private_oms_cancel_plan_test.cpp
   # Recovery tests prove typed namespace publication and fake acknowledgement precede exposure of
   # sealed identity authority without inventing an ADR-0014 byte schema.
   unit/recovery/deterministic_fake_recovery_medium_test.cpp

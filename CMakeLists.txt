@@ -76,6 +76,8 @@ add_library(
   src/aegis/oms/outbound_oms.cpp
   src/aegis/oms/private_order_event.cpp
   src/aegis/oms/private_order_resolution.cpp
+  # Detached lifecycle proposals calculate bounded transitions without publishing live state.
+  src/aegis/oms/private_oms_transition.cpp
   # Recovery owns the bounded external-lifetime typed fake journal and acknowledged namespace
   # bootstrap; no canonical evidence bytes, filesystem, network, or native venue behavior exists.
   src/aegis/recovery/deterministic_fake_recovery_medium.cpp

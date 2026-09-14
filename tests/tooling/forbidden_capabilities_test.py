@@ -979,6 +979,40 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                     )
 
     # --------------------------------------------------------
+    # Detached lifecycle planning remains offline and on its caller's serialized owner turn.
+    def test_m4_transition_files_keep_direct_owner_restrictions(self) -> None:
+        """Require planner and qualification coverage and reject hidden execution handoffs."""
+
+        production = {
+            "include/aegis/oms/outbound_oms.hpp",
+            "src/aegis/oms/outbound_oms.cpp",
+            "src/aegis/oms/private_oms_transition.hpp",
+            "src/aegis/oms/private_oms_transition.cpp",
+        }
+        qualification = {
+            "tests/support/private_oms_transition_fixture.hpp",
+            "tests/unit/oms/private_oms_transition_test.cpp",
+            "tests/unit/oms/private_oms_fill_plan_test.cpp",
+            "tests/unit/oms/private_oms_cancel_plan_test.cpp",
+        }
+        self.assertTrue(production <= set(scanner.M4_OWNER_PATH_FILE_PATTERNS))
+        self.assertTrue(production | qualification <= set(scanner.M4_GENERAL_FILE_PATTERNS))
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            for path in sorted(production):
+                with self.subTest(path=path):
+                    source = self.write_repository_file(
+                        repository,
+                        path,
+                        "#include <future>\nvoid mutate() { SerializedExecutor executor; }\n",
+                    )
+                    findings = scanner.scan_repository_paths_or_raise(repository, [source])
+                    self.assertEqual(
+                        [finding.rule for finding in findings],
+                        ["forbidden include", "executor handoff"],
+                    )
+
+    # --------------------------------------------------------
     # The production retention owner may borrow only its exact existing executor identity;
     # adding a constructor or arbitrary parameter remains a forbidden owner handoff.
     def test_retention_owner_executor_exceptions_are_narrow(self) -> None:

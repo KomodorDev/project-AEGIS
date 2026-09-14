@@ -1,5 +1,5 @@
 // Purpose: validate receive-time-free private-order attempts, attach trusted source provenance,
-// privately add receipt observations, and mediate read-only retained-order provenance checks.
+// privately add receipt observations, and normalize local facts only from genuine retained orders.
 
 #include "private_order_event_factory.hpp"
 
@@ -75,6 +75,115 @@ is_exchange_rejection_category_assigned(oms::ExchangeRejectionCategory category)
 // --------------------------------------------------------
 
 } // namespace
+
+// --------------------------------------------------------
+// Establish exact table membership before consulting any supplied row field or enriching
+// provenance.
+model::Result<model::M4Provenance> PrivateOrderEventFactory::derive_owned_order_provenance(
+    const oms::OutboundOms& orders, const oms::OutboundOrderRecord& order) const {
+  if (!orders.has_retained_order_record(order)) {
+    return model::Result<model::M4Provenance>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidPrivateEvent, "private_order.local_owner"));
+  }
+  return resolver_.derive_retained_order_provenance(order);
+}
+
+// --------------------------------------------------------
+// Copy a local request's exact order/attempt binding after proving retained ownership. This value
+// alone cannot authorize a cancel, enter an executor lane, or make a new attempt eligible.
+model::Result<oms::NormalizedPrivateOrderInput>
+PrivateOrderEventFactory::normalize_order_cancel_request(
+    oms::LocalPrivateEventOrigin origin, const oms::OutboundOms& orders,
+    const oms::OutboundOrderRecord& order, oms::CancelAttemptId cancel_attempt_id) const {
+  auto provenance = derive_owned_order_provenance(orders, order);
+  if (!provenance) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        std::move(provenance).error());
+  }
+  if (cancel_attempt_id.order_id() != order.order_id()) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                            "private_order.cancel_attempt"));
+  }
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
+      oms::NormalizedPrivateOrderInput{
+          std::move(origin), oms::PrivateEventSubjectScope::Order,
+          order.provenance().logical_account_id, order.provenance().venue_id,
+          std::move(provenance).value(),
+          oms::CancelRequestedPayload{order.order_id(), std::move(cancel_attempt_id)}});
+}
+
+// --------------------------------------------------------
+// Preserve one assigned local write observation without selecting or closing retained cancel
+// history.
+model::Result<oms::NormalizedPrivateOrderInput>
+PrivateOrderEventFactory::normalize_order_cancel_write_outcome(
+    oms::LocalPrivateEventOrigin origin, const oms::OutboundOms& orders,
+    const oms::OutboundOrderRecord& order, oms::CancelAttemptId cancel_attempt_id,
+    oms::CancelWriteOutcome outcome) const {
+  auto provenance = derive_owned_order_provenance(orders, order);
+  if (!provenance) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        std::move(provenance).error());
+  }
+  if (cancel_attempt_id.order_id() != order.order_id() ||
+      outcome < oms::CancelWriteOutcome::DefiniteFailureBeforeAcceptance ||
+      outcome > oms::CancelWriteOutcome::AcceptedThenOutcomeLost) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                            "private_order.cancel_write"));
+  }
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
+      oms::NormalizedPrivateOrderInput{
+          std::move(origin), oms::PrivateEventSubjectScope::Order,
+          order.provenance().logical_account_id, order.provenance().venue_id,
+          std::move(provenance).value(),
+          oms::CancelWriteOutcomePayload{order.order_id(), std::move(cancel_attempt_id), outcome}});
+}
+
+// --------------------------------------------------------
+// Bind an assigned certainty observation to the immutable creating submission attempt; lifecycle
+// planning separately decides whether that observation is compatible with the retained M3 outcome.
+model::Result<oms::NormalizedPrivateOrderInput>
+PrivateOrderEventFactory::normalize_order_local_failure(
+    oms::LocalPrivateEventOrigin origin, const oms::OutboundOms& orders,
+    const oms::OutboundOrderRecord& order, oms::LocalFailureCertainty certainty) const {
+  auto provenance = derive_owned_order_provenance(orders, order);
+  if (!provenance) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        std::move(provenance).error());
+  }
+  if (certainty < oms::LocalFailureCertainty::ProvenBeforeAcceptance ||
+      certainty > oms::LocalFailureCertainty::AcceptanceCouldHaveOccurred) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateEvent,
+                                            "private_order.local_failure"));
+  }
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
+      oms::NormalizedPrivateOrderInput{
+          std::move(origin), oms::PrivateEventSubjectScope::Order,
+          order.provenance().logical_account_id, order.provenance().venue_id,
+          std::move(provenance).value(),
+          oms::LocalFailurePayload{order.order_id(), order.attempt_id(), certainty}});
+}
+
+// --------------------------------------------------------
+// Preserve one order-scoped lack-of-response observation without assigning terminal authority.
+model::Result<oms::NormalizedPrivateOrderInput>
+PrivateOrderEventFactory::normalize_order_timeout(oms::LocalPrivateEventOrigin origin,
+                                                  const oms::OutboundOms& orders,
+                                                  const oms::OutboundOrderRecord& order) const {
+  auto provenance = derive_owned_order_provenance(orders, order);
+  if (!provenance) {
+    return model::Result<oms::NormalizedPrivateOrderInput>::create_failure(
+        std::move(provenance).error());
+  }
+  return model::Result<oms::NormalizedPrivateOrderInput>::create_success(
+      oms::NormalizedPrivateOrderInput{std::move(origin), oms::PrivateEventSubjectScope::Order,
+                                       order.provenance().logical_account_id,
+                                       order.provenance().venue_id, std::move(provenance).value(),
+                                       oms::OrderTimeoutObservedPayload{order.order_id()}});
+}
 
 // --------------------------------------------------------
 // Return whether sealed configuration proves the exact logical-account and venue binding.

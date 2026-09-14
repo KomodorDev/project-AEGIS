@@ -45,6 +45,14 @@ reuse. Joint replacement plans use fixed seven-scope scratch and retain no byte 
 This component's arithmetic and local commit qualification do not acknowledge a private input or
 complete its required journal/audit span.
 
+The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
+against the installed policy and reports exact proposed effect/callback counts. Its result contains
+fixed value fields, at most one new gap or cancel-history replacement, and the count of the canonical
+pending prefix a future transaction would drain. It retains no caller spans or owner capability and
+allocates no growing business storage. These proposed classifications are internal planning values,
+not assigned `PrivateEventDisposition` values or new evidence schemas. The planner does not reserve
+or publish journal, audit, identity, inventory, or callback records.
+
 ## Decision
 
 The following subsections define the accepted M4 capacity policy, provenance, semantic evidence, and

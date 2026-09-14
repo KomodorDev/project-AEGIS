@@ -341,6 +341,12 @@ public:
   find_order(const model::OrderId& order_id) const noexcept;
 
   // --------------------------------------------------------
+  // Return whether this live table owns the exact record address, without reading the supplied
+  // record. Detached copies, foreign rows, and moved-from tables never establish ownership.
+  // The caller must serialize table access or hold the owner quiescent for this query.
+  [[nodiscard]] bool has_retained_order_record(const OutboundOrderRecord& record) const noexcept;
+
+  // --------------------------------------------------------
   // Borrow one retained row in canonical admission order; an out-of-range index returns null.
   [[nodiscard]] const OutboundOrderRecord* record_at(std::size_t admission_index) const noexcept;
 

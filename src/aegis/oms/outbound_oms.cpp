@@ -288,5 +288,19 @@ OutboundOms::mark_submission_unknown_after_internal_fault(const model::OrderId& 
 }
 
 // --------------------------------------------------------
+// Compare addresses only after proving this facade still owns its original live storage.
+bool OutboundOms::has_retained_order_record(const OutboundOrderRecord& record) const noexcept {
+  if (!storage_incarnation_) {
+    return false;
+  }
+  for (const auto slot_index : admission_order_) {
+    if (&slots_[slot_index].value() == &record) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// --------------------------------------------------------
 
 } // namespace aegis::oms
