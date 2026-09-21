@@ -87,6 +87,7 @@ add_executable(
   unit/runtime/private_order_reconciler_test.cpp
   # Genuine owner binding must not turn planning into canonical or economic mutation.
   unit/runtime/private_oms_transition_owner_test.cpp
+  unit/runtime/private_business_proposal_test.cpp
   # Preparation tests prove bounded all-or-none insertion without canonical publication.
   unit/runtime/private_identity_preparation_test.cpp
   # Retention tests pin concrete owner authority, runtime composition, and submission containment.

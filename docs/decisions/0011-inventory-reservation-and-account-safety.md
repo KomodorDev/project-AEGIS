@@ -56,7 +56,8 @@ cancellation of its final partial residual. It validates each cumulative prefix 
 replacements before returning one atomic final plan. Each prefix retains its actual execution and
 signed transfer; no fabricated combined execution replaces source provenance. Cold backing has one
 exclusive detached batch lease, transferred by moves and released by consumption or destruction.
-Legacy single-fill and release plans do not acquire that lease.
+Legacy single-fill and release plans do not acquire that lease. A source-private initial business
+query joins one genuine initial OMS proposal with these economics but exposes no commit interface.
 
 The opt-in M4 runtime installs this component together with its private owner before callback
 authority exists. The current retention reducer does not call the economics commit interface.

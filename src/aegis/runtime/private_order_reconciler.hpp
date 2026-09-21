@@ -12,6 +12,7 @@
 #include "aegis/oms/private_order_resolution.hpp"
 #include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 #include "aegis/runtime/m4_policy.hpp"
+#include "private_business_proposal.hpp"
 #include "private_identity_retention.hpp"
 #include "private_order_event_factory.hpp"
 
@@ -414,6 +415,18 @@ public:
   [[nodiscard]] model::Result<oms::PrivateOmsTransitionPlan>
   derive_initial_known_authoritative_oms_transition(
       const oms::NormalizedPrivateOrderInput& input) const;
+
+  // --------------------------------------------------------
+  // Join a genuine initial M3 open order's lifecycle and economic proposals with a prospective
+  // audit span. Requires coherent untouched held economics; unknown/conflicting correlation or
+  // inconsistent components fail before returning any proposal. Success changes no live business
+  // state or counters; an execution proposal leases fixed scratch until destruction; moves transfer
+  // the lease. The complete call requires owner serialization or quiescence, like the component
+  // planners.
+  [[nodiscard]] model::Result<InitialKnownPrivateBusinessProposal>
+  derive_initial_known_authoritative_business_proposal(
+      const oms::NormalizedPrivateOrderInput& input,
+      recovery::AuditOrdinal prospective_first_audit_ordinal) const;
 
   // --------------------------------------------------------
 private:

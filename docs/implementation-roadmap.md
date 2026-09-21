@@ -334,6 +334,14 @@ residual. One opaque plan commits the complete final economic replacement or cha
 Its cold scratch admits one outstanding batch lease; moving the plan transfers the lease, and
 consumption or destruction releases it. Legacy single-fill/release plans retain their prior behavior.
 
+An additional owner-bound initial business query joins genuine correlation, the initial OMS
+proposal, and its economic candidate. It requires coherent untouched M3 open-order economics and
+exposes only immutable inspection, with no transferable economic commit authority. Its prospective
+audit span contains one primary row plus two aggregate callback rows when callbacks are proposed;
+these ordinals and storage are not reserved. Ordinary and reconciliation admission completions remain
+`RetainedForReconciliation`. Batch tests qualify multi-fill economics independently; the genuine
+runtime query cannot yet drain live gaps or advance orders between calls.
+
 The next joint reducer must validate OMS and economic plans against one unchanged owner before any
 mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
 order. The existing economics commit deliberately rejects an OMS projection changed since planning;

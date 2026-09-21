@@ -51,7 +51,10 @@ immutable populated prefix; another batch fails while that lease remains alive. 
 the actual normalized execution, a checked consecutive prospective audit ordinal, before/after
 reservation values, signed transfer, and seven-scope candidate. The final replacement may also
 release a partial cancellation residual. These component values are not canonical primary audit
-records and do not contain per-execution OMS projections.
+records and do not contain per-execution OMS projections. The initial runtime business proposal
+reports exact primary/callback counts and checks prospective span overflow without consuming
+ordinals or reserving journal, identity, diagnostic, audit, or callback storage. Typed semantic
+journal/audit implementation may proceed before ADR-0014; canonical byte encodings may not.
 
 The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
 against the installed policy and reports exact proposed effect/callback counts. Its result contains
