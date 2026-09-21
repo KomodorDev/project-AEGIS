@@ -307,7 +307,31 @@ copy exists in the reservation cells. Component tests apply these plans directly
 production private-retention path continues to leave economics unchanged until the joint business
 commit exists. Quiescent runtime evidence reports the installed source and aggregate bounds.
 
-Full OMS lifecycle application, fill-gap handling, integration of known-order economics, unknown
+A source-private pure OMS planner now calculates the known-order transition partition from a
+complete detached snapshot, sealed route, M4 policy, and normalized input. Its proposal owns the
+before/after projection, economic action and residual-release cause, safety or local-rejection
+classification, bounded gap insertion or drained prefix, cancel-history replacement, and exact
+transition/callback counts. Pending intervals are checked in canonical order before a contiguous
+incoming execution can drain them; the final post-drain cumulative determines terminal state.
+Cancellation proposals preserve exact request, write-outcome, and causal-rejection history. These
+values confer no commit authority and do not publish canonical identity, cache, audit, or callback
+records. Source-side conflicts and local/authoritative invalid transitions retain their distinct
+proposed classifications.
+
+The existing private owner exposes an initial known-authoritative-order query that derives its
+snapshot from its own genuine M3 row and requires empty canonical identity tables and side tables.
+Repeated calls describe the same unchanged baseline. Trusted source-private local normalizers also
+require exact live OMS storage membership; equal detached records cannot mint local provenance.
+Independent transition matrices, cancel-race tables, and all 120 arrival permutations of a five-fill
+model qualify proposals, while owner tests prove live orders and economics remain unchanged. These
+component tests do not complete the lifecycle Exit Gate.
+
+The next joint reducer must validate OMS and economic plans against one unchanged owner before any
+mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
+order. The existing economics commit deliberately rejects an OMS projection changed since planning;
+calling separate OMS and economics commits in sequence is therefore not a joint transaction.
+
+Full OMS lifecycle application, live fill-gap storage, integration of known-order economics, unknown
 and unattributed inventory, order-event callbacks, full authoritative reconciliation, the one-shot
 reference driver, business journal/snapshot/replay and catch-up, the 55-point crash matrix, and final
 exit evidence remain M4 work. ADR-0014 still does not exist and must accept exact canonical M4

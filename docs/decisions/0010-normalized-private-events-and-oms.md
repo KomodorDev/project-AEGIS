@@ -37,8 +37,18 @@ candidate mappings never authorize another event's ownership. Canonical event/tr
 exchange mappings remain empty because the joint journal, lifecycle, economics, audit, and callback
 commit specified below is incomplete. Preparation classifications are internal observations, not
 `PrivateEventDisposition` values: even an exact repeat remains `RetainedForReconciliation` until the
-complete business reducer exists. This staging boundary does not implement lifecycle transitions,
-fill-gap application, or order-event callbacks, and changes none of their accepted requirements.
+complete business reducer exists. This staging boundary does not apply lifecycle transitions,
+fill gaps, or order-event callbacks, and changes none of their accepted requirements.
+
+A separate source-private pure planner calculates the known-order transition partition below from
+complete detached state, pending intervals, cancel history, sealed metadata, and installed capacity
+policy. It returns proposed state, economic intent, safety/local-rejection classification, and
+bounded side-table changes. It does not deduplicate or consume an event/trade, authorize an exchange
+mapping, or mutate live ownership. Its proposed execution/mapping caches describe only the state a
+future complete canonical commit would publish; canonical cache truth still requires the registry
+evidence defined below. Account/source fan-out and complete-negative reconciliation are outside this
+per-order planner. A trusted initial-row wrapper obtains correlation and the genuine M3 snapshot
+from the private owner, but repeated queries do not advance that row.
 
 ## Decision
 

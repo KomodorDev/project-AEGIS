@@ -1,5 +1,6 @@
 // Purpose: create receive-time-free M4 private-order attempts, privately attach receipt
-// observations, and mediate sealed provenance checks for one owner-bound read-only planner.
+// observations, and normalize local order facts from genuine retained rows without cancellation
+// or executor authority.
 
 #pragma once
 
@@ -7,6 +8,7 @@
 #include "aegis/model/identifier.hpp"
 #include "aegis/model/order_id.hpp"
 #include "aegis/model/result.hpp"
+#include "aegis/oms/outbound_oms.hpp"
 #include "aegis/oms/private_order_event.hpp"
 #include "m4_provenance_resolver.hpp"
 
@@ -24,6 +26,8 @@ class PrivateOrderReconciler;
 // ########################################################################
 // The factory derives provenance and closed scope from one validated resolver; its public inputs
 // contain only source/local facts and never accept caller-authored organizational attribution.
+// Local normalizers borrow mutable OMS storage read-only; callers must serialize that owner or
+// hold it quiescent throughout normalization. No borrowed row escapes in the normalized value.
 class PrivateOrderEventFactory final {
 public:
 
@@ -31,6 +35,37 @@ public:
   // Own one resolver so normalized source provenance never depends on a caller-managed lifetime.
   explicit PrivateOrderEventFactory(M4ProvenanceResolver resolver)
       : resolver_{std::move(resolver)} {}
+
+  // --------------------------------------------------------
+  // Normalize one local cancel-request fact from the exact retained row and matching attempt
+  // order. This grants no bot authorization, executor admission, or cancel eligibility.
+  [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput> normalize_order_cancel_request(
+      oms::LocalPrivateEventOrigin origin, const oms::OutboundOms& orders,
+      const oms::OutboundOrderRecord& order, oms::CancelAttemptId cancel_attempt_id) const;
+
+  // --------------------------------------------------------
+  // Normalize one assigned first-write observation for the exact order/attempt shape. Matching
+  // retained cancel history and lifecycle eligibility are checked by the later transition plan.
+  [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
+  normalize_order_cancel_write_outcome(oms::LocalPrivateEventOrigin origin,
+                                       const oms::OutboundOms& orders,
+                                       const oms::OutboundOrderRecord& order,
+                                       oms::CancelAttemptId cancel_attempt_id,
+                                       oms::CancelWriteOutcome outcome) const;
+
+  // --------------------------------------------------------
+  // Copy the retained order and submission identity into one assigned local-failure observation;
+  // normalization neither decides acceptance certainty nor changes the retained M3 state.
+  [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
+  normalize_order_local_failure(oms::LocalPrivateEventOrigin origin, const oms::OutboundOms& orders,
+                                const oms::OutboundOrderRecord& order,
+                                oms::LocalFailureCertainty certainty) const;
+
+  // --------------------------------------------------------
+  // Normalize an order-scoped timeout from genuine row authority without implying terminality.
+  [[nodiscard]] model::Result<oms::NormalizedPrivateOrderInput>
+  normalize_order_timeout(oms::LocalPrivateEventOrigin origin, const oms::OutboundOms& orders,
+                          const oms::OutboundOrderRecord& order) const;
 
   // --------------------------------------------------------
   // Create a receive-time-free attempt for one ordinary acknowledgement without inferring local
@@ -212,6 +247,13 @@ public:
 
   // --------------------------------------------------------
 private:
+
+  // --------------------------------------------------------
+  // Require exact table ownership before reading the row, then derive sealed known-order
+  // provenance; failure creates no authority and changes no row or source identity.
+  [[nodiscard]] model::Result<model::M4Provenance>
+  derive_owned_order_provenance(const oms::OutboundOms& orders,
+                                const oms::OutboundOrderRecord& order) const;
 
   // --------------------------------------------------------
   // Return whether sealed configuration proves the exact logical-account and venue binding.

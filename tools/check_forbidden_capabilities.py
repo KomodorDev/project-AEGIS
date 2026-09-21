@@ -145,6 +145,16 @@ M3_DIRECT_PATH_FILE_PATTERNS = (
 # M4 paths remain an explicit credential-free/offline manifest so later connectivity milestones
 # cannot silently make identity planning, OMS, inventory, recovery, tests, or evidence helpers live.
 M4_GENERAL_FILE_PATTERNS = (
+    "include/aegis/oms/outbound_oms.hpp",
+    "src/aegis/oms/outbound_oms.cpp",
+    "src/aegis/oms/private_oms_transition.hpp",
+    "src/aegis/oms/private_oms_transition.cpp",
+    "src/aegis/runtime/private_oms_transition_planner.cpp",
+    "tests/support/private_oms_transition_fixture.hpp",
+    "tests/unit/oms/private_oms_transition_test.cpp",
+    "tests/unit/oms/private_oms_fill_plan_test.cpp",
+    "tests/unit/oms/private_oms_cancel_plan_test.cpp",
+    "tests/unit/runtime/private_oms_transition_owner_test.cpp",
     "include/aegis/risk/reservation_conversion.hpp",
     "include/aegis/risk/reservation_ledger.hpp",
     "src/aegis/risk/reservation_conversion.cpp",
@@ -215,6 +225,11 @@ M4_GENERAL_FILE_PATTERNS = (
 # These current M4 production files can execute during private owner construction, normalization,
 # planning, and retained preparation and therefore inherit the M3 direct-path restrictions.
 M4_OWNER_PATH_FILE_PATTERNS = (
+    "include/aegis/oms/outbound_oms.hpp",
+    "src/aegis/oms/outbound_oms.cpp",
+    "src/aegis/oms/private_oms_transition.hpp",
+    "src/aegis/oms/private_oms_transition.cpp",
+    "src/aegis/runtime/private_oms_transition_planner.cpp",
     "include/aegis/risk/reservation_conversion.hpp",
     "include/aegis/risk/reservation_ledger.hpp",
     "src/aegis/risk/reservation_conversion.cpp",
