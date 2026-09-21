@@ -960,6 +960,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         qualification = {
             "tests/unit/risk/reservation_conversion_test.cpp",
             "tests/unit/risk/private_fill_economics_test.cpp",
+            "tests/unit/risk/private_fill_batch_economics_test.cpp",
         }
         self.assertTrue(production <= set(scanner.M4_OWNER_PATH_FILE_PATTERNS))
         self.assertTrue(production | qualification <= set(scanner.M4_GENERAL_FILE_PATTERNS))

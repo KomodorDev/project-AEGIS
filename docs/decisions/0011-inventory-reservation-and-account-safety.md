@@ -51,6 +51,13 @@ state; commit rejects foreign, stale, moved-from, or consumed plans before chang
 All source and aggregate storage is preallocated from the installed M4 policy. Reservation slot
 reuse cannot discard an earlier order's confirmed source contribution.
 
+The same component can prepare a bounded contiguous execution batch with optional definitive
+cancellation of its final partial residual. It validates each cumulative prefix and all seven scope
+replacements before returning one atomic final plan. Each prefix retains its actual execution and
+signed transfer; no fabricated combined execution replaces source provenance. Cold backing has one
+exclusive detached batch lease, transferred by moves and released by consumption or destruction.
+Legacy single-fill and release plans do not acquire that lease.
+
 The opt-in M4 runtime installs this component together with its private owner before callback
 authority exists. The current retention reducer does not call the economics commit interface.
 Consequently these component tests prove arithmetic, capacity, and atomic owner-local behavior;

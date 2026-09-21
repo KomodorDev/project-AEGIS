@@ -326,6 +326,14 @@ Independent transition matrices, cancel-race tables, and all 120 arrival permuta
 model qualify proposals, while owner tests prove live orders and economics remain unchanged. These
 component tests do not complete the lifecycle Exit Gate.
 
+A bounded economic batch planner now preflights one incoming execution plus at most
+`max_pending_fill_intervals_per_order` retained executions against one unchanged live baseline. It
+retains every actual normalized fact, prospective audit ordinal, reservation prefix, signed transfer,
+and seven-scope prefix replacement. Optional definitive cancellation removes only the final partial
+residual. One opaque plan commits the complete final economic replacement or changes nothing.
+Its cold scratch admits one outstanding batch lease; moving the plan transfers the lease, and
+consumption or destruction releases it. Legacy single-fill/release plans retain their prior behavior.
+
 The next joint reducer must validate OMS and economic plans against one unchanged owner before any
 mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
 order. The existing economics commit deliberately rejects an OMS projection changed since planning;

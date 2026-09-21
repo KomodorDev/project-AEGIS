@@ -163,6 +163,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "src/aegis/risk/inventory_ledger.cpp",
     "tests/unit/risk/reservation_conversion_test.cpp",
     "tests/unit/risk/private_fill_economics_test.cpp",
+    "tests/unit/risk/private_fill_batch_economics_test.cpp",
     "src/aegis/runtime/private_identity_preparation.cpp",
     "src/aegis/runtime/private_identity_preparation.hpp",
     "src/aegis/runtime/private_identity_retention.cpp",

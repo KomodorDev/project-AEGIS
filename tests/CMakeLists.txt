@@ -67,6 +67,7 @@ add_executable(
   # Independent arithmetic and owner-level qualification prove exact joint fill conversion.
   unit/risk/reservation_conversion_test.cpp
   unit/risk/private_fill_economics_test.cpp
+  unit/risk/private_fill_batch_economics_test.cpp
   unit/risk/risk_policy_test.cpp
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.

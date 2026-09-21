@@ -45,6 +45,14 @@ reuse. Joint replacement plans use fixed seven-scope scratch and retain no byte 
 This component's arithmetic and local commit qualification do not acknowledge a private input or
 complete its required journal/audit span.
 
+Economic batch scratch is allocated cold at exactly
+`1 + max_pending_fill_intervals_per_order` effects and never grows. One outstanding plan leases its
+immutable populated prefix; another batch fails while that lease remains alive. Every effect owns
+the actual normalized execution, a checked consecutive prospective audit ordinal, before/after
+reservation values, signed transfer, and seven-scope candidate. The final replacement may also
+release a partial cancellation residual. These component values are not canonical primary audit
+records and do not contain per-execution OMS projections.
+
 The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
 against the installed policy and reports exact proposed effect/callback counts. Its result contains
 fixed value fields, at most one new gap or cancel-history replacement, and the count of the canonical
