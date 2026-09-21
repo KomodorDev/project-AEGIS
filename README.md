@@ -120,6 +120,10 @@ durable external journal.
   drains, cancellation history, local failures, and timeouts. It returns detached state and economic
   proposals. An owner-bound query can plan against a genuine initial M3 row; neither interface
   applies a private event or advances a live order.
+- A bounded economic batch planner checks every fill prefix and prepares one atomic final
+  reservation/inventory replacement. An immutable runtime business proposal joins an initial
+  genuine order's lifecycle and economics with prospective audit counts; it grants no live commit
+  authority and reserves no journal or audit records.
 - A bounded deterministic fake recovery medium that acknowledges namespace publication before the
   runtime exposes recovery-backed identity authority.
 - Typed M4 semantic evidence and audit-span relationships that remain storage-free until a later

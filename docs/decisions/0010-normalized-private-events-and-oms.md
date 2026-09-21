@@ -50,6 +50,12 @@ evidence defined below. Account/source fan-out and complete-negative reconciliat
 per-order planner. A trusted initial-row wrapper obtains correlation and the genuine M3 snapshot
 from the private owner, but repeated queries do not advance that row.
 
+The initial business query additionally joins that lifecycle proposal to coherent held-reservation
+and inventory planning, retaining the normalized input and first-admission resolution. It exposes
+read-only candidates and prospective audit requirements; it cannot transfer economic commit rights.
+A component-only economic advance is not a valid new initial OMS baseline. Multi-fill economic
+batch preparation is qualified independently and does not make live pending gaps reachable.
+
 ## Decision
 
 The following subsections define the accepted private-event vocabulary, correlation, lifecycle,

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,7 +69,7 @@ struct InventoryAggregateCell {
 
 // ########################################################################
 // One fixed scratch row contains every residual and confirmed replacement required for a scope.
-// Its indices remain private to the opaque plan that validates their exact owning incarnation.
+// Its indices refer only to the plan's exact owning incarnation and grant no mutation authority.
 struct ReservationInventoryScopeReplacement {
   std::size_t count_index;
   std::size_t quantity_index;
@@ -76,6 +77,63 @@ struct ReservationInventoryScopeReplacement {
   std::size_t directional_index;
   std::size_t inventory_index;
   RiskScopeExposure exposure;
+};
+
+// ########################################################################
+// One synchronous batch input borrows a complete normalized execution only during preparation;
+// its prospective audit ordinal is checked but no audit storage or canonical identity is reserved.
+struct ReservationInventoryExecutionInput {
+  const oms::NormalizedPrivateOrderInput& execution;
+  recovery::AuditOrdinal audit_ordinal;
+};
+
+// ########################################################################
+// One immutable internal effect preserves its actual execution and economic prefix. Scope rows
+// describe this prefix against the unchanged live baseline, not canonical published audit records.
+struct ReservationInventoryExecutionEffect {
+  oms::NormalizedPrivateOrderInput execution;
+  recovery::AuditOrdinal audit_ordinal;
+  ReservationEvidence reservation_before;
+  ReservationEvidence reservation_after;
+  model::Quantity signed_quantity_delta;
+  model::Notional signed_notional_delta;
+  std::array<ReservationInventoryScopeReplacement, 7U> scopes;
+};
+
+// ########################################################################
+// Cold scratch has one ledger owner and at most one detached plan lease. Shared ownership keeps
+// immutable prepared effects alive if the ledger is destroyed; it never preserves commit rights.
+class ReservationInventoryBatchStorage final {
+public:
+
+  // --------------------------------------------------------
+  // Destroy bounded backing only after both its ledger and any detached lease release it.
+  ~ReservationInventoryBatchStorage() = default;
+
+  // --------------------------------------------------------
+  // Neither copying nor moving can create a second mutable scratch owner.
+  ReservationInventoryBatchStorage(const ReservationInventoryBatchStorage&) = delete;
+  ReservationInventoryBatchStorage& operator=(const ReservationInventoryBatchStorage&) = delete;
+  ReservationInventoryBatchStorage(ReservationInventoryBatchStorage&&) = delete;
+  ReservationInventoryBatchStorage& operator=(ReservationInventoryBatchStorage&&) = delete;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Allocate exactly the installed drain width before any reservation or private turn exists.
+  explicit ReservationInventoryBatchStorage(std::size_t capacity);
+
+  // --------------------------------------------------------
+  std::vector<std::optional<ReservationInventoryExecutionEffect>> effects_;
+  std::uint32_t active_count_{0U};
+
+  // ########################################################################
+  // Only the ledger can prepare scratch; a plan may expose its immutable leased active prefix.
+  friend class InventoryLedger;
+  friend class ReservationInventoryPlan;
+
+  // ########################################################################
 };
 
 // ########################################################################
@@ -112,6 +170,23 @@ public:
   }
 
   // --------------------------------------------------------
+  // Borrow the final seven-scope candidate, including optional release after the last execution.
+  [[nodiscard]] std::span<const ReservationInventoryScopeReplacement, 7U>
+  scope_replacements() const noexcept {
+    return scopes_;
+  }
+
+  // --------------------------------------------------------
+  // Report the immutable batch prefix count; legacy, moved-from, and consumed plans report zero.
+  [[nodiscard]] std::uint32_t execution_effect_count() const noexcept;
+
+  // --------------------------------------------------------
+  // Borrow one owned batch effect while this plan retains its lease; an invalid index returns
+  // null. Consumption releases the lease, so earlier borrowed effect pointers must not be reused.
+  [[nodiscard]] const ReservationInventoryExecutionEffect*
+  execution_effect_at(std::size_t index) const noexcept;
+
+  // --------------------------------------------------------
 private:
 
   // --------------------------------------------------------
@@ -136,6 +211,7 @@ private:
   std::array<ReservationInventoryScopeReplacement, 7U> scopes_;
   std::optional<std::size_t> source_index_;
   std::optional<InventorySourceRecord> source_after_;
+  std::shared_ptr<const ReservationInventoryBatchStorage> batch_evidence_;
 
   // ########################################################################
   // Only this source-private owner may mint or inspect mutation authority within a plan.
@@ -184,6 +260,18 @@ public:
                        recovery::AuditOrdinal audit_ordinal) const;
 
   // --------------------------------------------------------
+  // Preflight every strictly contiguous execution prefix against one unchanged genuine owner,
+  // copying exact facts into cold scratch. Inputs remain alive and unchanged for this serialized
+  // call. An optional DefinitiveCancellation closes only a still-partial final residual. Empty,
+  // busy, or inconsistent batches return InvalidReservationConversion; over-width batches return
+  // InventoryCapacityExceeded. Success leases scratch exclusively until destruction or consumption;
+  // moves transfer that lease. Legacy single plans never acquire it. No caller span escapes.
+  [[nodiscard]] model::Result<ReservationInventoryPlan> plan_cumulative_fill_batch(
+      const oms::OutboundOrderRecord& order,
+      std::span<const ReservationInventoryExecutionInput> executions,
+      std::optional<ReservationClosureCause> terminal_release = std::nullopt) const;
+
+  // --------------------------------------------------------
   // Plan exact residual removal for one genuine Held order and an assigned non-fill terminal
   // cause. The caller supplies the definitive business authority; no confirmed position changes.
   [[nodiscard]] model::Result<ReservationInventoryPlan>
@@ -201,6 +289,10 @@ public:
   [[nodiscard]] std::uint32_t aggregate_cell_capacity() const noexcept;
   [[nodiscard]] std::uint32_t source_row_count() const noexcept;
   [[nodiscard]] std::size_t aggregate_cell_count() const noexcept;
+
+  // --------------------------------------------------------
+  // Report the exact cold scratch width for one incoming execution and every retained gap.
+  [[nodiscard]] std::uint32_t execution_batch_capacity() const noexcept;
 
   // --------------------------------------------------------
   // Borrow live const observations in source insertion or canonical aggregate order. Reads require
@@ -266,6 +358,7 @@ private:
   std::vector<std::optional<InventorySourceRecord>> sources_;
   std::vector<std::optional<InventoryAggregateCell>> aggregates_;
   std::size_t aggregate_count_{0U};
+  std::shared_ptr<ReservationInventoryBatchStorage> batch_storage_;
 
   // ########################################################################
   // Reservation operations read the sole confirmed cells and invalidate pending joint plans.

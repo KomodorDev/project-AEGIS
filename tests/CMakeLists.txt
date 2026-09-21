@@ -67,6 +67,7 @@ add_executable(
   # Independent arithmetic and owner-level qualification prove exact joint fill conversion.
   unit/risk/reservation_conversion_test.cpp
   unit/risk/private_fill_economics_test.cpp
+  unit/risk/private_fill_batch_economics_test.cpp
   unit/risk/risk_policy_test.cpp
   unit/risk/worst_case_exposure_test.cpp
   # Runtime-policy tests bind M2 capacities and source identity to sealed startup provenance.
@@ -86,6 +87,7 @@ add_executable(
   unit/runtime/private_order_reconciler_test.cpp
   # Genuine owner binding must not turn planning into canonical or economic mutation.
   unit/runtime/private_oms_transition_owner_test.cpp
+  unit/runtime/private_business_proposal_test.cpp
   # Preparation tests prove bounded all-or-none insertion without canonical publication.
   unit/runtime/private_identity_preparation_test.cpp
   # Retention tests pin concrete owner authority, runtime composition, and submission containment.
