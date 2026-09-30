@@ -101,6 +101,9 @@ add_library(
   src/aegis/runtime/private_order_reconciler.cpp
   src/aegis/runtime/private_oms_transition_planner.cpp
   src/aegis/runtime/private_business_proposal.cpp
+  # Complete proposed evidence uses startup-sized storage without journal or callback publication.
+  src/aegis/runtime/private_business_evidence_store.cpp
+  src/aegis/runtime/private_business_evidence_preparation.cpp
   # Preparations remain separate from canonical identities and economic application.
   src/aegis/runtime/private_identity_preparation.cpp
   # The concrete private consumer owns retained facts and fail-closed submission gates.
