@@ -960,6 +960,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
         qualification = {
             "tests/unit/risk/reservation_conversion_test.cpp",
             "tests/unit/risk/private_fill_economics_test.cpp",
+            "tests/unit/risk/private_fill_batch_economics_test.cpp",
         }
         self.assertTrue(production <= set(scanner.M4_OWNER_PATH_FILE_PATTERNS))
         self.assertTrue(production | qualification <= set(scanner.M4_GENERAL_FILE_PATTERNS))
@@ -989,6 +990,8 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/oms/private_oms_transition.hpp",
             "src/aegis/oms/private_oms_transition.cpp",
             "src/aegis/runtime/private_oms_transition_planner.cpp",
+            "src/aegis/runtime/private_business_proposal.hpp",
+            "src/aegis/runtime/private_business_proposal.cpp",
         }
         qualification = {
             "tests/support/private_oms_transition_fixture.hpp",
@@ -996,6 +999,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/oms/private_oms_fill_plan_test.cpp",
             "tests/unit/oms/private_oms_cancel_plan_test.cpp",
             "tests/unit/runtime/private_oms_transition_owner_test.cpp",
+            "tests/unit/runtime/private_business_proposal_test.cpp",
         }
         self.assertTrue(production <= set(scanner.M4_OWNER_PATH_FILE_PATTERNS))
         self.assertTrue(production | qualification <= set(scanner.M4_GENERAL_FILE_PATTERNS))

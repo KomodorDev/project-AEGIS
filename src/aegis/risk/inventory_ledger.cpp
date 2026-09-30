@@ -13,6 +13,11 @@
 namespace aegis::risk {
 
 // --------------------------------------------------------
+// Allocate optional inline effects once; no batch preparation grows or reallocates this backing.
+ReservationInventoryBatchStorage::ReservationInventoryBatchStorage(std::size_t capacity)
+    : effects_(capacity) {}
+
+// --------------------------------------------------------
 // Capture fixed scratch and its non-reusable owner identity without allocating during planning.
 ReservationInventoryPlan::ReservationInventoryPlan(
     std::shared_ptr<const InventoryPlanIncarnation> incarnation, std::uint64_t generation,
@@ -27,6 +32,21 @@ ReservationInventoryPlan::ReservationInventoryPlan(
       source_index_{source_index}, source_after_{std::move(source_after)} {}
 
 // --------------------------------------------------------
+// Only batch preparation attaches immutable scratch; a consumed or moved lease has no prefix.
+std::uint32_t ReservationInventoryPlan::execution_effect_count() const noexcept {
+  return batch_evidence_ ? batch_evidence_->active_count_ : 0U;
+}
+
+// --------------------------------------------------------
+// Return an immutable fixed-address effect only while this plan retains its complete batch lease.
+const ReservationInventoryExecutionEffect*
+ReservationInventoryPlan::execution_effect_at(std::size_t index) const noexcept {
+  return batch_evidence_ && index < batch_evidence_->active_count_
+             ? &batch_evidence_->effects_[index].value()
+             : nullptr;
+}
+
+// --------------------------------------------------------
 // Allocate policy-sized source and aggregate backing before any reservation is admitted.
 InventoryLedger::InventoryLedger(ReservationLedger& reservations, const oms::OutboundOms& orders,
                                  const execution::OwnerLocalRouteCatalog& routes,
@@ -35,7 +55,9 @@ InventoryLedger::InventoryLedger(ReservationLedger& reservations, const oms::Out
       orders_incarnation_{orders.storage_incarnation_}, routes_{&routes},
       root_{policy.root_provenance()}, incarnation_{std::make_shared<InventoryPlanIncarnation>()},
       sources_(static_cast<std::size_t>(policy.capacities().max_inventory_source_rows)),
-      aggregates_(static_cast<std::size_t>(policy.capacities().max_inventory_aggregate_cells)) {
+      aggregates_(static_cast<std::size_t>(policy.capacities().max_inventory_aggregate_cells)),
+      batch_storage_{new ReservationInventoryBatchStorage{static_cast<std::size_t>(
+          policy.capacities().max_pending_fill_intervals_per_order + 1U)}} {
   const auto zero_quantity = model::Quantity::from_scaled(0, 0).value();
   const auto zero_notional = model::Notional::from_scaled(0, 0).value();
   for (const auto& row : reservations.policy().limit_sets()) {
@@ -65,6 +87,12 @@ std::uint32_t InventoryLedger::source_row_count() const noexcept { return source
 // --------------------------------------------------------
 // Return the canonical complete-key count derived from the immutable risk policy.
 std::size_t InventoryLedger::aggregate_cell_count() const noexcept { return aggregate_count_; }
+
+// --------------------------------------------------------
+// The installed policy proves incoming-plus-pending width fits its u32 effects/callback limits.
+std::uint32_t InventoryLedger::execution_batch_capacity() const noexcept {
+  return static_cast<std::uint32_t>(batch_storage_->effects_.size());
+}
 
 // --------------------------------------------------------
 // Borrow one live const source row under owner serialization or quiescence; later fills may update

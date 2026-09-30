@@ -4,6 +4,7 @@
 #include "aegis/risk/reservation_ledger.hpp"
 
 #include "aegis/model/domain_error.hpp"
+#include "aegis/oms/private_order_resolution.hpp"
 #include "aegis/risk/reservation_conversion.hpp"
 #include "aegis/runtime/m4_policy.hpp"
 #include "inventory_ledger.hpp"
@@ -215,6 +216,27 @@ create_rejected_risk_check_result(execution::SubmissionReason reason,
 [[nodiscard]] model::Result<void> create_invalid_reservation_result() {
   return model::Result<void>::create_failure(DomainError::create_at_field(
       DomainErrorCode::InvalidRiskReservationState, "risk_reservation.state"));
+}
+
+// --------------------------------------------------------
+// Convert a checked nonnegative economic magnitude to its order-side inventory contribution.
+template <typename Decimal>
+[[nodiscard]] model::Result<Decimal> signed_inventory_value_from_side(Decimal value,
+                                                                      execution::OrderSide side) {
+  return side == execution::OrderSide::Sell ? zero_decimal<Decimal>().checked_subtract(value)
+                                            : model::Result<Decimal>::create_success(value);
+}
+
+// --------------------------------------------------------
+// Compare only canonical source event identity inside one proposed batch; this rejects internal
+// reuse without classifying or mutating the caller-owned global event/trade registries.
+[[nodiscard]] bool
+has_same_execution_event_identity(const oms::NormalizedPrivateOrderInput& left,
+                                  const oms::NormalizedPrivateOrderInput& right) noexcept {
+  return oms::PrivateEventRegistryKey::from_ingress_semantic_value(
+             oms::PrivateEventIngressSemanticValue::from_normalized_input(left)) ==
+         oms::PrivateEventRegistryKey::from_ingress_semantic_value(
+             oms::PrivateEventIngressSemanticValue::from_normalized_input(right));
 }
 
 // --------------------------------------------------------
@@ -1043,6 +1065,7 @@ InventoryLedger::find_owned_held_reservation(const oms::OutboundOrderRecord& ord
   if (!reservations_->implementation_ || reservations_->implementation_->inventory.get() != this ||
       generation_ == std::numeric_limits<std::uint64_t>::max() || !orders_incarnation_ ||
       orders_->storage_incarnation_ != orders_incarnation_ ||
+      !orders_->has_retained_order_record(order) ||
       orders_->find_order(order.order_id()) != &order) {
     return create_owner_or_state_failure();
   }
@@ -1389,6 +1412,301 @@ InventoryLedger::plan_cumulative_fill(const oms::OutboundOrderRecord& order,
 }
 
 // --------------------------------------------------------
+// Preflight each exact execution prefix and optional final cancellation against one immutable live
+// baseline. Only the complete result leases scratch; no partial result gains mutation authority.
+model::Result<ReservationInventoryPlan> InventoryLedger::plan_cumulative_fill_batch(
+    const oms::OutboundOrderRecord& order,
+    std::span<const ReservationInventoryExecutionInput> executions,
+    std::optional<ReservationClosureCause> terminal_release) const {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Establish genuine row ownership before reading its identity, then reject invalid or busy
+  // scratch before overwriting anything a previously returned plan could still observe.
+  auto reservation_index = find_owned_held_reservation(order);
+  if (!reservation_index) {
+    return model::Result<ReservationInventoryPlan>::create_failure(
+        std::move(reservation_index).error());
+  }
+  // Return a component-state failure without classifying or consuming a private event.
+  const auto create_batch_failure = [](std::string_view field) {
+    return model::Result<ReservationInventoryPlan>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::InvalidReservationConversion, std::string{field}));
+  };
+  if (executions.empty()) {
+    return create_batch_failure("reservation_conversion.empty_batch");
+  }
+  if (executions.size() > batch_storage_->effects_.size()) {
+    return model::Result<ReservationInventoryPlan>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::InventoryCapacityExceeded, "inventory.execution_batch"));
+  }
+  if (batch_storage_.use_count() != 1) {
+    return create_batch_failure("reservation_conversion.batch_busy");
+  }
+  if (terminal_release && *terminal_release != ReservationClosureCause::DefinitiveCancellation) {
+    return create_batch_failure("reservation_conversion.batch_closure_cause");
+  }
+  const auto& admission = order.admission();
+  const auto& provenance = admission.provenance;
+  const auto* route = routes_->find_route(provenance.route_id);
+  const auto projection = order.private_projection();
+  auto batch_exchange_order_id = projection.exchange_order_id;
+  if (projection.state != oms::OutboundOrderState::WriteInitiated &&
+      projection.state != oms::OutboundOrderState::SubmissionUnknown &&
+      projection.state != oms::OutboundOrderState::Working &&
+      projection.state != oms::OutboundOrderState::PartiallyFilled) {
+    return create_batch_failure("reservation_conversion.batch_order_state");
+  }
+  const auto& before =
+      reservations_->implementation_->reservation_slots[reservation_index.value()]->evidence;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Bind the existing source contribution to the exact original reservation before considering a
+  // batch. Append-only source capacity is checked after all economic prefix calculations.
+  const auto initial_signed_quantity =
+      signed_inventory_value_from_side(before.cumulative_confirmed_exposure.quantity, before.side);
+  const auto initial_signed_notional = signed_inventory_value_from_side(
+      before.cumulative_confirmed_exposure.quote_notional, before.side);
+  if (!initial_signed_quantity || !initial_signed_notional) {
+    return model::Result<ReservationInventoryPlan>::create_failure(
+        !initial_signed_quantity ? initial_signed_quantity.error()
+                                 : initial_signed_notional.error());
+  }
+  std::size_t source_index = 0U;
+  while (source_index < source_count_ &&
+         sources_[source_index]->admission.order_id != admission.order_id) {
+    ++source_index;
+  }
+  std::optional<recovery::AuditOrdinal> previous_audit;
+  if (source_index == source_count_) {
+    if (before.cumulative_confirmed_exposure.quantity.coefficient() != 0 ||
+        before.cumulative_confirmed_exposure.quote_notional.coefficient() != 0) {
+      return create_batch_failure("reservation_conversion.batch_source");
+    }
+  } else {
+    const auto& source = sources_[source_index].value();
+    if (source.admission != admission ||
+        source.confirmed_quantity != initial_signed_quantity.value() ||
+        source.confirmed_quote_notional != initial_signed_notional.value()) {
+      return create_batch_failure("reservation_conversion.batch_source");
+    }
+    const auto* source_execution =
+        std::get_if<oms::ExecutionPayload>(&source.latest_execution.payload());
+    if (source_execution == nullptr) {
+      return create_batch_failure("reservation_conversion.batch_source");
+    }
+    if (source_execution->locator.exchange_order_id()) {
+      if (batch_exchange_order_id &&
+          batch_exchange_order_id != source_execution->locator.exchange_order_id()) {
+        return create_batch_failure("reservation_conversion.batch_exchange_mapping");
+      }
+      batch_exchange_order_id = source_execution->locator.exchange_order_id();
+    }
+    previous_audit = source.latest_audit_ordinal;
+  }
+  auto previous_reservation = before;
+  auto final_signed_quantity = initial_signed_quantity.value();
+  auto final_signed_notional = initial_signed_notional.value();
+  auto final_quantity_delta = zero_decimal<model::Quantity>();
+  auto final_notional_delta = zero_decimal<model::Notional>();
+  std::optional<std::array<ReservationInventoryScopeReplacement, 7U>> final_scopes;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Every prefix is checked against the same live aggregates using its total signed delta from
+  // the baseline. This preserves intermediate overflow checks without cloning mutable owners.
+  for (std::size_t index = 0U; index < executions.size(); ++index) {
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Validate the actual source fact, exact chronology, prospective audit sequence, and local
+    // batch identity uniqueness before deriving this prefix's economic candidate.
+    const auto& input = executions[index].execution;
+    const auto audit_ordinal = executions[index].audit_ordinal;
+    const auto* execution = std::get_if<oms::ExecutionPayload>(&input.payload());
+    if (execution == nullptr || input.origin() == oms::PrivateEventOrigin::Local ||
+        input.provenance().root() != root_ ||
+        input.logical_account_id() != provenance.logical_account_id ||
+        input.venue_id() != provenance.venue_id ||
+        execution->instrument_id != provenance.instrument_id ||
+        execution->metadata_revision != provenance.metadata_revision ||
+        (execution->source_side && *execution->source_side != admission.economics.side) ||
+        (execution->locator.local_order_id() &&
+         *execution->locator.local_order_id() != admission.order_id) ||
+        (!execution->locator.local_order_id() &&
+         (!projection.exchange_order_id || !execution->locator.exchange_order_id() ||
+          *projection.exchange_order_id != *execution->locator.exchange_order_id())) ||
+        (projection.exchange_order_id && execution->locator.exchange_order_id() &&
+         *projection.exchange_order_id != *execution->locator.exchange_order_id()) ||
+        execution->incremental_quantity.coefficient() <= 0 ||
+        execution->incremental_quantity.scale() > route->metadata().quantity_scale() ||
+        execution->cumulative_quantity.scale() > route->metadata().quantity_scale() ||
+        execution->execution_price.coefficient() <= 0 ||
+        execution->execution_price.scale() > route->metadata().price_scale() ||
+        (admission.economics.side == execution::OrderSide::Buy &&
+         execution->execution_price > admission.economics.price) ||
+        (admission.economics.side == execution::OrderSide::Sell &&
+         execution->execution_price < admission.economics.price)) {
+      return create_batch_failure("reservation_conversion.batch_execution");
+    }
+    // Nonempty exchange locators must agree within the batch and with the retained latest source.
+    // This comparison does not authorize exchange-only correlation from an uncommitted candidate.
+    if (execution->locator.exchange_order_id()) {
+      if (batch_exchange_order_id &&
+          batch_exchange_order_id != execution->locator.exchange_order_id()) {
+        return create_batch_failure("reservation_conversion.batch_exchange_mapping");
+      }
+      batch_exchange_order_id = execution->locator.exchange_order_id();
+    }
+    if ((previous_audit && audit_ordinal <= *previous_audit) ||
+        (index > 0U && (previous_audit->value() == std::numeric_limits<std::uint64_t>::max() ||
+                        audit_ordinal.value() != previous_audit->value() + 1U))) {
+      return create_batch_failure("reservation_conversion.batch_audit_order");
+    }
+    for (std::size_t prior = 0U; prior < index; ++prior) {
+      const auto& previous_input = batch_storage_->effects_[prior]->execution;
+      if (has_same_execution_event_identity(input, previous_input) ||
+          execution->trade_id ==
+              std::get<oms::ExecutionPayload>(previous_input.payload()).trade_id) {
+        return create_batch_failure("reservation_conversion.batch_identity");
+      }
+    }
+    auto price_alignment = route->metadata().validate_price_alignment(execution->execution_price);
+    auto quantity_alignment =
+        route->metadata().validate_quantity_alignment(execution->incremental_quantity);
+    if (!price_alignment || !quantity_alignment) {
+      return model::Result<ReservationInventoryPlan>::create_failure(
+          !price_alignment ? price_alignment.error() : quantity_alignment.error());
+    }
+    auto expected_delta = execution->cumulative_quantity.checked_subtract(
+        previous_reservation.cumulative_confirmed_exposure.quantity);
+    if (!expected_delta) {
+      return model::Result<ReservationInventoryPlan>::create_failure(
+          std::move(expected_delta).error());
+    }
+    if (expected_delta.value() != execution->incremental_quantity) {
+      return create_batch_failure("reservation_conversion.batch_interval");
+    }
+    auto conversion = calculate_cumulative_reservation_conversion(
+        before.exposure, previous_reservation.cumulative_confirmed_exposure,
+        execution->cumulative_quantity, route->metadata(),
+        reservations_->policy().notional_scale());
+    if (!conversion) {
+      return model::Result<ReservationInventoryPlan>::create_failure(std::move(conversion).error());
+    }
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Keep the exact per-execution transfer for evidence and the total baseline transfer for the
+    // seven-scope replacement calculator; neither substitutes a fabricated aggregate execution.
+    const auto& converted = conversion.value();
+    const auto signed_quantity_delta =
+        signed_inventory_value_from_side(converted.newly_confirmed.quantity, before.side);
+    const auto signed_notional_delta =
+        signed_inventory_value_from_side(converted.newly_confirmed.quote_notional, before.side);
+    const auto signed_quantity =
+        signed_inventory_value_from_side(converted.cumulative_confirmed.quantity, before.side);
+    const auto signed_notional = signed_inventory_value_from_side(
+        converted.cumulative_confirmed.quote_notional, before.side);
+    if (!signed_quantity_delta || !signed_notional_delta || !signed_quantity || !signed_notional) {
+      const auto& error = !signed_quantity_delta   ? signed_quantity_delta.error()
+                          : !signed_notional_delta ? signed_notional_delta.error()
+                          : !signed_quantity       ? signed_quantity.error()
+                                                   : signed_notional.error();
+      return model::Result<ReservationInventoryPlan>::create_failure(error);
+    }
+    auto total_quantity_delta =
+        signed_quantity.value().checked_subtract(initial_signed_quantity.value());
+    auto total_notional_delta =
+        signed_notional.value().checked_subtract(initial_signed_notional.value());
+    if (!total_quantity_delta || !total_notional_delta) {
+      return model::Result<ReservationInventoryPlan>::create_failure(
+          !total_quantity_delta ? total_quantity_delta.error() : total_notional_delta.error());
+    }
+    const bool complete = converted.remaining.quantity.coefficient() == 0;
+    const ReservationEvidence after{
+        before.reservation_id,
+        complete ? ReservationState::ConsumedByFill : ReservationState::Held,
+        before.side,
+        before.exposure,
+        converted.remaining,
+        converted.cumulative_confirmed,
+        complete ? ReservationClosureCause::FullFill : ReservationClosureCause::Unassigned};
+    auto scopes =
+        calculate_scope_replacements(reservation_index.value(), after, total_quantity_delta.value(),
+                                     total_notional_delta.value());
+    if (!scopes) {
+      return model::Result<ReservationInventoryPlan>::create_failure(std::move(scopes).error());
+    }
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Store only inline copies into unleased cold scratch; a later failure exposes none of this
+    // prefix and leaves both economic owners and their plan generations unchanged.
+    static_assert(std::is_nothrow_copy_constructible_v<ReservationInventoryExecutionEffect>);
+    static_assert(std::is_nothrow_copy_assignable_v<ReservationInventoryExecutionEffect>);
+    batch_storage_->effects_[index] =
+        ReservationInventoryExecutionEffect{input,
+                                            audit_ordinal,
+                                            previous_reservation,
+                                            after,
+                                            signed_quantity_delta.value(),
+                                            signed_notional_delta.value(),
+                                            scopes.value()};
+    previous_reservation = after;
+    previous_audit = audit_ordinal;
+    final_signed_quantity = signed_quantity.value();
+    final_signed_notional = signed_notional.value();
+    final_quantity_delta = total_quantity_delta.value();
+    final_notional_delta = total_notional_delta.value();
+    final_scopes = std::move(scopes).value();
+
+    // ++++++++++++++++++++++++++++++++++++++++
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // A cancellation consumes only the remaining residual after the last partial prefix. It must
+  // not reclose a full fill or erase any of that execution's confirmed source evidence.
+  if (terminal_release) {
+    if (previous_reservation.state != ReservationState::Held ||
+        previous_reservation.remaining_exposure.quantity.coefficient() <= 0) {
+      return create_batch_failure("reservation_conversion.batch_terminal_state");
+    }
+    previous_reservation.state = ReservationState::Released;
+    previous_reservation.closure_cause = *terminal_release;
+    previous_reservation.remaining_exposure =
+        OrderExposure{zero_decimal<model::Quantity>(), zero_decimal<model::Notional>()};
+    auto release_scopes =
+        calculate_scope_replacements(reservation_index.value(), previous_reservation,
+                                     final_quantity_delta, final_notional_delta);
+    if (!release_scopes) {
+      return model::Result<ReservationInventoryPlan>::create_failure(
+          std::move(release_scopes).error());
+    }
+    final_scopes = std::move(release_scopes).value();
+  }
+  if (source_index == source_count_ && source_count_ >= sources_.size()) {
+    return model::Result<ReservationInventoryPlan>::create_failure(DomainError::create_at_field(
+        DomainErrorCode::InventoryCapacityExceeded, "inventory.source_rows"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Mint one existing commit-compatible plan and attach its immutable batch lease only after all
+  // preflights succeed. The last actual execution supplies permanent latest source provenance.
+  auto plan = ReservationInventoryPlan{
+      incarnation_,
+      generation_,
+      order,
+      reservation_index.value(),
+      before,
+      previous_reservation,
+      *final_scopes,
+      source_index,
+      InventorySourceRecord{admission, final_signed_quantity, final_signed_notional,
+                            executions.back().execution, executions.back().audit_ordinal}};
+  batch_storage_->active_count_ = static_cast<std::uint32_t>(executions.size());
+  plan.batch_evidence_ = batch_storage_;
+  return model::Result<ReservationInventoryPlan>::create_success(std::move(plan));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 // Prepare one non-fill closure without altering any retained confirmed source contribution.
 model::Result<ReservationInventoryPlan>
 InventoryLedger::plan_terminal_release(const oms::OutboundOrderRecord& order,
@@ -1483,6 +1801,7 @@ InventoryLedger::commit_reservation_inventory_plan(ReservationInventoryPlan&& pl
   }
   invalidate_plans();
   plan.incarnation_.reset();
+  plan.batch_evidence_.reset();
   return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
