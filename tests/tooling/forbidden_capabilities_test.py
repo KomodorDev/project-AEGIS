@@ -787,6 +787,11 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/runtime/private_order_event_factory.hpp",
             "src/aegis/runtime/private_order_reconciler.cpp",
             "src/aegis/runtime/private_order_reconciler.hpp",
+            "src/aegis/runtime/private_business_evidence_store.hpp",
+            "src/aegis/runtime/private_business_evidence_store.cpp",
+            "src/aegis/runtime/private_business_evidence_preparation.cpp",
+            "src/aegis/trace/private_business_evidence.hpp",
+            "src/aegis/trace/private_business_evidence.cpp",
             "src/aegis/runtime/serialized_executor.cpp",
             "src/aegis/trace/m4_semantic_evidence.cpp",
             "tests/support/m4_private_event_fixture.hpp",
@@ -801,6 +806,9 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/runtime/private_order_admission_test.cpp",
             "tests/unit/runtime/private_order_correlation_planner_test.cpp",
             "tests/unit/runtime/private_order_reconciler_test.cpp",
+            "tests/support/private_business_evidence_fixture.hpp",
+            "tests/unit/runtime/private_business_evidence_store_test.cpp",
+            "tests/unit/runtime/private_business_evidence_owner_test.cpp",
             "tests/unit/runtime/reconciliation_private_event_admission_test.cpp",
             "tests/unit/trace/m4_semantic_evidence_test.cpp",
         }
@@ -839,6 +847,11 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/runtime/private_order_event_factory.hpp",
             "src/aegis/runtime/private_order_reconciler.cpp",
             "src/aegis/runtime/private_order_reconciler.hpp",
+            "src/aegis/runtime/private_business_evidence_store.hpp",
+            "src/aegis/runtime/private_business_evidence_store.cpp",
+            "src/aegis/runtime/private_business_evidence_preparation.cpp",
+            "src/aegis/trace/private_business_evidence.hpp",
+            "src/aegis/trace/private_business_evidence.cpp",
             "src/aegis/trace/m4_semantic_evidence.cpp",
         }
         general = set(scanner.M4_GENERAL_FILE_PATTERNS)
@@ -871,6 +884,11 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "src/aegis/recovery/deterministic_fake_recovery_medium.cpp",
                 "src/aegis/runtime/private_order_reconciler.cpp",
                 "src/aegis/runtime/private_order_reconciler.hpp",
+                "src/aegis/runtime/private_business_evidence_store.hpp",
+                "src/aegis/runtime/private_business_evidence_store.cpp",
+                "src/aegis/runtime/private_business_evidence_preparation.cpp",
+                "src/aegis/trace/private_business_evidence.hpp",
+                "src/aegis/trace/private_business_evidence.cpp",
             ):
                 with self.subTest(path=path):
                     source = self.write_repository_file(

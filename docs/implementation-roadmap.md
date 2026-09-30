@@ -342,6 +342,28 @@ these ordinals and storage are not reserved. Ordinary and reconciliation admissi
 `RetainedForReconciliation`. Batch tests qualify multi-fill economics independently; the genuine
 runtime query cannot yet drain live gaps or advance orders between calls.
 
+The installed private owner now also owns a source-private business-evidence preparation store.
+Cold construction allocates exactly `max_private_event_records` event slots and
+`max_private_audit_records` audit slots, with a `max_transition_effects_per_turn` effect buffer for
+every possible primary slot and `floor(max_private_audit_records / 3)` callback buffers, each sized
+to `max_order_callbacks_per_turn`. One detached move-only lease copies complete normalized source
+facts, sealed resolutions, trade comparisons, OMS/reservation prefixes, canonical seven-scope
+inventory effects, and proposed callback values. It reserves the complete prospective `p` or `p+2`
+span before returning; callback-bearing preparations contain a Planned proposal and reserve the
+terminal ordinal without fabricating Delivered or Faulted evidence. Failure or abandonment consumes
+no slot or ordinal, and copied facts survive destruction of the store while the lease remains alive.
+
+The initial owner query derives these records from genuine unchanged M3 components at the store's
+next prospective audit position. The store also qualifies detached same-order execution drains;
+its generic interface validates complete evidence frames and their continuity, while the existing
+OMS planner owns the accepted lifecycle transition matrix. Live gap storage and drain consumption
+remain absent. Authored replay and optional journal linkage
+values are candidates, not executor admission or sequence-allocation authority. Accepted evidence
+prefixes remain empty, and admission completion remains `RetainedForReconciliation`. Unknown,
+conflict, non-order, and account/source fan-out evidence are outside this known-order slice. The
+typed journal payload now represents a private input and its immutable first resolution, but the
+fake medium still publishes only namespace registrations and rejects unsupported business kinds.
+
 The next joint reducer must validate OMS and economic plans against one unchanged owner before any
 mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
 order. The existing economics commit deliberately rejects an OMS projection changed since planning;
