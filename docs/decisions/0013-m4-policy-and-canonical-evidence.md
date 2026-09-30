@@ -56,6 +56,17 @@ reports exact primary/callback counts and checks prospective span overflow witho
 ordinals or reserving journal, identity, diagnostic, audit, or callback storage. Typed semantic
 journal/audit implementation may proceed before ADR-0014; canonical byte encodings may not.
 
+Complete typed known-order evidence now uses a separate cold store with exactly the policy's
+private-event and audit slot counts. Every audit slot has a preallocated effect buffer of
+`max_transition_effects_per_turn`; the Planned buffer pool has
+`floor(max_private_audit_records / 3)` entries of `max_order_callbacks_per_turn`. One detached
+preparation copies every supplied fact after validating the entire primary/callback topology and
+all capacity bounds. The complete prospective span includes a reserved terminal position but no
+Delivered or Faulted row. Abandonment consumes no accepted prefix or ordinal. These closed records
+retain optional linkage as candidate values and cannot publish evidence or acknowledge consumption.
+Currency and error context use bounded inline semantic storage; those bounds assign no ADR-0014
+byte widths. The fake recovery medium remains namespace-only.
+
 The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
 against the installed policy and reports exact proposed effect/callback counts. Its result contains
 fixed value fields, at most one new gap or cancel-history replacement, and the count of the canonical

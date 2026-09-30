@@ -56,6 +56,15 @@ read-only candidates and prospective audit requirements; it cannot transfer econ
 A component-only economic advance is not a valid new initial OMS baseline. Multi-fill economic
 batch preparation is qualified independently and does not make live pending gaps reachable.
 
+Complete known-order business evidence can now be prepared from that genuine initial query into
+fixed cold backing. Each primary proposal retains its actual source input, resolved attribution,
+OMS/reservation before and after values, optional seven-scope inventory effects, and safety reason.
+The aggregate callback proposal preserves each event/trade and an applied endpoint only when an
+execution would apply. A move-only lease reserves the entire prospective span but publishes no
+canonical disposition or callback outcome. Its absence of a terminal row is explicit; inspection
+cannot claim delivery, private consumption, or live state changes. The accepted commit and callback
+ordering below remains unimplemented end to end.
+
 ## Decision
 
 The following subsections define the accepted private-event vocabulary, correlation, lifecycle,
