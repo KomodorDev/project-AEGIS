@@ -8,6 +8,7 @@
 #include "aegis/model/order_id.hpp"
 #include "aegis/model/result.hpp"
 #include "aegis/model/time.hpp"
+#include "aegis/oms/private_order_resolution.hpp"
 #include "aegis/recovery/recovery_identity.hpp"
 
 #include <cstdint>
@@ -15,6 +16,17 @@
 #include <optional>
 #include <utility>
 #include <variant>
+
+namespace aegis::runtime {
+
+// ########################################################################
+// The source-private preparation owner seals complete business payload proposals without
+// publishing.
+class PrivateBusinessEvidenceStore;
+
+// ########################################################################
+
+} // namespace aegis::runtime
 
 namespace aegis::recovery {
 
@@ -140,9 +152,52 @@ struct NamespaceRegisteredJournalPayload {
 };
 
 // ########################################################################
-// The namespace-only fake medium accepts no business input; later owner slices extend this closed
-// variant only together with their complete typed replay and audit contracts.
-using JournalPayloadValue = std::variant<NamespaceRegisteredJournalPayload>;
+// A closed private recovery input owns the unchanged normalized source fact and its immutable
+// first-admission resolution. Construction by preparation proves no disposition, publication,
+// business application, callback delivery, acknowledgement, or recovery replay.
+class PrivateEventInputJournalPayload final {
+public:
+
+  // --------------------------------------------------------
+  // Borrow the complete source-normalized input, including its original trusted receive time.
+  [[nodiscard]] const oms::NormalizedPrivateOrderInput& input() const noexcept { return input_; }
+
+  // --------------------------------------------------------
+  // Borrow the sealed resolution that a future replay must reproduce and compare exactly.
+  [[nodiscard]] const oms::PrivateEventResolution& first_admission_resolution() const noexcept {
+    return resolution_;
+  }
+
+  // --------------------------------------------------------
+  // Compare every retained input and resolution field without inventing a semantic digest.
+  friend bool operator==(const PrivateEventInputJournalPayload&,
+                         const PrivateEventInputJournalPayload&) = default;
+
+  // --------------------------------------------------------
+private:
+
+  // --------------------------------------------------------
+  // Retain fully validated fixed domain values without exposing an independently authored factory.
+  PrivateEventInputJournalPayload(oms::NormalizedPrivateOrderInput input,
+                                  oms::PrivateEventResolution resolution) noexcept
+      : input_{std::move(input)}, resolution_{std::move(resolution)} {}
+
+  // --------------------------------------------------------
+  oms::NormalizedPrivateOrderInput input_;
+  oms::PrivateEventResolution resolution_;
+
+  // ########################################################################
+  // Only the source-private store may prepare a complete business payload; no append right follows.
+  friend class runtime::PrivateBusinessEvidenceStore;
+
+  // ########################################################################
+};
+
+// ########################################################################
+// The variant represents namespace records and private-input proposals. The namespace-only fake
+// medium still rejects business records until their complete publication/replay owner exists.
+using JournalPayloadValue =
+    std::variant<NamespaceRegisteredJournalPayload, PrivateEventInputJournalPayload>;
 
 // ########################################################################
 // One immutable semantic journal record owns causal lineage order, applicable provenance, and a
