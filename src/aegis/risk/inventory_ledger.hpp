@@ -278,6 +278,18 @@ public:
   plan_terminal_release(const oms::OutboundOrderRecord& order, ReservationClosureCause cause) const;
 
   // --------------------------------------------------------
+  // Recheck the complete unchanged owner, OMS row, and reservation without consuming this plan or
+  // writing either ledger. The serialized caller must prevent mutations through any later use;
+  // success alone grants no application capability. Failure matches component commit precedence.
+  [[nodiscard]] model::Result<void>
+  validate_reservation_inventory_plan(const ReservationInventoryPlan& plan) const;
+
+  // --------------------------------------------------------
+  // Observe the non-wrapping baseline changed by every reservation or inventory mutation. An
+  // owner-sealed preparation may compare this value, but the number grants no mutation authority.
+  [[nodiscard]] std::uint64_t planning_generation() const noexcept { return generation_; }
+
+  // --------------------------------------------------------
   // Reject foreign, stale, moved-from, or already consumed plans before writes; otherwise apply
   // every checked replacement with no fallible step and consume the plan's sole authority.
   [[nodiscard]] model::Result<void>
@@ -345,6 +357,11 @@ private:
   // Invalidate all detached plans after relocation or mutation; exhaustion permanently prevents
   // additional economic writes rather than wrapping into a previously issued generation.
   void invalidate_plans() noexcept;
+
+  // --------------------------------------------------------
+  // Apply and consume an already validated plan with no fallible operation. Only this ledger's
+  // serialized commit may call this phase, immediately after validation against unchanged owners.
+  void apply_validated_reservation_inventory_plan(ReservationInventoryPlan&& plan) noexcept;
 
   // --------------------------------------------------------
   ReservationLedger* reservations_;

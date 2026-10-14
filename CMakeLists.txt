@@ -104,6 +104,8 @@ add_library(
   # Complete proposed evidence uses startup-sized storage without journal or callback publication.
   src/aegis/runtime/private_business_evidence_store.cpp
   src/aegis/runtime/private_business_evidence_preparation.cpp
+  # Joint preparations retain genuine component plans and real unpublished journal reservations.
+  src/aegis/runtime/private_business_transaction.cpp
   # Preparations remain separate from canonical identities and economic application.
   src/aegis/runtime/private_identity_preparation.cpp
   # The concrete private consumer owns retained facts and fail-closed submission gates.

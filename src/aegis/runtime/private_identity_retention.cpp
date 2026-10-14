@@ -2,6 +2,7 @@
 // with fixed storage, stable completion oracles, and no canonical business consumption.
 
 #include "aegis/runtime/serialized_executor.hpp"
+#include "private_business_transaction.hpp"
 #include "private_order_reconciler.hpp"
 #include "submission_coordinator.hpp"
 
@@ -31,7 +32,11 @@ namespace {
       model::DomainError::create_at_field(Code::PrivateCorrelationFailed,
                                           "private_identity.preparation_failure"),
       model::DomainError::create_at_field(Code::ExecutionNotPermitted,
-                                          "private_identity.global_containment")};
+                                          "private_identity.global_containment"),
+      model::DomainError::create_at_field(Code::JournalCapacityExceeded,
+                                          "private_business.journal_preflight_capacity"),
+      model::DomainError::create_at_field(Code::PrivateEvidenceExhausted,
+                                          "private_business.preflight_failure")};
 }
 
 // --------------------------------------------------------
@@ -231,6 +236,7 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
   record.safety_reason = account != nullptr
                              ? std::optional{risk::AccountSafetyReason::IncompleteReconciliation}
                              : std::nullopt;
+  bool has_new_known_preparation = false;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Repeated event keys reuse their original resolution before any new provenance or correlation
@@ -256,6 +262,9 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
         auto plan = derive_first_seen_authoritative_identity_plan(retained_semantic);
         if (plan) {
           record.preparation = retention_.preparations.prepare_and_retain_identity(plan.value());
+          has_new_known_preparation = !record.preparation->capacity_exhaustion &&
+                                      !record.preparation->safety_reason &&
+                                      record.preparation->resolution.known_resolution() != nullptr;
         } else {
           record.planning_error = std::move(plan).error();
           record.error_kind =
@@ -289,6 +298,51 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
       if (account != nullptr) {
         record.safety_reason = risk::AccountSafetyReason::ArithmeticOrStateCapacityFailure;
       }
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Exercise real journal/evidence reservation only for a genuine callback-free initial gap.
+  // Callback-bearing facts await the actual dispatcher reservation, so no invented ordinal enters
+  // this production path. The capsule is validated and abandoned before retained completion.
+  if (has_new_known_preparation && record.normalized &&
+      record.normalized->kind() == oms::PrivateOrderEventKind::Execution) {
+    try {
+      auto proposal = derive_initial_known_authoritative_business_proposal(
+          *record.normalized, business_evidence_store_->next_audit_ordinal());
+      if (proposal && proposal.value().oms_transition().classification ==
+                          oms::ProposedPrivateOmsClassification::BufferedGap) {
+        auto transaction = prepare_initial_known_authoritative_business_transaction(
+            *record.normalized,
+            recovery::JournalReplayProvenance{receipt.attempt_ordinal, receipt.receive_sequence});
+        if (transaction) {
+          auto fresh = validate_prepared_initial_known_business_transaction(transaction.value());
+          if (fresh) {
+            static_assert(std::is_nothrow_copy_constructible_v<recovery::JournalRecord>);
+            record.journal_preflight_candidate.emplace(*transaction.value().journal_record());
+          } else {
+            record.planning_error = std::move(fresh).error();
+          }
+        } else {
+          record.planning_error = std::move(transaction).error();
+        }
+        if (record.planning_error) {
+          const auto code = record.planning_error->code;
+          const bool journal_capacity = code == model::DomainErrorCode::JournalCapacityExceeded;
+          const bool evidence_capacity = journal_capacity ||
+                                         code == model::DomainErrorCode::PrivateEvidenceExhausted ||
+                                         code == model::DomainErrorCode::RecoveryCounterExhausted;
+          record.error_kind = journal_capacity
+                                  ? PrivateIdentityRetentionError::JournalCapacity
+                                  : PrivateIdentityRetentionError::BusinessPreflightFailure;
+          record.safety_reason = evidence_capacity
+                                     ? risk::AccountSafetyReason::EvidenceCapacityExhausted
+                                     : risk::AccountSafetyReason::ArithmeticOrStateCapacityFailure;
+        }
+      }
+    } catch (...) {
+      record.error_kind = PrivateIdentityRetentionError::BusinessPreflightFailure;
+      record.safety_reason = risk::AccountSafetyReason::ArithmeticOrStateCapacityFailure;
     }
   }
 

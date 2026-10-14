@@ -1051,6 +1051,31 @@ TEST_CASE("private fill batch rejects detached rows and foreign owners before mu
 }
 
 // --------------------------------------------------------
+// Read-only validation retains economic authority and scratch, while the existing component commit
+// still consumes it exactly once and advances the shared baseline used by joint preparations.
+TEST_CASE("private economic validation preserves plans and observes consumed authority",
+          "[risk][m4][private-fill-batch][preflight]") {
+  PrivateFillBatchEconomicsFixture fixture;
+  const auto& order = fixture.reserve_and_admit_order_or_throw(execution::OrderSide::Buy, 7);
+  const auto executions = create_batch_executions_or_throw(fixture, order, 2U);
+  const auto inputs = create_batch_inputs_or_throw(executions);
+  auto planned = fixture.inventory().plan_cumulative_fill_batch(order, inputs);
+  REQUIRE(planned);
+  const auto before = capture_batch_economics_or_throw(fixture);
+  const auto generation = fixture.inventory().planning_generation();
+  const auto& inventory = fixture.inventory();
+  REQUIRE(inventory.validate_reservation_inventory_plan(planned.value()));
+  REQUIRE(inventory.validate_reservation_inventory_plan(planned.value()));
+  CHECK(planned.value().execution_effect_count() == 2U);
+  CHECK(inventory.planning_generation() == generation);
+  CHECK(capture_batch_economics_or_throw(fixture) == before);
+  REQUIRE(fixture.inventory().commit_reservation_inventory_plan(std::move(planned).value()));
+  CHECK(inventory.planning_generation() > generation);
+  CHECK_FALSE(inventory.validate_reservation_inventory_plan(planned.value()));
+  CHECK(planned.value().execution_effect_count() == 0U);
+}
+
+// --------------------------------------------------------
 // Every component mutation invalidates old batch authority. Keeping a stale plan alive retains its
 // evidence lease but never lets a rejected commit replace newer reservations, sources, or OMS
 // state.
@@ -1075,6 +1100,7 @@ TEST_CASE("private fill batch rejects stale plans after intervening owner mutati
   }
   const auto before_rejection = capture_batch_economics_or_throw(fixture);
   const auto oms_before_rejection = order.private_projection();
+  CHECK_FALSE(fixture.inventory().validate_reservation_inventory_plan(planned.value()));
   CHECK_FALSE(fixture.inventory().commit_reservation_inventory_plan(std::move(planned).value()));
   CHECK(planned.value().execution_effect_count() == 2U);
   CHECK(capture_batch_economics_or_throw(fixture) == before_rejection);
@@ -1097,12 +1123,14 @@ TEST_CASE("private fill batch rejects plans after ledger relocation and OMS repl
     auto relocated = std::move(fixture.reservations);
     auto* inventory = risk::InventoryLedger::installed_inventory(relocated);
     REQUIRE(inventory != nullptr);
+    CHECK_FALSE(inventory->validate_reservation_inventory_plan(planned.value()));
     CHECK_FALSE(inventory->commit_reservation_inventory_plan(std::move(planned).value()));
     fixture.reservations = std::move(relocated);
   }
   SECTION("OMS storage is replaced at the same address") {
     fixture.outbound =
         extract_batch_economics_result_or_throw(oms::OutboundOms::create_outbound_oms(32U));
+    CHECK_FALSE(fixture.inventory().validate_reservation_inventory_plan(planned.value()));
     CHECK_FALSE(fixture.inventory().commit_reservation_inventory_plan(std::move(planned).value()));
     CHECK(fixture.outbound.order_count() == 0U);
   }

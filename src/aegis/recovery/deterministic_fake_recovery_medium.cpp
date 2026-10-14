@@ -1,10 +1,11 @@
 // Purpose: implement fixed-capacity typed fake-media validation, namespace publication and fake
-// acknowledgement, and a sealed fail-closed bootstrap without canonical evidence bytes.
+// acknowledgement, and exclusive unpublished private-input reservation without canonical bytes.
 
 #include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 
 #include "aegis/model/domain_error.hpp"
 #include "aegis/runtime/m4_policy.hpp"
+#include "private_event_journal_reservation.hpp"
 
 #include <exception>
 #include <limits>
@@ -25,8 +26,6 @@ namespace {
                                                                        const char* field) {
   return model::DomainError::create_at_field(code, field);
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Return whether one namespace already appears in a fixed acknowledged registry prefix.
@@ -53,6 +52,7 @@ namespace detail {
 // One externally serialized backing allocation owns every fixed slot and watermark independently of
 // handle lifetime. Its acknowledged count never exceeds its published count, namespace rows match
 // the acknowledged namespace-record projection, and all slots beyond active prefixes stay empty.
+// At most one unpublished private-input reservation exists, only while its lease is active.
 struct FakeRecoveryBacking {
 
   // --------------------------------------------------------
@@ -75,6 +75,7 @@ struct FakeRecoveryBacking {
   std::uint32_t registered_namespace_count{0U};
   bool lease_active{false};
   std::uint64_t lease_generation{0U};
+  bool private_input_reservation_active{false};
 };
 
 // ########################################################################
@@ -121,8 +122,6 @@ published_journal_record_pointer_at(const detail::FakeRecoveryBacking& backing,
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Borrow one retained namespace without exposing mutable registry storage.
 [[nodiscard]] const model::OrderNamespace*
 registered_namespace_pointer_at(const detail::FakeRecoveryBacking& backing,
@@ -133,8 +132,6 @@ registered_namespace_pointer_at(const detail::FakeRecoveryBacking& backing,
   const auto& slot = backing.namespace_slots[static_cast<std::size_t>(index)];
   return slot ? &*slot : nullptr;
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Validate one record's causal envelope, presence profile, and complete typed equality projection.
@@ -191,8 +188,6 @@ validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
 
   // ++++++++++++++++++++++++++++++++++++++++
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Validate every retained prefix and cross-check the acknowledged namespace oracle without
@@ -286,8 +281,6 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Discard only the volatile published suffix after cold validation and outside a live lease.
 void discard_volatile_journal_suffix(detail::FakeRecoveryBacking& backing) noexcept {
   for (std::uint32_t index = backing.acknowledged_journal_record_count;
@@ -298,8 +291,253 @@ void discard_volatile_journal_suffix(detail::FakeRecoveryBacking& backing) noexc
 }
 
 // --------------------------------------------------------
+// Validate the exact live lease and namespace-only causal prefix before reserving or inspecting
+// an unpublished business candidate. No public capability can advance this prefix in this slice.
+[[nodiscard]] model::Result<void> validate_private_journal_reservation_lease(
+    const std::shared_ptr<detail::FakeJournalLeaseControl>& lease,
+    RuntimeEpochId runtime_epoch_id) {
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject absent, inactive, or superseded incarnation authority before accessing its prefix.
+  if (!lease || !lease->backing || !lease->backing->lease_active ||
+      lease->generation != lease->backing->lease_generation) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_lease"));
+  }
+  const auto& backing = *lease->backing;
+  if (backing.published_journal_record_count == 0U || backing.registered_namespace_count == 0U ||
+      backing.published_journal_record_count != backing.acknowledged_journal_record_count ||
+      backing.published_journal_record_count > backing.journal_slots.size() ||
+      backing.registered_namespace_count > backing.namespace_slots.size()) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_prefix"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Bind the exact runtime epoch to the latest fake-acknowledged namespace bootstrap record.
+  const auto* const registered_namespace =
+      registered_namespace_pointer_at(backing, backing.registered_namespace_count - 1U);
+  const auto* const predecessor =
+      published_journal_record_pointer_at(backing, backing.published_journal_record_count - 1U);
+  if (registered_namespace == nullptr || predecessor == nullptr ||
+      runtime_epoch_id.order_namespace() != *registered_namespace ||
+      runtime_epoch_id.counter() != 1U ||
+      predecessor->kind() != JournalRecordKind::NamespaceRegistered ||
+      !std::holds_alternative<NamespaceRegisteredJournalPayload>(predecessor->payload())) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_runtime_epoch"));
+  }
+  const auto& namespace_payload =
+      std::get<NamespaceRegisteredJournalPayload>(predecessor->payload());
+  if (namespace_payload.order_namespace != *registered_namespace ||
+      namespace_payload.registry_count_after_append != backing.registered_namespace_count ||
+      predecessor->sequence().value() != backing.published_journal_record_count ||
+      predecessor->lineage_id() != backing.lineage_id ||
+      predecessor->root_provenance() != backing.root_provenance) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_predecessor"));
+  }
+  return model::Result<void>::create_success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
 
 } // namespace
+
+// --------------------------------------------------------
+// Retain the already constructed complete record and live lease without allocating a journal row.
+PreparedPrivateEventJournalInput::PreparedPrivateEventJournalInput(
+    std::shared_ptr<detail::FakeJournalLeaseControl> lease, JournalRecord record) noexcept
+    : lease_{std::move(lease)}, record_{std::move(record)} {}
+
+// --------------------------------------------------------
+// Transfer the sole unpublished reservation and revoke every moved-from inspection operation.
+PreparedPrivateEventJournalInput::PreparedPrivateEventJournalInput(
+    PreparedPrivateEventJournalInput&& other) noexcept
+    : lease_{std::move(other.lease_)}, record_{std::move(other.record_)} {
+  other.record_.reset();
+}
+
+// --------------------------------------------------------
+// Abandon the previous candidate before taking the source's complete exclusive reservation.
+PreparedPrivateEventJournalInput&
+PreparedPrivateEventJournalInput::operator=(PreparedPrivateEventJournalInput&& other) noexcept {
+  if (this != &other) {
+    release_reservation();
+    lease_ = std::move(other.lease_);
+    record_ = std::move(other.record_);
+    other.record_.reset();
+  }
+  return *this;
+}
+
+// --------------------------------------------------------
+// Release the unpublished candidate before the final lease share permits cold inspection again.
+PreparedPrivateEventJournalInput::~PreparedPrivateEventJournalInput() { release_reservation(); }
+
+// --------------------------------------------------------
+// The retained lease and candidate together represent this value's sole inspection capability.
+bool PreparedPrivateEventJournalInput::has_reservation() const noexcept {
+  return lease_ != nullptr && record_.has_value();
+}
+
+// --------------------------------------------------------
+// Borrow the complete candidate only while this value retains its own reservation.
+const JournalRecord* PreparedPrivateEventJournalInput::record() const noexcept {
+  return has_reservation() ? &*record_ : nullptr;
+}
+
+// --------------------------------------------------------
+// Verify exact unchanged lease, causal position, and empty destination without renewing authority.
+model::Result<void> PreparedPrivateEventJournalInput::validate_reservation() const {
+  if (!has_reservation()) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reservation"));
+  }
+  if (!record_->runtime_epoch_id()) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reservation"));
+  }
+  auto lease_valid =
+      validate_private_journal_reservation_lease(lease_, *record_->runtime_epoch_id());
+  if (!lease_valid) {
+    return lease_valid;
+  }
+  const auto& backing = *lease_->backing;
+  const auto* const predecessor =
+      published_journal_record_pointer_at(backing, backing.published_journal_record_count - 1U);
+  if (!backing.private_input_reservation_active ||
+      backing.published_journal_record_count >= backing.journal_slots.size() ||
+      backing.journal_slots[backing.published_journal_record_count] ||
+      record_->lineage_id() != backing.lineage_id ||
+      record_->root_provenance() != backing.root_provenance ||
+      record_->sequence().value() !=
+          static_cast<std::uint64_t>(backing.published_journal_record_count) + 1U ||
+      !record_->predecessor() || predecessor == nullptr ||
+      *record_->predecessor() != predecessor->sequence()) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reservation"));
+  }
+  return model::Result<void>::create_success();
+}
+
+// --------------------------------------------------------
+// Revoke exactly this incarnation's unpublished reservation without changing any journal prefix.
+void PreparedPrivateEventJournalInput::release_reservation() noexcept {
+  if (lease_ && record_ && lease_->backing && lease_->backing->lease_active &&
+      lease_->generation == lease_->backing->lease_generation) {
+    lease_->backing->private_input_reservation_active = false;
+  }
+  record_.reset();
+  lease_.reset();
+}
+
+// --------------------------------------------------------
+// Reserve a complete authoritative known-order input only after every envelope and capacity check.
+model::Result<PreparedPrivateEventJournalInput>
+PreparedPrivateEventJournalInput::reserve_private_event_journal_input(
+    std::shared_ptr<detail::FakeJournalLeaseControl> lease, RuntimeEpochId runtime_epoch_id,
+    const oms::NormalizedPrivateOrderInput& input,
+    const oms::PrivateEventResolution& first_admission_resolution,
+    JournalReplayProvenance replay_provenance, AuditSpan audit_span) {
+  using ReservationResult = model::Result<PreparedPrivateEventJournalInput>;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Check original acknowledged lease authority before accessing its root or fixed storage.
+  auto lease_valid = validate_private_journal_reservation_lease(lease, runtime_epoch_id);
+  if (!lease_valid) {
+    return ReservationResult::create_failure(std::move(lease_valid).error());
+  }
+  auto& backing = *lease->backing;
+  if (backing.private_input_reservation_active) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reservation"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve source-normalized and resolved provenance separately; an instrument disagreement may
+  // remain a truthful known-order safety proposal rather than being rewritten or discarded.
+  const auto* const known = first_admission_resolution.known_resolution();
+  if (input.subject_scope() != oms::PrivateEventSubjectScope::Order ||
+      (input.origin() != oms::PrivateEventOrigin::Venue &&
+       input.origin() != oms::PrivateEventOrigin::Reconciliation) ||
+      known == nullptr || !known->provenance.subject() || !input.provenance().subject()) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_profile"));
+  }
+  if (input.provenance().root() != backing.root_provenance ||
+      known->provenance.root() != backing.root_provenance) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_root"));
+  }
+  const auto& known_subject = *known->provenance.subject();
+  const auto& source_subject = *input.provenance().subject();
+  if (known_subject.logical_account_id() != input.logical_account_id() ||
+      known_subject.venue_id() != input.venue_id() ||
+      source_subject.logical_account_id() != input.logical_account_id() ||
+      source_subject.venue_id() != input.venue_id() || !known_subject.firm_id() ||
+      !known_subject.desk_id() || !known_subject.bot_id() || !known_subject.strategy_id() ||
+      !known_subject.route() || !known_subject.instrument() ||
+      (source_subject.firm_id() && source_subject.firm_id() != known_subject.firm_id())) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_subject"));
+  }
+  const auto* const reconciliation =
+      std::get_if<oms::ReconciliationPrivateEventOrigin>(&input.origin_value());
+  if (reconciliation != nullptr &&
+      reconciliation->reconciliation_epoch_id.runtime_epoch_id() != runtime_epoch_id) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reconciliation_epoch"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Include every namespace row in remaining physical headroom and derive the next causal sequence
+  // from the medium's actual prefix; no caller-authored linkage or prefix increment is accepted.
+  if (backing.published_journal_record_count >= backing.journal_slots.size()) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::JournalCapacityExceeded, "journal.capacity"));
+  }
+  if (backing.journal_slots[backing.published_journal_record_count]) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.unpublished_slot"));
+  }
+  const auto* const predecessor =
+      published_journal_record_pointer_at(backing, backing.published_journal_record_count - 1U);
+  if (predecessor->sequence().value() == std::numeric_limits<std::uint64_t>::max()) {
+    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::RecoveryCounterExhausted, "journal.sequence"));
+  }
+  auto next_sequence = JournalSequence::from_value(predecessor->sequence().value() + 1U);
+  if (!next_sequence) {
+    return ReservationResult::create_failure(std::move(next_sequence).error());
+  }
+  JournalRecord complete_record{
+      backing.lineage_id,
+      next_sequence.value(),
+      predecessor->sequence(),
+      runtime_epoch_id,
+      JournalRecordKind::PrivateEventInput,
+      backing.root_provenance,
+      known->provenance.subject(),
+      replay_provenance,
+      JournalPayloadValue{PrivateEventInputJournalPayload{input, first_admission_resolution}},
+      audit_span};
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Materialize the complete no-throw return value before acquiring the sole reservation flag.
+  // Publication, acknowledgement, actual audit rows, and live business state remain unchanged.
+  static_assert(std::is_nothrow_move_constructible_v<JournalRecord>);
+  static_assert(std::is_nothrow_move_constructible_v<PreparedPrivateEventJournalInput>);
+  static_assert(std::is_nothrow_move_constructible_v<ReservationResult>);
+  auto prepared = ReservationResult::create_success(
+      PreparedPrivateEventJournalInput{std::move(lease), std::move(complete_record)});
+  backing.private_input_reservation_active = true;
+  return prepared;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
 
 // --------------------------------------------------------
 // Keep every namespace-fenced startup authority together until later runtime composition consumes
@@ -315,12 +553,8 @@ RecoveryBootstrap::RecoveryBootstrap(RecoveryLineageId lineage_id, RuntimeEpochI
       order_ids_{std::move(order_ids)} {}
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Member destruction releases the lease after the sealed registered provider ceases use.
 RecoveryBootstrap::~RecoveryBootstrap() = default;
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Allocate one stable backing under exact policy capacities; translate allocation/length failures
@@ -351,13 +585,9 @@ DeterministicFakeRecoveryMedium::create_deterministic_fake_recovery_medium_from_
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Shared backing may outlive this external handle while a bootstrap or installed owner retains the
 // live incarnation lease.
 DeterministicFakeRecoveryMedium::~DeterministicFakeRecoveryMedium() = default;
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Validate a fully acknowledged cold prefix and every candidate resource before atomically
@@ -503,14 +733,10 @@ model::Result<RecoveryBootstrap> DeterministicFakeRecoveryMedium::bootstrap_reco
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Return the immutable lineage identity directly from the shared backing.
 const RecoveryLineageId& DeterministicFakeRecoveryMedium::lineage_id() const noexcept {
   return backing_->lineage_id;
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Return the exact compatible M4 root used to validate every record.
@@ -519,14 +745,10 @@ const model::M4RootProvenance& DeterministicFakeRecoveryMedium::root_provenance(
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Return exact initialization-preallocated typed journal headroom.
 std::uint32_t DeterministicFakeRecoveryMedium::journal_record_capacity() const noexcept {
   return static_cast<std::uint32_t>(backing_->journal_slots.size());
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Return the published prefix during cold inspection; reject an active lease.
@@ -540,8 +762,6 @@ DeterministicFakeRecoveryMedium::published_journal_record_count() const {
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Return the separately retained fake-acknowledged prefix during cold inspection.
 model::Result<std::uint32_t>
 DeterministicFakeRecoveryMedium::acknowledged_journal_record_count() const {
@@ -553,14 +773,10 @@ DeterministicFakeRecoveryMedium::acknowledged_journal_record_count() const {
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Return exact initialization-preallocated namespace-registry headroom.
 std::uint32_t DeterministicFakeRecoveryMedium::registered_namespace_capacity() const noexcept {
   return static_cast<std::uint32_t>(backing_->namespace_slots.size());
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Return the acknowledged namespace count during cold inspection; reject an active lease.
@@ -571,8 +787,6 @@ model::Result<std::uint32_t> DeterministicFakeRecoveryMedium::registered_namespa
   }
   return model::Result<std::uint32_t>::create_success(backing_->registered_namespace_count);
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Copy one published typed record by chronological index without exposing physical slots.
@@ -591,8 +805,6 @@ model::Result<JournalRecord> DeterministicFakeRecoveryMedium::published_journal_
 }
 
 // --------------------------------------------------------
-
-// --------------------------------------------------------
 // Copy one acknowledged namespace by chronological index without exposing registry slots.
 model::Result<model::OrderNamespace>
 DeterministicFakeRecoveryMedium::registered_namespace_at(std::uint32_t chronological_index) const {
@@ -609,8 +821,6 @@ DeterministicFakeRecoveryMedium::registered_namespace_at(std::uint32_t chronolog
   }
   return model::Result<model::OrderNamespace>::create_success(*value);
 }
-
-// --------------------------------------------------------
 
 // --------------------------------------------------------
 // Model crash loss only between incarnations and only after complete cold validation; success

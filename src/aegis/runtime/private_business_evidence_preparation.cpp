@@ -128,14 +128,33 @@ PrivateOrderReconciler::prepare_initial_known_authoritative_business_evidence(
   if (!identity) {
     return PreparationResult::create_failure(std::move(identity).error());
   }
-  const auto& business = proposal.value();
+  return prepare_initial_business_evidence_from_proposal(proposal.value(), identity.value(),
+                                                         replay_provenance, first_callback_ordinal,
+                                                         journal_sequence, diagnostic_ordinal);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Copy complete evidence while borrowing the genuine retained component and identity proposals.
+// The combined transaction uses this same path without relinquishing its economic scratch lease.
+model::Result<PreparedPrivateBusinessEvidence>
+PrivateOrderReconciler::prepare_initial_business_evidence_from_proposal(
+    const InitialKnownPrivateBusinessProposal& business,
+    const FirstSeenAuthoritativePrivateIdentityPlan& identity,
+    recovery::JournalReplayProvenance replay_provenance,
+    std::optional<model::CallbackOrdinal> first_callback_ordinal,
+    std::optional<recovery::JournalSequence> journal_sequence,
+    std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal) const {
+  using PreparationResult = model::Result<PreparedPrivateBusinessEvidence>;
+  const auto& input = business.input();
   const auto& resolution = business.first_admission_resolution();
   const auto* known = resolution.known_resolution();
   const auto& lifecycle = business.oms_transition();
   const auto* economics = business.economics_plan();
   std::optional<oms::PrivateTradeSemanticValue> trade;
   if (const auto* derived =
-          std::get_if<FirstSeenPrivateTradeIdentityPlan>(&identity.value().trade_plan())) {
+          std::get_if<FirstSeenPrivateTradeIdentityPlan>(&identity.trade_plan())) {
     trade = derived->semantic_value;
   }
 
@@ -214,7 +233,7 @@ PrivateOrderReconciler::prepare_initial_known_authoritative_business_evidence(
                     : std::span<const trace::OrderCallbackAuditValue>{};
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // The store validates every bound and copies values before the component scratch lease ends.
+  // The store validates every bound and copies values before the component lease can be released.
   return business_evidence_store_->prepare_known_private_business_evidence(
       input, resolution, trade, replay_provenance, primary_rows, range, callback_values,
       journal_sequence, diagnostic_ordinal);
