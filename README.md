@@ -131,6 +131,11 @@ durable external journal.
   prospective span, including an absent callback terminal row, and copies every source fact and
   economic prefix. Abandonment consumes no records or ordinals. The runtime prepares genuine initial
   orders; no publication, delivery, acknowledgement, or canonical evidence bytes are implemented.
+- A sealed joint preparation retains the genuine identity and economic plans together with that
+  evidence and a real fake-medium journal reservation. It derives sequence and predecessor from the
+  acknowledged namespace prefix, rechecks unchanged owner state, and releases every reservation on
+  abandonment. Authentic callback-free gap turns exercise this preflight in both admission lanes;
+  their copied journal candidates remain volatile observations, and completion remains retained.
 
 The [current M4 implementation boundary](docs/implementation-roadmap.md#current-implementation-boundary)
 explains why canonical identity publication still requires the joint business journal, OMS,

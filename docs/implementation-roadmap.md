@@ -364,6 +364,30 @@ conflict, non-order, and account/source fan-out evidence are outside this known-
 typed journal payload now represents a private input and its immutable first resolution, but the
 fake medium still publishes only namespace registrations and rejects unsupported business kinds.
 
+A source-private joint preparation now retains the genuine first-seen identity plan, complete
+initial business proposal (including its economic scratch lease), copied evidence, and one real
+fake-medium journal reservation together. The closed reservation derives its sequence and
+predecessor from the actual acknowledged prefix; it includes the complete typed input, sealed first
+resolution, runtime epoch, root, replay provenance, and required span. This known-order journal
+envelope carries the complete resolved subject, while the payload keeps the unchanged source
+provenance. Venue and runtime-qualified reconciliation normalized facts use `PrivateEventInput`;
+full original batch rows and the separate `ReconciliationInput` dispatcher remain unimplemented.
+
+The move-only preparation keeps every lease until destruction, survives owner destruction for
+immutable inspection, and keeps cold reopening fenced until its journal lease ends. Validation
+first compares an opaque owner-incarnation identity, then rejects changes to the genuine order,
+reservation/inventory generation, containment, identity/preparation history, and evidence/journal
+linkage. It grants no publication or application authority. Economic component validation is now
+separate from its private no-fail write phase; the existing component commit retains its behavior.
+
+Production admission exercises this preflight only for a first-seen known initial callback-free
+fill gap, using the authentic receipt's admission/receive identities. It copies the prospective
+journal candidate into fixed retained-turn storage, abandons all reservations, and still completes
+as `RetainedForReconciliation`. The namespace row counts against journal capacity: exhaustion
+preserves the fact and latches `EvidenceCapacityExhausted`/`Quarantined`. Callback-bearing input
+preflight remains an explicit value-level API because the actual bot callback reservation is absent.
+No sequence, audit ordinal, canonical identity, or live business change is consumed by this slice.
+
 The next joint reducer must validate OMS and economic plans against one unchanged owner before any
 mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
 order. The existing economics commit deliberately rejects an OMS projection changed since planning;

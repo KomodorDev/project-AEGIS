@@ -44,6 +44,16 @@ snapshots, replay, authoritative reconciliation, live catch-up, recovered-owner 
 `SubmitReferenceIntent`, and the 55-point crash matrix remain unimplemented. The accepted recovery
 and durability requirements below are unchanged, and this composition proves no recovery exit gate.
 
+One closed source-private reservation can now prepare a complete known-order `PrivateEventInput`
+record from the installed live lease. It derives the next sequence/predecessor from the real medium,
+reserves existing fixed headroom, and copies the mandatory span without publication or sequence
+advance. The known envelope owns resolved local subject provenance; its payload independently keeps
+the unchanged normalized source and sealed resolution. Both venue and current-runtime reconciliation
+normalized events fit that private-input payload; no original batch row or complete reconciliation
+dispatcher is invented. Abandonment releases the reservation, while a detached preparation keeps
+cold reopening fenced until its lease ends. Bootstrap/replay validation still rejects business kinds;
+publication, complete-span acknowledgement, and recovery remain later implementation work.
+
 ## Decision
 
 The following subsections define the accepted recovery authority, journal/snapshot ordering, replay
