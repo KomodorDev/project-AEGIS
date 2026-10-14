@@ -126,8 +126,11 @@ durable external journal.
   authority and reserves no journal or audit records.
 - A bounded deterministic fake recovery medium that acknowledges namespace publication before the
   runtime exposes recovery-backed identity authority.
-- Typed M4 semantic evidence and audit-span relationships that remain storage-free until a later
-  accepted canonical byte schema and durable implementation are added.
+- Complete typed known-order event, input-journal payload, primary audit, and aggregate callback
+  proposals with startup-sized evidence backing. One move-only preparation reserves the full
+  prospective span, including an absent callback terminal row, and copies every source fact and
+  economic prefix. Abandonment consumes no records or ordinals. The runtime prepares genuine initial
+  orders; no publication, delivery, acknowledgement, or canonical evidence bytes are implemented.
 
 The [current M4 implementation boundary](docs/implementation-roadmap.md#current-implementation-boundary)
 explains why canonical identity publication still requires the joint business journal, OMS,

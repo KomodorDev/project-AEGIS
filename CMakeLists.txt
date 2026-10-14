@@ -101,6 +101,9 @@ add_library(
   src/aegis/runtime/private_order_reconciler.cpp
   src/aegis/runtime/private_oms_transition_planner.cpp
   src/aegis/runtime/private_business_proposal.cpp
+  # Complete proposed evidence uses startup-sized storage without journal or callback publication.
+  src/aegis/runtime/private_business_evidence_store.cpp
+  src/aegis/runtime/private_business_evidence_preparation.cpp
   # Preparations remain separate from canonical identities and economic application.
   src/aegis/runtime/private_identity_preparation.cpp
   # The concrete private consumer owns retained facts and fail-closed submission gates.
@@ -121,6 +124,8 @@ add_library(
   src/aegis/trace/trace.cpp
   # M4 semantic trace vocabulary remains typed and storage-free until ADR-0014 assigns bytes.
   src/aegis/trace/m4_semantic_evidence.cpp
+  # Complete private business evidence retains cold backing without publishing records.
+  src/aegis/trace/private_business_evidence.cpp
   # Runtime trace adds bounded deterministic data-plane evidence without changing the M1 schema.
   src/aegis/trace/runtime_trace.cpp
   # Submission trace owns separate bounded AEGISSTS evidence so M2 callback preflight is unchanged.

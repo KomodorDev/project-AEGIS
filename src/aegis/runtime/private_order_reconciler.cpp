@@ -225,6 +225,16 @@ PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
   auto recovery_identity_lease = recovery_bootstrap.lease_;
 
   // ++++++++++++++++++++++++++++++++++++++++
+  // Allocate the complete future business-evidence backing before any bootstrap authority moves.
+  auto business_evidence_store =
+      PrivateBusinessEvidenceStore::create_private_business_evidence_store(
+          policy, recovery_lineage_id, runtime_epoch_id);
+  if (!business_evidence_store) {
+    return model::Result<PreparedReconciler>::create_failure(
+        std::move(business_evidence_store).error());
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
   // Interesting syntax: a new-expression obtains storage before evaluating constructor arguments.
   // Allocation failure therefore cannot affect bootstrap authority; the child receives only the
   // copied lease share while the caller-owned bootstrap remains completely intact.
@@ -241,7 +251,8 @@ PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
       owner, std::move(owned_m4_policy), recovery_lineage_id, runtime_epoch_id,
       registered_order_namespace, std::move(event_factory), std::move(event_identity_records),
       std::move(trade_identity_records), std::move(exchange_order_mappings),
-      std::move(recovery_identity_lease), configuration}};
+      std::move(business_evidence_store).value(), std::move(recovery_identity_lease),
+      configuration}};
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Wrap the fully allocated child before consuming either bootstrap authority. The returned
@@ -495,6 +506,7 @@ PrivateOrderReconciler::PrivateOrderReconciler(
     std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
     std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
     std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
+    std::unique_ptr<PrivateBusinessEvidenceStore> business_evidence_store,
     std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease,
     const configuration::StartupConfiguration& configuration)
     : owner_{&owner}, m4_policy_{std::move(m4_policy)}, recovery_lineage_id_{recovery_lineage_id},
@@ -503,8 +515,9 @@ PrivateOrderReconciler::PrivateOrderReconciler(
       event_identity_records_{std::move(event_identity_records)},
       trade_identity_records_{std::move(trade_identity_records)},
       exchange_order_mappings_{std::move(exchange_order_mappings)},
+      business_evidence_store_{std::move(business_evidence_store)},
       recovery_lease_{std::move(recovery_lease)}, retention_{configuration, m4_policy_} {
-  if (!recovery_lease_) {
+  if (!recovery_lease_ || !business_evidence_store_) {
     std::terminate();
   }
 }

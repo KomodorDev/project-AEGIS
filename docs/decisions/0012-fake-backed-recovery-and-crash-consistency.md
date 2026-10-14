@@ -35,7 +35,11 @@ production private-retention owner from an acknowledged namespace bootstrap befo
 authority becomes available. Its lease keeps the namespace-only fake medium unavailable for cold
 inspection until the runtime is destroyed. Private facts, comparison preparations, and safety
 causes retained by that owner are volatile and are not published or acknowledged business journal
-records. The medium still contains only namespace registrations. Business journal records,
+records. The medium still contains only namespace registrations. A typed private-input payload now
+owns the complete normalized input and sealed first resolution for a future business record, and
+the private owner prepares prospective audit spans in separate fixed backing. Neither value has
+append, publication, acknowledgement, or replay authority; unsupported business kinds still fail
+the medium's namespace-only validation. Published business journal records,
 snapshots, replay, authoritative reconciliation, live catch-up, recovered-owner publication,
 `SubmitReferenceIntent`, and the 55-point crash matrix remain unimplemented. The accepted recovery
 and durability requirements below are unchanged, and this composition proves no recovery exit gate.

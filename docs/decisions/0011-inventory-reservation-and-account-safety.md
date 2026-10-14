@@ -59,6 +59,12 @@ exclusive detached batch lease, transferred by moves and released by consumption
 Legacy single-fill and release plans do not acquire that lease. A source-private initial business
 query joins one genuine initial OMS proposal with these economics but exposes no commit interface.
 
+That genuine initial query can additionally copy complete prospective OMS, reservation, and all
+seven nominally keyed inventory audit effects into bounded evidence backing. Signed deltas retain
+the actual execution while definitive releases carry zero confirmed transfer. Proposed safety
+changes cannot clear the current account gate. This evidence lease applies no economics or safety;
+its complete values are preparation for the later joint transaction.
+
 The opt-in M4 runtime installs this component together with its private owner before callback
 authority exists. The current retention reducer does not call the economics commit interface.
 Consequently these component tests prove arithmetic, capacity, and atomic owner-local behavior;

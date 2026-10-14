@@ -12,6 +12,7 @@
 #include "aegis/oms/private_order_resolution.hpp"
 #include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 #include "aegis/runtime/m4_policy.hpp"
+#include "private_business_evidence_store.hpp"
 #include "private_business_proposal.hpp"
 #include "private_identity_retention.hpp"
 #include "private_order_event_factory.hpp"
@@ -429,6 +430,26 @@ public:
       recovery::AuditOrdinal prospective_first_audit_ordinal) const;
 
   // --------------------------------------------------------
+  // Prepare complete copied known-order evidence from genuine unchanged initial components and
+  // this store's prospective audit position. Replay and optional linkage values remain authored
+  // candidates; they grant no admission, journal, callback, or publication authority. Only one
+  // evidence lease may remain outstanding, including after moves; destruction releases scratch.
+  // The entire call and lease access require owner serialization or quiescence.
+  [[nodiscard]] model::Result<PreparedPrivateBusinessEvidence>
+  prepare_initial_known_authoritative_business_evidence(
+      const oms::NormalizedPrivateOrderInput& input,
+      recovery::JournalReplayProvenance replay_provenance,
+      std::optional<model::CallbackOrdinal> first_callback_ordinal = std::nullopt,
+      std::optional<recovery::JournalSequence> journal_sequence = std::nullopt,
+      std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal = std::nullopt) const;
+
+  // --------------------------------------------------------
+  // Inspect fixed preparation capacities and prospective counters without mutation rights.
+  [[nodiscard]] const PrivateBusinessEvidenceStore& business_evidence_store() const noexcept {
+    return *business_evidence_store_;
+  }
+
+  // --------------------------------------------------------
 private:
 
   // ########################################################################
@@ -516,6 +537,7 @@ private:
       std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
       std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
       std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
+      std::unique_ptr<PrivateBusinessEvidenceStore> business_evidence_store,
       std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease,
       const configuration::StartupConfiguration& configuration);
 
@@ -548,6 +570,7 @@ private:
   std::uint32_t event_identity_record_count_{0U};
   std::uint32_t trade_identity_record_count_{0U};
   std::uint32_t exchange_order_mapping_count_{0U};
+  std::unique_ptr<PrivateBusinessEvidenceStore> business_evidence_store_;
   std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease_;
   PrivateIdentityRetentionState retention_;
 
