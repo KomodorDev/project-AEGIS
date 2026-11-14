@@ -187,8 +187,12 @@ private:
   oms::PrivateEventResolution resolution_;
 
   // ########################################################################
-  // Only the source-private store may prepare a complete business payload; no append right follows.
+  // The source-private evidence store seals a complete payload alongside prospective audit rows.
   friend class runtime::PrivateBusinessEvidenceStore;
+
+  // ########################################################################
+  // The closed reservation owner seals the same payload when deriving real medium linkage first.
+  friend class PreparedPrivateEventJournalInput;
 
   // ########################################################################
 };
@@ -261,7 +265,7 @@ public:
   friend bool operator==(const JournalRecord&, const JournalRecord&) = default;
 
   // --------------------------------------------------------
-  // Only the deterministic journal owner may construct a record after complete presence checks.
+  // Only closed journal owners may construct a record after complete envelope checks.
 private:
 
   // --------------------------------------------------------
@@ -296,6 +300,10 @@ private:
   // ########################################################################
   // The concrete fake medium creates namespace rows during fake-acknowledged bootstrap.
   friend class DeterministicFakeRecoveryMedium;
+
+  // ########################################################################
+  // A source-private reservation retains a complete prospective input without publishing it.
+  friend class PreparedPrivateEventJournalInput;
 
   // ########################################################################
 };

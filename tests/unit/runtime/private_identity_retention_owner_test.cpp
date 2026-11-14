@@ -3,6 +3,7 @@
 // inventory.
 
 #include "aegis/risk/inventory_ledger.hpp"
+#include "aegis/runtime/private_business_transaction.hpp"
 #include "aegis/runtime/private_order_reconciler.hpp"
 #include "aegis/runtime/serialized_executor.hpp"
 #include "m4_private_event_fixture.hpp"
@@ -95,10 +96,10 @@ public:
   }
 
   // --------------------------------------------------------
-  // Normalize a unique ordinary execution while permitting independent trade-capacity pressure.
+  // Normalize a unique contiguous or gapped execution with independent trade-capacity pressure.
   [[nodiscard]] oms::PrivateOrderIngressAttempt
   create_execution_attempt_or_throw(std::uint8_t event_byte, std::uint8_t trade_byte = 0x71U,
-                                    std::int64_t price = 99) const {
+                                    std::int64_t price = 99, std::int64_t cumulative = 1) const {
     const auto& provenance = order_or_throw().provenance();
     auto locator = extract_result_or_throw(oms::PrivateOrderLocator::create_private_order_locator(
         order_id, test_support::create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x61U)));
@@ -113,20 +114,25 @@ public:
         test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(trade_byte),
         provenance.instrument_id, provenance.metadata_revision,
         test_support::create_m4_decimal_or_throw<model::Quantity>(1),
-        test_support::create_m4_decimal_or_throw<model::Quantity>(1),
+        test_support::create_m4_decimal_or_throw<model::Quantity>(cumulative),
         test_support::create_m4_decimal_or_throw<model::Price>(price), std::nullopt));
   }
 
   // --------------------------------------------------------
-  // Normalize a distinct reconciliation row whose required side reproduces the ordinary tuple.
+  // Normalize a reconciliation row with optional gap and exact current-runtime epoch qualification.
   [[nodiscard]] oms::ReconciliationPrivateEventIngressAttempt
-  create_reconciliation_attempt_or_throw(std::uint64_t row = 1U) const {
+  create_reconciliation_attempt_or_throw(std::uint64_t row = 1U, std::int64_t cumulative = 1,
+                                         bool current_epoch = false) const {
     const auto& provenance = order_or_throw().provenance();
     auto locator = extract_result_or_throw(
         oms::PrivateOrderLocator::create_private_order_locator(order_id, std::nullopt));
     return extract_result_or_throw(factory.create_reconciliation_execution_attempt(
         oms::ReconciliationPrivateIngressOrigin{
-            test_support::create_m4_reconciliation_epoch_or_throw(),
+            current_epoch
+                ? extract_result_or_throw(recovery::ReconciliationEpochId::
+                                              reconciliation_epoch_id_from_runtime_and_counter(
+                                                  owner().runtime_epoch_id(), 1U))
+                : test_support::create_m4_reconciliation_epoch_or_throw(),
             test_support::create_m4_opaque_identity_or_throw<oms::AuthoritativeCutId>(0x51U),
             test_support::create_m4_ordinal_or_throw<recovery::ReconciliationRowOrdinal>(row),
             model::SourceTimestamp{100U}},
@@ -134,7 +140,7 @@ public:
         test_support::create_m4_opaque_identity_or_throw<oms::TradeId>(0x71U),
         provenance.instrument_id, provenance.metadata_revision,
         test_support::create_m4_decimal_or_throw<model::Quantity>(1),
-        test_support::create_m4_decimal_or_throw<model::Quantity>(1),
+        test_support::create_m4_decimal_or_throw<model::Quantity>(cumulative),
         test_support::create_m4_decimal_or_throw<model::Price>(99), execution::OrderSide::Buy));
   }
 
@@ -898,6 +904,96 @@ TEST_CASE("production identity owner publishes stable retained pointers to concu
   CHECK(fixture.owner().event_identity_record_count() == 0U);
   CHECK(fixture.owner().trade_identity_record_count() == 0U);
   CHECK(fixture.owner().exchange_order_mapping_count() == 0U);
+}
+
+// --------------------------------------------------------
+
+// --------------------------------------------------------
+// Authentic admitted gaps exercise real journal preflight in both lanes without assigning a bot
+// callback or claiming private consumption. The namespace row consumes the first journal slot.
+TEST_CASE("production private gap turns reserve and abandon real journal candidates",
+          "[private-business-transaction][private-identity-retention][admission]") {
+  for (const bool reconciliation : {false, true}) {
+    for (const std::uint64_t journal_capacity : {1U, 2U}) {
+      CAPTURE(reconciliation, journal_capacity);
+      auto capacities = test_support::create_ordinary_m4_policy_capacities();
+      capacities.max_journal_records = journal_capacity;
+      RetentionOwnerFixture fixture{capacities};
+      const auto before = fixture.order_or_throw().private_projection();
+      const auto* reservation = fixture.authority.submission->reservations().find_reservation(
+          fixture.order_or_throw().reservation_id());
+      REQUIRE(reservation != nullptr);
+      const auto reservation_before = *reservation;
+      std::optional<runtime::AdmissionReceipt> receipt;
+      if (reconciliation) {
+        const auto attempt = fixture.create_reconciliation_attempt_or_throw(1U, 2, true);
+        const auto admitted =
+            extract_result_or_throw(fixture.executor->try_admit_reconciliation_event(attempt));
+        REQUIRE(admitted.receipt);
+        receipt = admitted.receipt;
+      } else {
+        const auto attempt = fixture.create_execution_attempt_or_throw(1U, 0x71U, 99, 2);
+        const auto admitted = extract_result_or_throw(fixture.executor->try_admit_private(attempt));
+        REQUIRE(admitted.receipt);
+        receipt = admitted.receipt;
+      }
+      fixture.execute_pending_turns_or_throw();
+      const auto* retained =
+          fixture.owner().find_retained_identity_turn(receipt->attempt_ordinal, reconciliation);
+      REQUIRE(retained != nullptr);
+      REQUIRE(retained->normalized);
+      CHECK(retained->receipt == receipt);
+      CHECK(fixture.owner().find_retained_identity_turn(receipt->attempt_ordinal,
+                                                        !reconciliation) == nullptr);
+      CHECK_FALSE(
+          fixture.owner().find_committed_private_event_disposition(receipt->attempt_ordinal));
+      CHECK_FALSE(fixture.owner().find_committed_reconciliation_event_disposition(
+          receipt->attempt_ordinal));
+      CHECK(fixture.order_or_throw().private_projection() == before);
+      CHECK(*fixture.authority.submission->reservations().find_reservation(
+                fixture.order_or_throw().reservation_id()) == reservation_before);
+      CHECK(fixture.owner().event_identity_record_count() == 0U);
+      CHECK(fixture.owner().trade_identity_record_count() == 0U);
+      CHECK(fixture.owner().exchange_order_mapping_count() == 0U);
+      CHECK(fixture.owner().business_evidence_store().accepted_private_event_record_count() == 0U);
+      CHECK(fixture.owner().business_evidence_store().accepted_private_audit_record_count() == 0U);
+      CHECK(fixture.owner().business_evidence_store().next_audit_ordinal().value() == 1U);
+      CHECK_FALSE(fixture.owner().business_evidence_store().has_outstanding_preparation());
+      if (journal_capacity == 1U) {
+        CHECK_FALSE(retained->journal_preflight_candidate);
+        REQUIRE(retained->planning_error);
+        CHECK(retained->planning_error->code == model::DomainErrorCode::JournalCapacityExceeded);
+        CHECK(retained->error_kind == runtime::PrivateIdentityRetentionError::JournalCapacity);
+        CHECK(retained->safety_reason == risk::AccountSafetyReason::EvidenceCapacityExhausted);
+        CHECK(fixture.owner().account_safety_state(
+                  fixture.order_or_throw().provenance().logical_account_id) ==
+              risk::AccountSafetyState::Quarantined);
+      } else {
+        REQUIRE(retained->journal_preflight_candidate);
+        const auto& journal = *retained->journal_preflight_candidate;
+        CHECK(journal.sequence().value() == 2U);
+        REQUIRE(journal.predecessor());
+        CHECK(journal.predecessor()->value() == 1U);
+        CHECK(journal.runtime_epoch_id() == fixture.owner().runtime_epoch_id());
+        CHECK(journal.lineage_id() == fixture.owner().recovery_lineage_id());
+        REQUIRE(journal.replay_provenance());
+        CHECK(journal.replay_provenance()->admission_ordinal == receipt->attempt_ordinal);
+        CHECK(journal.replay_provenance()->receive_sequence == receipt->receive_sequence);
+        REQUIRE(journal.audit_span());
+        CHECK(journal.audit_span()->first_audit_ordinal().value() == 1U);
+        CHECK(journal.audit_span()->audit_record_count() == 1U);
+        CHECK(std::get<recovery::PrivateEventInputJournalPayload>(journal.payload()).input() ==
+              *retained->normalized);
+        CHECK(retained->safety_reason == risk::AccountSafetyReason::IncompleteReconciliation);
+        CHECK_FALSE(retained->planning_error);
+        // The abandoned reservation can be acquired again without consuming journal or audit IDs.
+        auto retry = fixture.owner().prepare_initial_known_authoritative_business_transaction(
+            *retained->normalized, *journal.replay_provenance());
+        REQUIRE(retry);
+        CHECK(retry.value().journal_record()->sequence() == journal.sequence());
+      }
+    }
+  }
 }
 
 // --------------------------------------------------------

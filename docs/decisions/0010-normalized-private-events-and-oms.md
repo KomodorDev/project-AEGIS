@@ -65,6 +65,14 @@ canonical disposition or callback outcome. Its absence of a terminal row is expl
 cannot claim delivery, private consumption, or live state changes. The accepted commit and callback
 ordering below remains unimplemented end to end.
 
+The new owner-sealed joint preparation retains those complete proposals and their economic lease
+alongside a real unpublished journal reservation. It rejects foreign or changed owners before any
+later use, including unchanged-economics proposals whose inventory baseline changed elsewhere.
+Authentic callback-free gap admissions exercise and abandon this preflight in both lanes, retaining
+the candidate solely as volatile evidence. Callback-bearing preparations use prospective callback
+values and cannot stand in for the actual dispatcher. Canonical identity publication and live OMS
+application remain outside this slice.
+
 ## Decision
 
 The following subsections define the accepted private-event vocabulary, correlation, lifecycle,

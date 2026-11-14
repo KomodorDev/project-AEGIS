@@ -1743,9 +1743,9 @@ InventoryLedger::plan_terminal_release(const oms::OutboundOrderRecord& order,
 }
 
 // --------------------------------------------------------
-// Validate one unchanged incarnation and complete source projection before the no-fail commit.
+// Validate one unchanged incarnation and complete source projection without consuming authority.
 model::Result<void>
-InventoryLedger::commit_reservation_inventory_plan(ReservationInventoryPlan&& plan) {
+InventoryLedger::validate_reservation_inventory_plan(const ReservationInventoryPlan& plan) const {
   if (!plan.incarnation_ || plan.incarnation_ != incarnation_ || plan.generation_ != generation_ ||
       generation_ == std::numeric_limits<std::uint64_t>::max() || !reservations_->implementation_ ||
       reservations_->implementation_->inventory.get() != this || !orders_incarnation_ ||
@@ -1756,7 +1756,7 @@ InventoryLedger::commit_reservation_inventory_plan(ReservationInventoryPlan&& pl
     return model::Result<void>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidReservationConversion, "reservation_conversion.stale_plan"));
   }
-  auto& storage = *reservations_->implementation_;
+  const auto& storage = *reservations_->implementation_;
   if (plan.reservation_index_ >= storage.reservation_slots.size() ||
       !storage.reservation_slots[plan.reservation_index_] ||
       storage.reservation_slots[plan.reservation_index_]->evidence != plan.before_ ||
@@ -1764,6 +1764,26 @@ InventoryLedger::commit_reservation_inventory_plan(ReservationInventoryPlan&& pl
     return model::Result<void>::create_failure(DomainError::create_at_field(
         DomainErrorCode::InvalidReservationConversion, "reservation_conversion.stale_reservation"));
   }
+  return model::Result<void>::create_success();
+}
+
+// --------------------------------------------------------
+// Preserve component commit behavior by validating everything before its private no-fail phase.
+model::Result<void>
+InventoryLedger::commit_reservation_inventory_plan(ReservationInventoryPlan&& plan) {
+  auto valid = validate_reservation_inventory_plan(plan);
+  if (!valid) {
+    return valid;
+  }
+  apply_validated_reservation_inventory_plan(std::move(plan));
+  return model::Result<void>::create_success();
+}
+
+// --------------------------------------------------------
+// Replace all prevalidated residual and confirmed cells synchronously, then revoke this plan.
+void InventoryLedger::apply_validated_reservation_inventory_plan(
+    ReservationInventoryPlan&& plan) noexcept {
+  auto& storage = *reservations_->implementation_;
   static_assert(std::is_nothrow_copy_constructible_v<InventorySourceRecord>);
   static_assert(std::is_nothrow_copy_assignable_v<InventorySourceRecord>);
   static_assert(std::is_nothrow_copy_assignable_v<ReservationEvidence>);
@@ -1802,7 +1822,6 @@ InventoryLedger::commit_reservation_inventory_plan(ReservationInventoryPlan&& pl
   invalidate_plans();
   plan.incarnation_.reset();
   plan.batch_evidence_.reset();
-  return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++
 }

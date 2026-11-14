@@ -65,6 +65,14 @@ the actual execution while definitive releases carry zero confirmed transfer. Pr
 changes cannot clear the current account gate. This evidence lease applies no economics or safety;
 its complete values are preparation for the later joint transaction.
 
+A combined owner preparation now retains the economic plan until its complete evidence and journal
+reservations end. Read-only economic validation checks the same source baseline as component commit;
+the existing commit immediately follows that validation with a private no-fail write phase. Every
+reservation/inventory mutation advances the captured non-wrapping generation, invalidating joint
+preparations even when they propose no economics. The joint API still applies nothing. A production
+callback-free gap whose real journal reservation cannot fit retains the fact and selects reason 17,
+`EvidenceCapacityExhausted`, without changing either ledger.
+
 The opt-in M4 runtime installs this component together with its private owner before callback
 authority exists. The current retention reducer does not call the economics commit interface.
 Consequently these component tests prove arithmetic, capacity, and atomic owner-local behavior;

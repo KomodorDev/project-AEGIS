@@ -4,6 +4,7 @@
 #pragma once
 
 #include "aegis/oms/outbound_oms.hpp"
+#include "aegis/recovery/journal_record.hpp"
 #include "aegis/runtime/private_order_admission.hpp"
 #include "private_identity_preparation.hpp"
 
@@ -26,6 +27,8 @@ enum class PrivateIdentityRetentionError : std::size_t {
   EvidenceCapacity,
   InternalFailure,
   GlobalContainment,
+  JournalCapacity,
+  BusinessPreflightFailure,
   Count,
 };
 
@@ -44,6 +47,8 @@ struct RetainedPrivateIdentityTurn {
   std::optional<model::TurnOrdinal> turn_ordinal;
   std::optional<oms::NormalizedPrivateOrderInput> normalized;
   std::optional<PrivateIdentityPreparationResult> preparation;
+  // A copied candidate records successful callback-free preflight; it is never a published input.
+  std::optional<recovery::JournalRecord> journal_preflight_candidate;
   std::optional<model::DomainError> planning_error;
   std::optional<risk::AccountSafetyReason> safety_reason;
   PrivateIdentityRetentionError error_kind{PrivateIdentityRetentionError::PendingReducer};

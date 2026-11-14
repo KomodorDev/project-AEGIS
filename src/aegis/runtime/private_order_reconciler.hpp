@@ -25,6 +25,19 @@
 #include <vector>
 
 namespace aegis::runtime {
+namespace detail {
+
+// ########################################################################
+// A cold lifetime identity prevents detached preparations from authorizing a replacement owner.
+struct PrivateBusinessTransactionIncarnation;
+
+// ########################################################################
+
+} // namespace detail
+
+// ########################################################################
+// A sealed detached transaction retains genuine component and journal reservations together.
+class PreparedInitialKnownPrivateBusinessTransaction;
 
 // ########################################################################
 // The coordinator installs the child only while pristine, then owns and destroys it at one stable
@@ -444,6 +457,26 @@ public:
       std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal = std::nullopt) const;
 
   // --------------------------------------------------------
+  // Retain one genuine initial business proposal, economic scratch, complete evidence, and real
+  // journal-slot reservation together. Replay/callback identities remain prospective values;
+  // this source-private preparation cannot publish or consume input. Failure releases every
+  // acquired reservation without changing business prefixes or counters. The complete call and
+  // subsequent access require owner serialization or quiescence.
+  [[nodiscard]] model::Result<PreparedInitialKnownPrivateBusinessTransaction>
+  prepare_initial_known_authoritative_business_transaction(
+      const oms::NormalizedPrivateOrderInput& input,
+      recovery::JournalReplayProvenance replay_provenance,
+      std::optional<model::CallbackOrdinal> first_callback_ordinal = std::nullopt,
+      std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal = std::nullopt) const;
+
+  // --------------------------------------------------------
+  // Reject moved, foreign, stale, or internally inconsistent preparations before any publication
+  // or dereference of a saved row. Success proves unchanged captured owner components and live
+  // reservations only; it grants no admission, callback, append, or economic-consumption right.
+  [[nodiscard]] model::Result<void> validate_prepared_initial_known_business_transaction(
+      const PreparedInitialKnownPrivateBusinessTransaction& transaction) const;
+
+  // --------------------------------------------------------
   // Inspect fixed preparation capacities and prospective counters without mutation rights.
   [[nodiscard]] const PrivateBusinessEvidenceStore& business_evidence_store() const noexcept {
     return *business_evidence_store_;
@@ -538,6 +571,7 @@ private:
       std::vector<std::optional<PrivateTradeIdentityRecord>> trade_identity_records,
       std::vector<std::optional<PrivateExchangeOrderMapping>> exchange_order_mappings,
       std::unique_ptr<PrivateBusinessEvidenceStore> business_evidence_store,
+      std::shared_ptr<const detail::PrivateBusinessTransactionIncarnation> business_incarnation,
       std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease,
       const configuration::StartupConfiguration& configuration);
 
@@ -556,6 +590,18 @@ private:
   [[nodiscard]] bool bind_private_executor(SerializedExecutor& executor) noexcept;
 
   // --------------------------------------------------------
+  // Copy complete evidence from an already retained genuine proposal and exact identity plan.
+  // This helper borrows their fixed values for the serialized call and preserves both leases.
+  [[nodiscard]] model::Result<PreparedPrivateBusinessEvidence>
+  prepare_initial_business_evidence_from_proposal(
+      const InitialKnownPrivateBusinessProposal& business,
+      const FirstSeenAuthoritativePrivateIdentityPlan& identity,
+      recovery::JournalReplayProvenance replay_provenance,
+      std::optional<model::CallbackOrdinal> first_callback_ordinal,
+      std::optional<recovery::JournalSequence> journal_sequence,
+      std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal) const;
+
+  // --------------------------------------------------------
   // Retain immutable owner/recovery authority, empty canonical tables, and the opaque live lease.
   // The last-declared retention state owns the independently mutable preparations and gates.
   const SubmissionCoordinator* owner_;
@@ -571,6 +617,7 @@ private:
   std::uint32_t trade_identity_record_count_{0U};
   std::uint32_t exchange_order_mapping_count_{0U};
   std::unique_ptr<PrivateBusinessEvidenceStore> business_evidence_store_;
+  std::shared_ptr<const detail::PrivateBusinessTransactionIncarnation> business_incarnation_;
   std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease_;
   PrivateIdentityRetentionState retention_;
 

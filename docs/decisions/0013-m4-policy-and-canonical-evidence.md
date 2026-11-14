@@ -67,6 +67,14 @@ retain optional linkage as candidate values and cannot publish evidence or ackno
 Currency and error context use bounded inline semantic storage; those bounds assign no ADR-0014
 byte widths. The fake recovery medium remains namespace-only.
 
+Journal-backed joint preparations now reserve one slot from that medium's actual fixed journal
+capacity, including the already acknowledged namespace prefix. Their complete typed record and
+actual sequence link every prepared primary and Planned row. One outstanding reservation keeps its
+incarnation lease; failure or abandonment consumes no published prefix, audit position, or callback
+counter. A retained production gap candidate is a copied volatile observation of abandoned
+preflight, so its sequence may recur and is not publication or durability evidence. These types add
+no encoder, digest preimage, or ADR-0014 byte assignment.
+
 The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
 against the installed policy and reports exact proposed effect/callback counts. Its result contains
 fixed value fields, at most one new gap or cancel-history replacement, and the count of the canonical
