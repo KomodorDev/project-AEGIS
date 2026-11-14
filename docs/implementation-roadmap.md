@@ -266,35 +266,27 @@ conditions below is fully proven end to end.
 
 ### Current implementation boundary
 
-The accepted joint commit requires the prepared business journal input, the complete OMS and
-reservation/inventory plan, and the required audit/callback capacity before canonical identities or
-exchange mappings can become application authority. Those dependencies remain incomplete. The
-current slice therefore commits only bounded **preparations**: immutable event comparisons and
-first-admission resolutions, trade comparisons, and diagnostic mapping candidates. It preflights
-every required preparation capacity and conflict before insertion, and either retains all required
-new records or changes none. Repeated event keys reuse their original resolution before looking at
-later owner state. A prepared mapping never becomes a correlation source; the canonical event,
-trade, and exchange-mapping tables remain empty.
+The owner now implements a narrow joint commit in both private admission lanes: a known execution
+whose cumulative interval starts beyond the already-applied quantity can commit as `BufferedGap`.
+For example, an interval `[1, 2)` received while the applied quantity is zero waits in the order's
+bounded pending list. The owner checks the exact source, event and trade identities, correlation,
+interval, and all capacities before publishing anything. It then publishes the typed journal input,
+updates the order-management system (OMS) and canonical identities, and publishes the matching
+event and primary audit row. Neither reservation nor inventory changes, and no callback is invoked.
 
-`MarketRuntime::create_with_fake_private_identity_retention` installs this owner before bot callback
-authority can escape and composes both policy-sized private lanes under the existing shared attempt
-and turn ordering. Ordinary source admission has a production caller; authoritative reconciliation
-input remains behind its trusted internal factory and separate lane/completion oracle. Every
-admitted private fact completes as `RetainedForReconciliation`, including repeated facts. Its
-preparation classification is separate from `PrivateEventDisposition` and cannot acknowledge
-economic consumption. The owner retains complete inputs and monotonic account/global safety causes;
-successful fence handling proves this bounded retention, not business journal/audit publication.
-The normal retained-turn prefix is bounded by `max_private_event_records`. One dedicated overflow
-record preserves the first additional admitted fact and faults the executor, preventing the prefix
-from growing indefinitely. Rejected source attempts remain the source's responsibility.
+An exact repeat of a committed gap publishes its own `ExactEventDuplicate` event and audit records
+using the original resolution. It changes no order, trade, mapping, or safety state. A gap's original
+completion remains nonterminal while its execution is pending. Changed input under a committed
+event key is retained and quarantines the affected account. A previously retained input or trade
+does not become eligible for automatic application after a mapping appears or storage frees up.
 
-With the M4 owner installed, account safety rejects subsequent submissions after local identity
-generation and before reservation arithmetic. `SubmissionReason::AccountReconciliationRequired = 58`
-and `AccountQuarantined = 59` extend the existing result vocabulary; earlier assignments and M1-M3
-goldens are unchanged. The M3-only composition retains its existing behavior. Private preparation
-does not apply an OMS transition, convert reservations, change inventory, or invoke an order-event
-callback. Runtime evidence copies canonical and prepared counts separately after every unsuppressed
-lane and fence has become quiescent.
+`MarketRuntime::create_with_fake_private_identity_retention` installs the owner and both bounded
+admission lanes. Inputs outside the implemented commit cases remain `RetainedForReconciliation`.
+The retained path preserves full facts and account/global safety causes, and its separate fixed
+prefix still has one fail-stop overflow record. Canonical mappings are exact account/venue-scoped
+bindings; provisional mapping candidates remain diagnostic only. Submission gating preserves its
+M3 position after local identity generation and before reservation arithmetic. The runtime copies
+canonical and prepared counts separately after quiescence.
 
 The installed inventory component owns confirmed source rows and canonical aggregate cells sized
 from the M4 policy. Its source-private planning interface borrows genuine retained OMS orders and
@@ -319,7 +311,7 @@ records. Source-side conflicts and local/authoritative invalid transitions retai
 proposed classifications.
 
 The existing private owner exposes an initial known-authoritative-order query that derives its
-snapshot from its own genuine M3 row and requires empty canonical identity tables and side tables.
+snapshot from its own genuine M3 row with empty per-order gap and cancellation state.
 Repeated calls describe the same unchanged baseline. Trusted source-private local normalizers also
 require exact live OMS storage membership; equal detached records cannot mint local provenance.
 Independent transition matrices, cancel-race tables, and all 120 arrival permutations of a five-fill
@@ -338,9 +330,8 @@ An additional owner-bound initial business query joins genuine correlation, the 
 proposal, and its economic candidate. It requires coherent untouched M3 open-order economics and
 exposes only immutable inspection, with no transferable economic commit authority. Its prospective
 audit span contains one primary row plus two aggregate callback rows when callbacks are proposed;
-these ordinals and storage are not reserved. Ordinary and reconciliation admission completions remain
-`RetainedForReconciliation`. Batch tests qualify multi-fill economics independently; the genuine
-runtime query cannot yet drain live gaps or advance orders between calls.
+these ordinals and storage are not reserved by this query. Batch tests qualify multi-fill economics
+independently; a contiguous input that would drain live gaps is still retained for reconciliation.
 
 The installed private owner now also owns a source-private business-evidence preparation store.
 Cold construction allocates exactly `max_private_event_records` event slots and
@@ -353,21 +344,15 @@ span before returning; callback-bearing preparations contain a Planned proposal 
 terminal ordinal without fabricating Delivered or Faulted evidence. Failure or abandonment consumes
 no slot or ordinal, and copied facts survive destruction of the store while the lease remains alive.
 
-The initial owner query derives these records from genuine unchanged M3 components at the store's
-next prospective audit position. The store also qualifies detached same-order execution drains;
-its generic interface validates complete evidence frames and their continuity, while the existing
-OMS planner owns the accepted lifecycle transition matrix. Live gap storage and drain consumption
-remain absent. Authored replay and optional journal linkage
-values are candidates, not executor admission or sequence-allocation authority. Accepted evidence
-prefixes remain empty, and admission completion remains `RetainedForReconciliation`. Unknown,
-conflict, non-order, and account/source fan-out evidence are outside this known-order slice. The
-typed journal payload now represents a private input and its immutable first resolution, but the
-fake medium still publishes only namespace registrations and rejects unsupported business kinds.
+The evidence store now appends one immutable event/audit pair per committed callback-free gap or
+exact repeat. One release-published prefix makes both records visible to concurrent completion
+lookups; subsequent preparations do not reuse published effect storage. It still validates
+detached economic and callback proposals without granting publication authority to those proposals.
 
 A source-private joint preparation now retains the genuine first-seen identity plan, complete
 initial business proposal (including its economic scratch lease), copied evidence, and one real
 fake-medium journal reservation together. The closed reservation derives its sequence and
-predecessor from the actual acknowledged prefix; it includes the complete typed input, sealed first
+predecessor from the actual published prefix; it includes the complete typed input, sealed first
 resolution, runtime epoch, root, replay provenance, and required span. This known-order journal
 envelope carries the complete resolved subject, while the payload keeps the unchanged source
 provenance. Venue and runtime-qualified reconciliation normalized facts use `PrivateEventInput`;
@@ -380,25 +365,18 @@ reservation/inventory generation, containment, identity/preparation history, and
 linkage. It grants no publication or application authority. Economic component validation is now
 separate from its private no-fail write phase; the existing component commit retains its behavior.
 
-Production admission exercises this preflight only for a first-seen known initial callback-free
-fill gap, using the authentic receipt's admission/receive identities. It copies the prospective
-journal candidate into fixed retained-turn storage, abandons all reservations, and still completes
-as `RetainedForReconciliation`. The namespace row counts against journal capacity: exhaustion
-preserves the fact and latches `EvidenceCapacityExhausted`/`Quarantined`. Callback-bearing input
-preflight remains an explicit value-level API because the actual bot callback reservation is absent.
-No sequence, audit ordinal, canonical identity, or live business change is consumed by this slice.
+The fake journal includes its acknowledged namespace row in capacity checks. Committed private
+inputs remain an unacknowledged suffix: cold inspection can see them, and the owner must be closed
+and the suffix explicitly discarded before namespace bootstrap can reopen. A journal or evidence
+capacity failure retains the input and quarantines the account without consuming a journal position
+or audit ordinal. Business durability acknowledgement and replay remain unimplemented.
 
-The next joint reducer must validate OMS and economic plans against one unchanged owner before any
-mutation, then apply their already-validated replacements in the accepted journal/OMS/economics
-order. The existing economics commit deliberately rejects an OMS projection changed since planning;
-calling separate OMS and economics commits in sequence is therefore not a joint transaction.
-
-Full OMS lifecycle application, live fill-gap storage, integration of known-order economics, unknown
-and unattributed inventory, order-event callbacks, full authoritative reconciliation, the one-shot
-reference driver, business journal/snapshot/replay and catch-up, the 55-point crash matrix, and final
-exit evidence remain M4 work. ADR-0014 still does not exist and must accept exact canonical M4
-evidence bytes before an encoder or byte golden is implemented. Namespace-only fake recovery and
-retained preparations do not prove crash recovery or complete unknown/external-order containment.
+Remaining M4 work includes live application of contiguous fills and gap drains, callback-bearing
+transactions, full cancellation and reconciliation, unattributed inventory, the one-shot reference
+driver, snapshots and catch-up, the 55-point crash matrix, and final exit evidence. The next economic
+commit must validate OMS and economic plans against one unchanged owner before publishing, and
+then apply the prevalidated OMS, reservation, and inventory changes in order. ADR-0014 must accept
+the exact canonical evidence bytes before implementation of an encoder or byte golden.
 
 ### Outcome
 

@@ -30,15 +30,13 @@ authenticated account mapping, venue-native order ID encoding, or live cancellat
 
 ## Current implementation boundary
 
-The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) installs a
-concrete owner that retains private facts and transactionally prepares event/trade comparisons and
-mapping candidates. Repeated event keys reuse the first immutable resolution before correlation;
-candidate mappings never authorize another event's ownership. Canonical event/trade registries and
-exchange mappings remain empty because the joint journal, lifecycle, economics, audit, and callback
-commit specified below is incomplete. Preparation classifications are internal observations, not
-`PrivateEventDisposition` values: even an exact repeat remains `RetainedForReconciliation` until the
-complete business reducer exists. This staging boundary does not apply lifecycle transitions,
-fill gaps, or order-event callbacks, and changes none of their accepted requirements.
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) commits
+known execution gaps and their exact event repeats through authentic owner turns in both private
+admission lanes. A gap publishes the reserved typed input, adds one sorted pending interval and its
+canonical event/trade identities, installs an eligible exact mapping, and appends primary evidence.
+An exact repeat reuses the original resolution and appends duplicate evidence without applying the
+gap again. A changed event key payload fails closed and retains the complete contradictory fact.
+Other inputs remain in bounded retention; its candidate mappings never authorize ownership.
 
 A separate source-private pure planner calculates the known-order transition partition below from
 complete detached state, pending intervals, cancel history, sealed metadata, and installed capacity
@@ -54,7 +52,7 @@ The initial business query additionally joins that lifecycle proposal to coheren
 and inventory planning, retaining the normalized input and first-admission resolution. It exposes
 read-only candidates and prospective audit requirements; it cannot transfer economic commit rights.
 A component-only economic advance is not a valid new initial OMS baseline. Multi-fill economic
-batch preparation is qualified independently and does not make live pending gaps reachable.
+batch preparation is qualified independently; production gap draining remains open.
 
 Complete known-order business evidence can now be prepared from that genuine initial query into
 fixed cold backing. Each primary proposal retains its actual source input, resolved attribution,
@@ -68,10 +66,9 @@ ordering below remains unimplemented end to end.
 The new owner-sealed joint preparation retains those complete proposals and their economic lease
 alongside a real unpublished journal reservation. It rejects foreign or changed owners before any
 later use, including unchanged-economics proposals whose inventory baseline changed elsewhere.
-Authentic callback-free gap admissions exercise and abandon this preflight in both lanes, retaining
-the candidate solely as volatile evidence. Callback-bearing preparations use prospective callback
-values and cannot stand in for the actual dispatcher. Canonical identity publication and live OMS
-application remain outside this slice.
+The detached initial preparation remains inspection-only. The owner commits callback-free gaps
+through a separate guarded path, so callers cannot publish a detached preparation. Callback-bearing
+preparations still use prospective values and cannot stand in for the actual dispatcher.
 
 ## Decision
 

@@ -30,29 +30,19 @@ machine, or power-loss durability.
 
 ## Current implementation boundary
 
-The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) installs the
-production private-retention owner from an acknowledged namespace bootstrap before bot callback
-authority becomes available. Its lease keeps the namespace-only fake medium unavailable for cold
-inspection until the runtime is destroyed. Private facts, comparison preparations, and safety
-causes retained by that owner are volatile and are not published or acknowledged business journal
-records. The medium still contains only namespace registrations. A typed private-input payload now
-owns the complete normalized input and sealed first resolution for a future business record, and
-the private owner prepares prospective audit spans in separate fixed backing. Neither value has
-append, publication, acknowledgement, or replay authority; unsupported business kinds still fail
-the medium's namespace-only validation. Published business journal records,
-snapshots, replay, authoritative reconciliation, live catch-up, recovered-owner publication,
-`SubmitReferenceIntent`, and the 55-point crash matrix remain unimplemented. The accepted recovery
-and durability requirements below are unchanged, and this composition proves no recovery exit gate.
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) installs a
+private owner from an acknowledged namespace bootstrap. While its lease is live, cold media
+inspection and discard are unavailable. The owner can publish complete typed `PrivateEventInput`
+records for callback-free execution gaps and exact event repeats, using the next sequence after the
+actual published tail. Each record links the matching primary audit row and preserves the original
+normalized source independently from resolved subject provenance.
 
-One closed source-private reservation can now prepare a complete known-order `PrivateEventInput`
-record from the installed live lease. It derives the next sequence/predecessor from the real medium,
-reserves existing fixed headroom, and copies the mandatory span without publication or sequence
-advance. The known envelope owns resolved local subject provenance; its payload independently keeps
-the unchanged normalized source and sealed resolution. Both venue and current-runtime reconciliation
-normalized events fit that private-input payload; no original batch row or complete reconciliation
-dispatcher is invented. Abandonment releases the reservation, while a detached preparation keeps
-cold reopening fenced until its lease ends. Bootstrap/replay validation still rejects business kinds;
-publication, complete-span acknowledgement, and recovery remain later implementation work.
+Business records remain unacknowledged. A closed incarnation's published suffix can be inspected or
+explicitly discarded; namespace bootstrap rejects an undiscarded suffix. Discard preserves the
+acknowledged namespace prefix and never infers replay from a volatile audit reference. Original
+reconciliation batch rows, complete-span acknowledgement, business replay, snapshots, live catch-up,
+recovered-owner publication, `SubmitReferenceIntent`, and the crash matrix remain unimplemented.
+The accepted recovery and durability requirements below are unchanged.
 
 ## Decision
 

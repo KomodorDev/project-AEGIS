@@ -1,8 +1,9 @@
-// Purpose: preallocate and validate complete prospective known-order evidence, then lease immutable
-// scratch without publishing journal/audit records, advancing counters, or changing business state.
+// Purpose: preallocate and validate known-order evidence, then publish paired event and audit
+// records for validated callback-free owner commits without changing business state here.
 
 #include "private_business_evidence_store.hpp"
 
+#include <atomic>
 #include <limits>
 #include <new>
 #include <stdexcept>
@@ -15,9 +16,10 @@ namespace aegis::runtime {
 namespace detail {
 
 // ########################################################################
-// One incarnation owns fixed future accepted slots and one unpublished scratch prefix. The scratch
-// lease prevents reuse while any prepared capability survives; its shared owner keeps every copied
-// fact and buffer alive after the store handle dies. Accepted prefixes remain empty in this slice.
+// One incarnation owns fixed accepted slots and one unpublished scratch prefix. The scratch lease
+// prevents reuse while any prepared capability survives, and its shared owner keeps every copied
+// fact alive after the store handle dies. One release/acquire count exposes only complete accepted
+// pairs; scratch uses primary buffers strictly beyond that immutable prefix.
 struct PrivateBusinessEvidenceBacking {
 
   // --------------------------------------------------------
@@ -44,11 +46,13 @@ struct PrivateBusinessEvidenceBacking {
   recovery::AuditOrdinal next_audit;
   std::vector<std::optional<trace::PrivateEventEvidence>> event_slots;
   std::vector<std::optional<trace::OrderAuditRecord>> audit_slots;
+  std::atomic<std::uint32_t> accepted_pair_count{0U};
   std::vector<std::shared_ptr<trace::PrivateOrderAuditEffectBuffer>> primary_buffers;
   std::vector<std::shared_ptr<trace::OrderCallbackAuditBuffer>> callback_buffers;
   std::optional<trace::PrivateEventEvidence> scratch_event;
   std::optional<recovery::PrivateEventInputJournalPayload> scratch_journal_payload;
   std::optional<recovery::AuditSpan> scratch_span;
+  std::optional<recovery::AuditOrdinal> scratch_following_audit;
   std::vector<std::optional<trace::OrderAuditRecord>> scratch_primary_rows;
   std::optional<trace::OrderAuditRecord> scratch_planned_callback_row;
   std::uint32_t scratch_primary_count{0U};
@@ -736,7 +740,13 @@ PrivateBusinessEvidenceStore::prepare_known_private_business_evidence(
   }
   const auto primary_count = static_cast<std::uint32_t>(primary_rows.size());
   const auto audit_count = primary_count + (expected_callback_count == 0U ? 0U : 2U);
-  if (audit_count > capacities.max_private_audit_records ||
+  const auto accepted_count = backing.accepted_pair_count.load(std::memory_order_relaxed);
+  if (accepted_count >= backing.event_slots.size()) {
+    return PreparationResult::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::PrivateEvidenceExhausted,
+                                            "private_business_evidence.event_capacity"));
+  }
+  if (audit_count > backing.audit_slots.size() - accepted_count ||
       (expected_callback_count != 0U && backing.callback_buffers.empty())) {
     return PreparationResult::create_failure(
         model::DomainError::create_at_field(model::DomainErrorCode::PrivateEvidenceExhausted,
@@ -746,10 +756,14 @@ PrivateBusinessEvidenceStore::prepare_known_private_business_evidence(
   if (!span) {
     return PreparationResult::create_failure(std::move(span).error());
   }
+  auto following_audit = span.value().last_audit_ordinal().derive_next_ordinal();
+  if (!following_audit) {
+    return PreparationResult::create_failure(std::move(following_audit).error());
+  }
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Copy complete immutable candidates only after every failure boundary has passed. All nested
-  // storage and return wrappers already exist or move without failure; accepted stores stay empty.
+  // storage and return wrappers already exist or move without failure; accepted rows stay intact.
   static_assert(std::is_nothrow_copy_constructible_v<trace::PrivateOrderAuditEffect>);
   static_assert(std::is_nothrow_copy_constructible_v<trace::OrderCallbackAuditValue>);
   static_assert(std::is_nothrow_move_constructible_v<trace::OrderAuditRecord>);
@@ -763,9 +777,10 @@ PrivateBusinessEvidenceStore::prepare_known_private_business_evidence(
   backing.scratch_journal_payload.emplace(
       recovery::PrivateEventInputJournalPayload{input, first_admission_resolution});
   backing.scratch_span.emplace(std::move(span).value());
+  backing.scratch_following_audit.emplace(std::move(following_audit).value());
   for (std::uint32_t index = 0U; index < primary_count; ++index) {
     const auto& row = primary_rows[index];
-    auto& buffer = backing.primary_buffers[index];
+    auto& buffer = backing.primary_buffers[accepted_count + index];
     buffer->values_[0U].emplace(row.effects.front());
     const auto ordinal = recovery::AuditOrdinal::from_value(backing.next_audit.value() + index);
     backing.scratch_primary_rows[index].emplace(
@@ -820,12 +835,120 @@ PrivateBusinessEvidenceStore::prepare_known_private_business_evidence(
 }
 
 // --------------------------------------------------------
-// Clear every populated detached slot while preserving exact empty accepted prefixes and counters.
+// Validate one exact owner-local callback-free evidence pair against the reserved journal value.
+model::Result<void> PrivateBusinessEvidenceStore::validate_callback_free_publication(
+    const PreparedPrivateBusinessEvidence& preparation,
+    const recovery::JournalRecord& journal_record) const {
+  const auto& backing = *backing_;
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject foreign, moved-from, or incomplete preparations before inspecting any leased row.
+  if (preparation.backing_ != backing_ || !backing.scratch_leased ||
+      !backing.scratch_following_audit || preparation.primary_audit_record_count() != 1U ||
+      preparation.order_callback_count() != 0U ||
+      preparation.planned_callback_record() != nullptr) {
+    return reject_private_business_evidence_at_field(
+        "private_business_evidence.publication_preparation");
+  }
+  const auto* event = preparation.private_event_evidence();
+  const auto* audit = preparation.primary_audit_record_at(0U);
+  const auto* span = preparation.audit_span();
+  if (event == nullptr || audit == nullptr || span == nullptr || span->audit_record_count() != 1U ||
+      span->first_audit_ordinal() != backing.next_audit ||
+      audit->audit_ordinal() != span->first_audit_ordinal() || event->diagnostic_ordinal() ||
+      audit->error() || audit->effect_count() != 1U || audit->callback_count() != 0U ||
+      audit->callback_range()) {
+    return reject_private_business_evidence_at_field("private_business_evidence.publication_span");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Admit only the two closed callback-free dispositions; neither writes account safety here.
+  const auto disposition = event->disposition();
+  const auto* effect = audit->effect_at(0U);
+  if ((disposition != oms::PrivateEventDisposition::BufferedGap &&
+       disposition != oms::PrivateEventDisposition::ExactEventDuplicate) ||
+      audit->disposition() != disposition ||
+      audit->kind() != trace::M4AuditKind::EventDisposition ||
+      event->input().kind() != oms::PrivateOrderEventKind::Execution || effect == nullptr ||
+      effect->account_safety_transition) {
+    return reject_private_business_evidence_at_field(
+        "private_business_evidence.publication_disposition");
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Check reserved positions and strictly increasing actual receipt identities before publication.
+  const auto accepted_count = backing.accepted_pair_count.load(std::memory_order_relaxed);
+  if (accepted_count >= backing.event_slots.size() ||
+      accepted_count >= backing.audit_slots.size()) {
+    return model::Result<void>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::PrivateEvidenceExhausted,
+                                            "private_business_evidence.publication_capacity"));
+  }
+  if (backing.event_slots[accepted_count] || backing.audit_slots[accepted_count]) {
+    return reject_private_business_evidence_at_field(
+        "private_business_evidence.publication_destination");
+  }
+  if (accepted_count != 0U) {
+    const auto& previous = *backing.event_slots[accepted_count - 1U];
+    if (event->admission_ordinal().value() <= previous.admission_ordinal().value() ||
+        event->receive_sequence().value() <= previous.receive_sequence().value()) {
+      return reject_private_business_evidence_at_field(
+          "private_business_evidence.publication_receipt_order");
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Match the unchanged input, resolved subject, and both evidence rows to this exact journal
+  // record. Prospective values with merely similar sequences cannot supply publication authority.
+  const auto* reserved_payload =
+      std::get_if<recovery::PrivateEventInputJournalPayload>(&journal_record.payload());
+  const auto* prepared_payload = preparation.journal_payload();
+  if (journal_record.kind() != recovery::JournalRecordKind::PrivateEventInput ||
+      journal_record.lineage_id() != backing.lineage ||
+      journal_record.runtime_epoch_id() != backing.epoch ||
+      journal_record.root_provenance() != backing.policy.root_provenance() ||
+      journal_record.subject_provenance() != audit->subject_provenance() ||
+      journal_record.audit_span() != *span ||
+      journal_record.replay_provenance() != event->replay_provenance() ||
+      event->journal_sequence() != journal_record.sequence() ||
+      audit->journal_sequence() != journal_record.sequence() || reserved_payload == nullptr ||
+      prepared_payload == nullptr || *reserved_payload != *prepared_payload ||
+      audit->source_input() != event->input()) {
+    return reject_private_business_evidence_at_field(
+        "private_business_evidence.publication_journal_linkage");
+  }
+  return model::Result<void>::create_success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Publish the complete immutable pair only after the owner finishes the no-fail business writes.
+void PrivateBusinessEvidenceStore::publish_validated_callback_free_evidence(
+    PreparedPrivateBusinessEvidence&& preparation) noexcept {
+  static_assert(std::is_nothrow_move_constructible_v<trace::PrivateEventEvidence>);
+  static_assert(std::is_nothrow_move_constructible_v<trace::OrderAuditRecord>);
+  auto& backing = *backing_;
+  const auto index = backing.accepted_pair_count.load(std::memory_order_relaxed);
+  backing.event_slots[index].emplace(std::move(*backing.scratch_event));
+  backing.audit_slots[index].emplace(std::move(*backing.scratch_primary_rows[0U]));
+  backing.next_audit = *backing.scratch_following_audit;
+
+  // The row now owns its permanent effect buffer. Cleanup may only clear unpublished scratch.
+  backing.scratch_primary_rows[0U].reset();
+  backing.scratch_primary_count = 0U;
+  preparation.release_preparation();
+  backing.accepted_pair_count.store(index + 1U, std::memory_order_release);
+}
+
+// --------------------------------------------------------
+// Clear every populated detached slot while preserving the immutable prefix and audit counter.
 void PrivateBusinessEvidenceStore::release_private_business_evidence_scratch(
     detail::PrivateBusinessEvidenceBacking& backing) noexcept {
+  const auto accepted_count = backing.accepted_pair_count.load(std::memory_order_relaxed);
   for (std::uint32_t index = 0U; index < backing.scratch_primary_count; ++index) {
     backing.scratch_primary_rows[index].reset();
-    backing.primary_buffers[index]->values_[0U].reset();
+    backing.primary_buffers[accepted_count + index]->values_[0U].reset();
   }
   if (backing.scratch_callback_count != 0U) {
     backing.scratch_planned_callback_row.reset();
@@ -837,6 +960,7 @@ void PrivateBusinessEvidenceStore::release_private_business_evidence_scratch(
   backing.scratch_event.reset();
   backing.scratch_journal_payload.reset();
   backing.scratch_span.reset();
+  backing.scratch_following_audit.reset();
   backing.scratch_primary_count = 0U;
   backing.scratch_callback_count = 0U;
   backing.scratch_leased = false;
@@ -903,15 +1027,35 @@ std::uint32_t PrivateBusinessEvidenceStore::planned_callback_buffer_capacity() c
 }
 
 // --------------------------------------------------------
-// Preparation has no acceptance operation, so the retained accepted event prefix remains empty.
+// Acquire the complete accepted event prefix without observing any leased scratch.
 std::uint32_t PrivateBusinessEvidenceStore::accepted_private_event_record_count() const noexcept {
-  return 0U;
+  return backing_->accepted_pair_count.load(std::memory_order_acquire);
 }
 
 // --------------------------------------------------------
-// No prospective primary or Planned row becomes accepted in this preparation-only store.
+// Acquire the same complete prefix because each published callback-free turn owns one audit row.
 std::uint32_t PrivateBusinessEvidenceStore::accepted_private_audit_record_count() const noexcept {
-  return 0U;
+  return backing_->accepted_pair_count.load(std::memory_order_acquire);
+}
+
+// --------------------------------------------------------
+// Borrow only an immutable event at or below the acquired complete prefix.
+const trace::PrivateEventEvidence* PrivateBusinessEvidenceStore::accepted_private_event_record_at(
+    std::uint32_t chronological_index) const noexcept {
+  if (chronological_index >= accepted_private_event_record_count()) {
+    return nullptr;
+  }
+  return &*backing_->event_slots[chronological_index];
+}
+
+// --------------------------------------------------------
+// Borrow only an immutable audit row at or below the acquired complete prefix.
+const trace::OrderAuditRecord* PrivateBusinessEvidenceStore::accepted_private_audit_record_at(
+    std::uint32_t chronological_index) const noexcept {
+  if (chronological_index >= accepted_private_audit_record_count()) {
+    return nullptr;
+  }
+  return &*backing_->audit_slots[chronological_index];
 }
 
 // --------------------------------------------------------

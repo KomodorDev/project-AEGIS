@@ -18,13 +18,6 @@
 namespace aegis::oms {
 
 // ########################################################################
-// A retained gap keeps its complete immutable normalized source fact; the planner validates the
-// borrowed sequence as nonoverlapping intervals ordered by cumulative endpoint.
-struct PendingPrivateExecution {
-  NormalizedPrivateOrderInput execution;
-};
-
-// ########################################################################
 // One retained cancel request keeps its first write fact and first causal rejection independently
 // from its final status. Later distinct rejections belong to the future complete event registry and
 // never overwrite this first evidence. Confirmed records a noncausal terminal close.
@@ -84,7 +77,7 @@ struct PrivateOmsTransitionInputs {
 // The complete value-only proposal contains no live references, scratch aliases, owner token, or
 // commit operation. Counts state exact proposed per-input effects and callbacks; an execution
 // drain contributes one effect/callback for the input and each drained gap. Forbidden local facts
-// still need one audit effect but no callback. Capacity failure returns no partial proposal.
+// still need one audit effect but no callback. A proposal alone does not reserve output capacity.
 // Safety reasons include an open-order timeout as well as authoritative contradiction; absence
 // never clears existing account safety. Rejection code is InvalidPrivateOmsState exactly for a
 // forbidden local proposal. Closure cause appears only when the proposed economics close a hold.
@@ -113,6 +106,12 @@ struct PrivateOmsTransitionPlan {
 // complete projection. Account/source fanout and complete-negative recovery authority are excluded.
 [[nodiscard]] model::Result<PrivateOmsTransitionPlan>
 derive_private_oms_transition(const PrivateOmsTransitionInputs& inputs);
+
+// --------------------------------------------------------
+// Validate the baseline and classify the input so a serialized owner can retain verified facts
+// when output capacity fails. Callers must check every output bound before publishing.
+[[nodiscard]] model::Result<PrivateOmsTransitionPlan>
+derive_private_oms_transition_before_output_capacity(const PrivateOmsTransitionInputs& inputs);
 
 // --------------------------------------------------------
 

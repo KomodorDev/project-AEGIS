@@ -27,12 +27,11 @@ turn that rule into bounded owner-local state without importing M5's later dynam
 
 ## Current implementation boundary
 
-The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) retains complete
-private inputs and monotonic account/global containment before the joint business reducer exists.
-The concrete `PrivateAdmissionOwner` returns only retained completions; successful account/global
-fence handling records bounded retention and submission gating, not the complete journal/audit
-publication required for a finished M4 owner. No safety clear, reservation conversion, inventory
-mutation, or canonical safety audit is implemented by this staging path.
+The [current M4 slice](../implementation-roadmap.md#current-implementation-boundary) commits
+callback-free execution gaps and exact event repeats with unchanged reservations and inventory.
+Unsupported or failed inputs remain in complete bounded retention with monotonic account/global
+containment. Fence handling records submission gating and retained causes; canonical safety audits
+and explicit safety clearing are still open.
 
 When that owner is explicitly installed, the submission path enforces the accepted account gate
 after local identity generation and before reservation arithmetic, including reasons
@@ -69,8 +68,8 @@ A combined owner preparation now retains the economic plan until its complete ev
 reservations end. Read-only economic validation checks the same source baseline as component commit;
 the existing commit immediately follows that validation with a private no-fail write phase. Every
 reservation/inventory mutation advances the captured non-wrapping generation, invalidating joint
-preparations even when they propose no economics. The joint API still applies nothing. A production
-callback-free gap whose real journal reservation cannot fit retains the fact and selects reason 17,
+preparations even when they propose no economics. The detached joint preparation applies nothing.
+A production callback-free gap whose real journal reservation cannot fit retains the fact and selects reason 17,
 `EvidenceCapacityExhausted`, without changing either ledger.
 
 The opt-in M4 runtime installs this component together with its private owner before callback

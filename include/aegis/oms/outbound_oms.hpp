@@ -11,6 +11,7 @@
 #include "aegis/model/result.hpp"
 #include "aegis/model/sha256.hpp"
 #include "aegis/model/time.hpp"
+#include "aegis/oms/private_order_event.hpp"
 #include "aegis/oms/private_order_identity.hpp"
 #include "aegis/risk/exposure.hpp"
 
@@ -18,6 +19,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace aegis::risk {
@@ -30,7 +32,31 @@ class InventoryLedger;
 
 } // namespace aegis::risk
 
+namespace aegis::runtime {
+
+// ########################################################################
+// The coordinator installs the complete cold gap storage before any live OMS turn.
+class SubmissionCoordinator;
+
+// ########################################################################
+// The installed private child alone applies gaps validated within the owning turn.
+class PrivateOrderReconciler;
+
+// ########################################################################
+
+} // namespace aegis::runtime
+
 namespace aegis::oms {
+
+// ########################################################################
+// The pure planner's detached proposal can describe one pending execution without owning a row.
+struct PrivateOmsTransitionPlan;
+
+// ########################################################################
+// One pending gap keeps its complete normalized execution; the OMS orders intervals by endpoint.
+struct PendingPrivateExecution {
+  NormalizedPrivateOrderInput execution;
+};
 
 // ########################################################################
 // Values 1-5 preserve the local M3 admission, encoding, and fake-initiation assignments; values
@@ -139,8 +165,7 @@ struct OutboundOrderAdmission {
 
 // ########################################################################
 // A record retains its complete admission permanently and exposes only detached or const
-// inspection. OutboundOms owns every current transition; no M4 reconciler or caller receives
-// mutation authority in this prerequisite slice.
+// inspection. OutboundOms owns the complete mutable projection and pending intervals.
 class OutboundOrderRecord final {
 public:
 
@@ -215,8 +240,8 @@ private:
 
   // ########################################################################
 
-  // Retain the immutable admission and the complete owner-local M4 projection at one stable row
-  // address; bounded counters describe side tables that later slices will preallocate separately.
+  // Retain the immutable admission and complete owner-local M4 projection at one stable address;
+  // the pending count matches the bounded interval side table at the corresponding physical slot.
   OutboundOrderAdmission admission_;
   OutboundOrderState state_{OutboundOrderState::PendingEncoding};
   bool exchange_acknowledged_{false};
@@ -280,9 +305,9 @@ private:
 
 // ########################################################################
 // The owner-local table uses deterministic open addressing and never erases rows, so complete
-// OrderId equality resolves every hash collision and retained pointers stay stable. Every fallible
-// transition validates its exact source state before mutation and otherwise returns InvalidOmsState
-// with the complete table unchanged.
+// OrderId equality resolves every hash collision and retained pointers stay stable. The installed
+// M4 side table owns each row's complete, ascending pending prefix; its size always equals the
+// corresponding projection's pending count. Validation leaves both tables unchanged on failure.
 class OutboundOms final {
 public:
 
@@ -361,6 +386,12 @@ public:
   // --------------------------------------------------------
 private:
 
+  // ########################################################################
+  // Cold storage preallocates an independent bounded interval sequence for every physical row slot.
+  using PendingPrivateExecutionStorage = std::vector<std::vector<PendingPrivateExecution>>;
+
+  // ########################################################################
+
   // --------------------------------------------------------
   // Construct only after create has rejected an unusable zero capacity.
   explicit OutboundOms(std::uint32_t capacity);
@@ -369,6 +400,11 @@ private:
   // Hash all 24 identity bytes only to choose a probe start; equality remains authoritative.
   [[nodiscard]] std::size_t
   calculate_probe_start_index(const model::OrderId& order_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Locate the exact physical row or return absence without changing any slot.
+  [[nodiscard]] std::optional<std::size_t>
+  find_retained_slot_index(const model::OrderId& order_id) const noexcept;
 
   // --------------------------------------------------------
   // Resolve a mutable row for the closed transition implementation.
@@ -381,11 +417,41 @@ private:
                                                            OutboundOrderState target);
 
   // --------------------------------------------------------
+  // Allocate bounded M4 side tables while leaving the pristine OMS unchanged on failure.
+  [[nodiscard]] model::Result<PendingPrivateExecutionStorage>
+  prepare_pending_private_execution_storage(std::uint64_t capacity_per_order) const;
+
+  // --------------------------------------------------------
+  // Install storage only during the coordinator's no-fail phase after successful preparation.
+  void
+  install_prepared_pending_private_execution_storage(PendingPrivateExecutionStorage storage,
+                                                     std::uint32_t capacity_per_order) noexcept;
+
+  // --------------------------------------------------------
+  // Borrow one owner's immutable pending prefix; a later gap commit can change the sequence.
+  [[nodiscard]] std::span<const PendingPrivateExecution>
+  pending_private_executions(const model::OrderId& order_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Reject stale or non-gap proposals and exhausted side tables before any business write.
+  [[nodiscard]] model::Result<void>
+  validate_buffered_private_execution(const model::OrderId& order_id,
+                                      const PrivateOmsTransitionPlan& transition) const;
+
+  // --------------------------------------------------------
+  // Apply the previously validated gap in the same serialized turn, after journal publication.
+  void
+  apply_validated_buffered_private_execution(const model::OrderId& order_id,
+                                             const PrivateOmsTransitionPlan& transition) noexcept;
+
+  // --------------------------------------------------------
   // Retain the fixed slot table and canonical admission index without post-construction growth.
   std::uint32_t capacity_;
   std::uint32_t size_{0U};
   std::vector<std::optional<OutboundOrderRecord>> slots_;
   std::vector<std::uint32_t> admission_order_;
+  PendingPrivateExecutionStorage pending_private_executions_by_slot_;
+  std::uint32_t pending_private_execution_capacity_{0U};
 
   // --------------------------------------------------------
 
@@ -400,6 +466,15 @@ private:
   // ########################################################################
   // The source-private economics owner receives identity comparison only, never OMS mutation.
   friend class risk::InventoryLedger;
+
+  // ########################################################################
+  // The coordinator alone installs cold M4 storage during its sealed bootstrap transaction.
+  friend class runtime::SubmissionCoordinator;
+
+  // ########################################################################
+  // The installed reconciler validates and applies only the closed gap transition after journal
+  // publication; no public OMS mutation capability escapes the owning turn.
+  friend class runtime::PrivateOrderReconciler;
 
   // ########################################################################
 };

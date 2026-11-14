@@ -1,5 +1,5 @@
-// Purpose: prepare bounded prospective known-order journal and audit evidence in policy-sized cold
-// storage without publishing records, consuming ordinals, or granting business mutation authority.
+// Purpose: prepare bounded known-order journal and audit evidence in policy-sized cold storage,
+// then retain complete callback-free evidence only after the genuine owner commits its turn.
 
 #pragma once
 
@@ -24,6 +24,10 @@ struct PrivateBusinessEvidenceBacking;
 // ########################################################################
 
 } // namespace detail
+
+// ########################################################################
+// The installed order owner alone can publish a validated evidence pair after business commit.
+class PrivateOrderReconciler;
 
 // ########################################################################
 // One synchronous borrowed input describes a proposed primary effect group. The first row owns
@@ -123,12 +127,11 @@ private:
 };
 
 // ########################################################################
-// A nonmoving, source-private owner allocates all event/audit/effect/callback backing at
-// construction. It accepts only known order-scoped prospective values and supports one detached
-// preparation at a time. All accepted/published prefixes remain empty and the next audit ordinal
-// remains one; neither preparation nor abandonment consumes any slot or counter. Caller
-// serialization is required for construction, preparation, inspection, movement, and destruction;
-// no internal thread or lock exists.
+// A nonmoving, source-private store owns fixed event, audit, effect, and callback backing. It
+// supports one detached known-order preparation at a time and publishes only complete event/audit
+// pairs for the closed callback-free commit profiles. Preparation or abandonment consumes no
+// slot or counter. Caller serialization is required except for accepted-prefix counts and const
+// record lookups, which acquire one published prefix while the store remains alive.
 class PrivateBusinessEvidenceStore final {
 public:
 
@@ -170,6 +173,14 @@ public:
       std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal = std::nullopt);
 
   // --------------------------------------------------------
+  // Check the exact same-store lease, callback-free profile, causal receipt, and complete reserved
+  // journal linkage without changing anything. The caller must keep this owner turn serialized
+  // through the later publication; validation alone grants no right to apply or publish a plan.
+  [[nodiscard]] model::Result<void>
+  validate_callback_free_publication(const PreparedPrivateBusinessEvidence& preparation,
+                                     const recovery::JournalRecord& journal_record) const;
+
+  // --------------------------------------------------------
   // Borrow the sealed root that owns every prospective row and sizes its immutable backing.
   [[nodiscard]] const model::M4RootProvenance& root_provenance() const noexcept;
 
@@ -195,9 +206,17 @@ public:
   [[nodiscard]] std::uint32_t planned_callback_buffer_capacity() const noexcept;
 
   // --------------------------------------------------------
-  // Return empty accepted prefixes; detached scratch never becomes published evidence.
+  // Acquire the complete immutable paired prefix; detached scratch never counts as accepted.
   [[nodiscard]] std::uint32_t accepted_private_event_record_count() const noexcept;
   [[nodiscard]] std::uint32_t accepted_private_audit_record_count() const noexcept;
+
+  // --------------------------------------------------------
+  // Borrow one immutable accepted record by zero-based chronological index, or return null
+  // outside the acquired prefix. Accepted pointers remain valid until store destruction.
+  [[nodiscard]] const trace::PrivateEventEvidence*
+  accepted_private_event_record_at(std::uint32_t chronological_index) const noexcept;
+  [[nodiscard]] const trace::OrderAuditRecord*
+  accepted_private_audit_record_at(std::uint32_t chronological_index) const noexcept;
 
   // --------------------------------------------------------
   // Return whether the one detached scratch reservation is presently leased.
@@ -212,6 +231,13 @@ private:
       std::shared_ptr<detail::PrivateBusinessEvidenceBacking> backing) noexcept;
 
   // --------------------------------------------------------
+  // Move one validated event and audit pair into their permanent slots, advance the audit
+  // ordinal, and revoke scratch. Only the serialized reconciler may call this no-fail phase,
+  // after publication validation and after writing the reserved journal and business changes.
+  void
+  publish_validated_callback_free_evidence(PreparedPrivateBusinessEvidence&& preparation) noexcept;
+
+  // --------------------------------------------------------
   // Release only unpublished scratch; accepted slots and every ordinal remain untouched.
   static void release_private_business_evidence_scratch(
       detail::PrivateBusinessEvidenceBacking& backing) noexcept;
@@ -222,6 +248,10 @@ private:
   // ########################################################################
   // The detached lease may invoke only its private cleanup phase after the store handle dies.
   friend class PreparedPrivateBusinessEvidence;
+
+  // ########################################################################
+  // The genuine serialized owner alone can publish validated evidence after applying the turn.
+  friend class PrivateOrderReconciler;
 
   // ########################################################################
 };

@@ -198,8 +198,9 @@ private:
 };
 
 // ########################################################################
-// The variant represents namespace records and private-input proposals. The namespace-only fake
-// medium still rejects business records until their complete publication/replay owner exists.
+// The variant represents namespace records and private inputs. The fake medium supports only
+// the closed callback-free private publication profile; private acknowledgement and replay are
+// unavailable.
 using JournalPayloadValue =
     std::variant<NamespaceRegisteredJournalPayload, PrivateEventInputJournalPayload>;
 

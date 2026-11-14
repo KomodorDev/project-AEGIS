@@ -183,6 +183,14 @@ validate_capacities(const M4PolicyCapacities& capacities,
                                     capacities.max_recovery_notifications)) {
     return create_m4_policy_validation_failure_from_field("capacities.max_recovery_notifications");
   }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Bound the complete cold pending-interval storage for every permanent outbound OMS row.
+  if (!is_product_u32_representable(requirements.outbound_oms_capacity,
+                                    capacities.max_pending_fill_intervals_per_order)) {
+    return create_m4_policy_validation_failure_from_field(
+        "capacities.max_pending_fill_intervals_per_order");
+  }
   return model::Result<void>::create_success();
 
   // ++++++++++++++++++++++++++++++++++++++++

@@ -126,9 +126,10 @@ private:
 // It models fake acknowledgement but makes no filesystem, process-crash, power-loss, AEGISJRN byte,
 // digest, or real-durability claim. Every operation requires caller-provided external
 // serialization; concurrent access is unsupported. At most one live incarnation lease exists across
-// either its bootstrap or installed owners, cold queries require no live lease, and acknowledged
-// namespace rows always form one contiguous journal prefix. The public surface has no path,
-// endpoint, credential, callback, retry, thread, or background work.
+// either its bootstrap or installed owners, and cold queries require no live lease. Acknowledged
+// namespace rows form one contiguous prefix, and only the installed owner may append an
+// unacknowledged private-input suffix. The public surface has no path, endpoint, credential,
+// callback, retry, thread, or background work.
 class DeterministicFakeRecoveryMedium final {
 public:
 

@@ -1,5 +1,5 @@
-// Purpose: bind private identity planning, bounded retained preparations, and production admission
-// containment to one submission owner without claiming canonical or economic consumption.
+// Purpose: bind private identity planning, bounded gap commits, retained preparations, and
+// production admission containment to one submission owner.
 
 #pragma once
 
@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -46,7 +47,7 @@ class SubmissionCoordinator;
 
 // ########################################################################
 // One event-identity slot schema pairs receive-time-free ingress semantics with an immutable
-// resolution and original disposition. This slice allocates slots but never populates them.
+// resolution and original disposition. A committed gap adds the immutable row once.
 struct PrivateEventIdentityRecord {
   oms::PrivateEventRegistryKey key;
   oms::PrivateEventIngressSemanticValue ingress_semantic_value;
@@ -64,7 +65,7 @@ struct PrivateEventIdentityRecord {
 
 // ########################################################################
 // One trade-identity slot schema pairs a complete semantic tuple with its original and current
-// dispositions. This slice allocates slots but never populates or changes them.
+// dispositions. This slice creates BufferedGap rows; it does not apply the pending execution.
 struct PrivateTradeIdentityRecord {
   oms::TradeKey key;
   oms::PrivateTradeSemanticValue semantic_value;
@@ -82,7 +83,7 @@ struct PrivateTradeIdentityRecord {
 
 // ########################################################################
 // One exchange-mapping slot schema binds a venue/account-scoped exchange key to one local order.
-// This slice allocates slots but never populates them.
+// A committed gap can establish the binding once; volatile candidates remain separate.
 struct PrivateExchangeOrderMapping {
   oms::ExchangeOrderKey exchange_order_key;
   model::OrderId order_id;
@@ -261,11 +262,11 @@ private:
 
 // ########################################################################
 // The child binds one nonmoving coordinator and acknowledged recovery incarnation. Token-gated
-// owner turns retain preparations and containment; canonical identity tables remain empty until
-// the later joint business reducer exists. Read-only planning and account/table inspection require
-// owner serialization or quiescence. Completion-error and immutable retained-turn queries support
-// concurrent access through release/acquire publication.
-// The opaque lease keeps cold medium inspection fenced and grants no journal mutation operation.
+// owner turns commit bounded execution gaps and exact repeats or preserve unsupported facts in
+// retention. Read-only planning and account/table inspection require owner serialization or
+// quiescence. Completion and immutable retained-turn queries support concurrent access through
+// release/acquire publication. The recovery lease keeps cold medium inspection fenced and permits
+// journal publication only through the closed joint turn.
 class PrivateOrderReconciler final : public PrivateAdmissionOwner {
 public:
 
@@ -281,23 +282,22 @@ public:
   ~PrivateOrderReconciler() override = default;
 
   // --------------------------------------------------------
-  // Retain one genuine ordinary or reconciliation token without claiming economic consumption.
-  // Wrong-owner, moved, stale, or recursive authority changes no preparation or account state.
+  // Commit a supported execution gap or exact repeat from a genuine lane token. Retain other
+  // valid inputs for reconciliation. Wrong-owner, moved, stale, or recursive tokens change nothing.
   [[nodiscard]] PrivateTurnCompletion
   commit_private_order_turn(AdmittedPrivateOrderSlot admitted) noexcept override;
   [[nodiscard]] PrivateTurnCompletion
   commit_reconciliation_event_turn(AdmittedReconciliationEventSlot admitted) noexcept override;
 
   // --------------------------------------------------------
-  // No canonical disposition exists in this preparation-only owner, in either admission lane.
+  // Acquire the immutable disposition of a committed ordinary-private or reconciliation input.
+  // These lane-specific completion queries may run concurrently with later appends.
   [[nodiscard]] std::optional<oms::PrivateEventDisposition>
-  find_committed_private_event_disposition(model::AdmissionOrdinal) const noexcept override {
-    return std::nullopt;
-  }
+  find_committed_private_event_disposition(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept override;
   [[nodiscard]] std::optional<oms::PrivateEventDisposition>
-  find_committed_reconciliation_event_disposition(model::AdmissionOrdinal) const noexcept override {
-    return std::nullopt;
-  }
+  find_committed_reconciliation_event_disposition(
+      model::AdmissionOrdinal attempt_ordinal) const noexcept override;
 
   // --------------------------------------------------------
   // Acquire the matching lane's immutable published error; returned pointers survive later appends
@@ -371,13 +371,13 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return the canonical event count, which remains zero until the joint business reducer exists.
+  // Return the canonical first-admission event count, excluding duplicate observations.
   [[nodiscard]] std::uint32_t event_identity_record_count() const noexcept {
     return event_identity_record_count_;
   }
 
   // --------------------------------------------------------
-  // Return the canonical trade count, which remains zero until the joint business reducer exists.
+  // Return the canonical trade count, excluding retained preparations and duplicates.
   [[nodiscard]] std::uint32_t trade_identity_record_count() const noexcept {
     return trade_identity_record_count_;
   }
@@ -387,6 +387,28 @@ public:
   [[nodiscard]] std::uint32_t exchange_order_mapping_count() const noexcept {
     return exchange_order_mapping_count_;
   }
+
+  // --------------------------------------------------------
+  // Borrow one immutable canonical event row, or null. Check it before attempting correlation.
+  // These identity and pending queries require owner serialization or quiescence.
+  [[nodiscard]] const PrivateEventIdentityRecord*
+  find_committed_event_identity(const oms::PrivateEventRegistryKey& key) const noexcept;
+
+  // --------------------------------------------------------
+  // Borrow one canonical trade tuple, or null; a preparation never establishes this record.
+  [[nodiscard]] const PrivateTradeIdentityRecord*
+  find_committed_trade_identity(const oms::TradeKey& key) const noexcept;
+
+  // --------------------------------------------------------
+  // Borrow the active account/venue-scoped binding, excluding all preparation candidates.
+  [[nodiscard]] const PrivateExchangeOrderMapping*
+  find_committed_exchange_mapping(const oms::ExchangeOrderKey& key) const noexcept;
+
+  // --------------------------------------------------------
+  // Borrow the exact retained order's immutable pending prefix in ascending cumulative endpoint
+  // order, or an empty view if absent. A later gap commit can change the borrowed sequence.
+  [[nodiscard]] std::span<const oms::PendingPrivateExecution>
+  pending_private_executions(const model::OrderId& order_id) const noexcept;
 
   // --------------------------------------------------------
   // Borrow the immutable policy copy that authorized and sized this child.
@@ -412,18 +434,18 @@ public:
 
   // --------------------------------------------------------
   // Derive the authoritative identity plan only from a venue/reconciliation order event and this
-  // bound pristine identity state. State inconsistency returns PrivateCorrelationFailed before
-  // input validation; invalid source/payload shape returns InvalidPrivateEvent. Successful safety
-  // conflicts remain detached results. This operation changes no owner, OMS, risk, evidence,
-  // count, or slot state, so equal repeated inputs return equal values. The caller must prevent a
-  // concurrent submission or other coordinator mutation until the call returns.
+  // bound owner. The caller must compare any canonical event first; an already committed key
+  // returns PrivateEventConflict without re-correlation. Invalid source shape returns
+  // InvalidPrivateEvent, inconsistent owner state returns PrivateCorrelationFailed, and exact
+  // locator or provenance conflicts remain detached safety results. No state changes; the caller
+  // must prevent concurrent coordinator mutation throughout the call.
   [[nodiscard]] model::Result<FirstSeenAuthoritativePrivateIdentityPlan>
   derive_first_seen_authoritative_identity_plan(
       const oms::PrivateEventIngressSemanticValue& ingress_semantic_value) const;
 
   // --------------------------------------------------------
-  // Derive a detached authoritative lifecycle proposal from this owner's genuine M3 row and empty
-  // canonical side tables. Unknown/conflicting correlation returns PrivateCorrelationFailed.
+  // Derive a detached authoritative lifecycle proposal from this owner's genuine row with no
+  // pending fills or cancellation history. Unknown or conflicting correlation fails closed.
   // No proposed state becomes live, and no dedupe, callback, journal, or commit authority escapes.
   // Reads require owner serialization or quiescence for the complete call.
   [[nodiscard]] model::Result<oms::PrivateOmsTransitionPlan>
@@ -484,6 +506,30 @@ public:
 
   // --------------------------------------------------------
 private:
+
+  // ########################################################################
+  // One guarded owner turn either commits, reports a prepublication failure, or leaves the input
+  // to the existing retained path. Preserve sealed resolution and established comparison facts
+  // when the input stays outside the canonical registries.
+  struct CallbackFreePrivateCommitResult {
+    std::optional<oms::PrivateEventDisposition> disposition;
+    std::optional<model::DomainError> error;
+    std::optional<risk::AccountSafetyReason> safety_reason;
+    std::optional<oms::PrivateEventResolution> resolution;
+    RetainedPrivateExecutionProgress execution_progress{};
+  };
+
+  // ########################################################################
+
+  // --------------------------------------------------------
+  // Under the authenticated, serialized owner turn, commit a known execution gap or its exact
+  // duplicate. Complete all fallible checks before journal publication; unsupported inputs stay
+  // eligible for retention, and prepublication failures leave every committed prefix unchanged.
+  [[nodiscard]] CallbackFreePrivateCommitResult
+  commit_callback_free_private_input_if_supported(const oms::NormalizedPrivateOrderInput& input,
+                                                  const AdmissionReceipt& receipt);
+
+  // --------------------------------------------------------
 
   // ########################################################################
   // One private move-only transaction carries the completely allocated child while the validated
@@ -550,8 +596,9 @@ private:
   // nothing and publishes no child.
   [[nodiscard]] static model::Result<PreparedRecoveryBoundPrivateOrderReconciler>
   prepare_recovery_bound_private_order_reconciler(
-      const SubmissionCoordinator& owner, const configuration::StartupConfiguration& configuration,
-      const M4Policy& policy, const recovery::RecoveryBootstrap& recovery_bootstrap);
+      const SubmissionCoordinator& owner, oms::OutboundOms& outbound_oms,
+      const configuration::StartupConfiguration& configuration, const M4Policy& policy,
+      const recovery::RecoveryBootstrap& recovery_bootstrap);
 
   // --------------------------------------------------------
   // Transfer the already validated bootstrap lease and provider only after every fallible step has
@@ -564,7 +611,7 @@ private:
   // opaque live lease; owner/lease lifetimes are guaranteed by unique ownership and destruction
   // order.
   PrivateOrderReconciler(
-      const SubmissionCoordinator& owner, M4Policy m4_policy,
+      const SubmissionCoordinator& owner, oms::OutboundOms& outbound_oms, M4Policy m4_policy,
       recovery::RecoveryLineageId recovery_lineage_id, recovery::RuntimeEpochId runtime_epoch_id,
       model::OrderNamespace registered_order_namespace, PrivateOrderEventFactory event_factory,
       std::vector<std::optional<PrivateEventIdentityRecord>> event_identity_records,
@@ -576,12 +623,11 @@ private:
       const configuration::StartupConfiguration& configuration);
 
   // --------------------------------------------------------
-  // Jointly retain one admitted source, its optional preparation, and containment before releasing
-  // the matching completion error. All allocation belongs to cold construction.
-  [[nodiscard]] PrivateTurnCompletion
-  retain_admitted_identity_turn(SerializedExecutor& executor, CriticalPrivateEventAttempt attempt,
-                                const AdmissionReceipt& receipt,
-                                model::TurnOrdinal turn_ordinal) noexcept;
+  // Commit a supported admitted input or retain its full source, progress, and containment. The
+  // guard spans validation, publication, and the final lane-specific completion.
+  [[nodiscard]] PrivateTurnCompletion commit_or_retain_admitted_private_turn(
+      SerializedExecutor& executor, CriticalPrivateEventAttempt attempt,
+      const AdmissionReceipt& receipt, model::TurnOrdinal turn_ordinal) noexcept;
 
   // --------------------------------------------------------
   // Bind the first authenticated event/fence executor only when its installed policy matches;
@@ -602,9 +648,28 @@ private:
       std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal) const;
 
   // --------------------------------------------------------
-  // Retain immutable owner/recovery authority, empty canonical tables, and the opaque live lease.
+  // Borrow an order's active reverse binding, if any; one order can own at most one exchange key.
+  [[nodiscard]] const PrivateExchangeOrderMapping*
+  find_committed_exchange_mapping_for_order(const model::OrderId& order_id) const noexcept;
+
+  // --------------------------------------------------------
+  // Check canonical event/trade/mapping insertion and the genuine OMS gap before publication.
+  // Failure leaves every row unchanged. Callers serialize validation through application.
+  [[nodiscard]] model::Result<void>
+  validate_buffered_gap_state(const FirstSeenAuthoritativePrivateIdentityPlan& identity,
+                              const oms::PrivateOmsTransitionPlan& transition) const;
+
+  // --------------------------------------------------------
+  // Publish the previously validated OMS gap and its immutable identities after journal
+  // publication in the same uninterrupted owner turn. This phase has no fallible operation.
+  void apply_validated_buffered_gap_state(const FirstSeenAuthoritativePrivateIdentityPlan& identity,
+                                          const oms::PrivateOmsTransitionPlan& transition) noexcept;
+
+  // --------------------------------------------------------
+  // Retain immutable owner/recovery authority, bounded canonical tables, and the opaque live lease.
   // The last-declared retention state owns the independently mutable preparations and gates.
   const SubmissionCoordinator* owner_;
+  oms::OutboundOms* outbound_oms_;
   M4Policy m4_policy_;
   recovery::RecoveryLineageId recovery_lineage_id_;
   recovery::RuntimeEpochId runtime_epoch_id_;

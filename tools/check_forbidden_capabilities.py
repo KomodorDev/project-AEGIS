@@ -157,6 +157,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "src/aegis/recovery/private_event_journal_reservation.hpp",
     "src/aegis/runtime/private_business_transaction.hpp",
     "src/aegis/runtime/private_business_transaction.cpp",
+    "src/aegis/runtime/private_gap_commit.cpp",
     "src/aegis/runtime/private_business_evidence_preparation.cpp",
     "src/aegis/trace/private_business_evidence.hpp",
     "src/aegis/trace/private_business_evidence.cpp",
@@ -171,6 +172,7 @@ M4_GENERAL_FILE_PATTERNS = (
     "tests/unit/runtime/private_business_evidence_owner_test.cpp",
     "tests/support/private_business_transaction_fixture.hpp",
     "tests/unit/runtime/private_business_transaction_test.cpp",
+    "tests/unit/runtime/private_gap_commit_test.cpp",
     "include/aegis/risk/reservation_conversion.hpp",
     "include/aegis/risk/reservation_ledger.hpp",
     "src/aegis/risk/reservation_conversion.cpp",
@@ -254,6 +256,7 @@ M4_OWNER_PATH_FILE_PATTERNS = (
     "src/aegis/recovery/private_event_journal_reservation.hpp",
     "src/aegis/runtime/private_business_transaction.hpp",
     "src/aegis/runtime/private_business_transaction.cpp",
+    "src/aegis/runtime/private_gap_commit.cpp",
     "src/aegis/runtime/private_business_evidence_preparation.cpp",
     "src/aegis/trace/private_business_evidence.hpp",
     "src/aegis/trace/private_business_evidence.cpp",
@@ -552,7 +555,7 @@ APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
     # these exact declarations grant no constructor, queue, or admission handoff exception.
     Path("src/aegis/runtime/private_order_reconciler.hpp"): (
         re.compile(
-            r"\bretain_admitted_identity_turn\s*\(\s*(?P<identifier>SerializedExecutor)\s*&\s*executor\s*,"
+            r"\bcommit_or_retain_admitted_private_turn\s*\(\s*(?P<identifier>SerializedExecutor)\s*&\s*executor\s*,"
         ),
         re.compile(
             r"\bbind_private_executor\s*\(\s*(?P<identifier>SerializedExecutor)"
@@ -561,7 +564,7 @@ APPROVED_DIRECT_PATH_IDENTIFIERS: dict[Path, tuple[re.Pattern[str], ...]] = {
     ),
     Path("src/aegis/runtime/private_identity_retention.cpp"): (
         re.compile(
-            r"\bPrivateOrderReconciler::retain_admitted_identity_turn\s*\(\s*(?P<identifier>SerializedExecutor)\s*&\s*executor\s*,"
+            r"\bPrivateOrderReconciler::commit_or_retain_admitted_private_turn\s*\(\s*(?P<identifier>SerializedExecutor)\s*&\s*executor\s*,"
         ),
         re.compile(
             r"\bPrivateOrderReconciler::bind_private_executor\s*\(\s*"

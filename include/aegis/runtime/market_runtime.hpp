@@ -237,10 +237,10 @@ public:
                               FakeSubmissionRuntimeParams submission_params);
 
   // --------------------------------------------------------
-  // Install bounded M4 identity preparation before callback authority becomes reachable. Admitted
-  // private facts are retained for later reconciliation; this composition cannot acknowledge
-  // economic consumption. Installation consumes the bootstrap before callback/executor setup,
-  // so a failure after installation releases that incarnation and requires a fresh bootstrap.
+  // Install bounded M4 identity ownership before callback authority becomes reachable. The owner
+  // can commit supported execution gaps and exact repeats to its volatile journal. Other facts
+  // remain available for reconciliation. Installation consumes the bootstrap before callback and
+  // executor setup, so a later failure releases that incarnation and requires a fresh bootstrap.
   [[nodiscard]] static model::Result<std::unique_ptr<MarketRuntime>>
   create_with_fake_private_identity_retention(configuration::StartupConfiguration configuration,
                                               RuntimePolicy policy,
@@ -271,8 +271,8 @@ public:
 
   // --------------------------------------------------------
   // Copy one trusted ordinary private attempt into its isolated reserve after source bootstrap.
-  // A rejected attempt remains the source's responsibility; successful copying is observable
-  // separately from the owner's eventual retained completion.
+  // A rejected attempt remains the source's responsibility. Successful copying precedes the
+  // serialized owner's gap, duplicate, or retained completion.
   [[nodiscard]] model::Result<PrivateAdmissionDecision>
   try_admit_private(const oms::PrivateOrderIngressAttempt& attempt);
 
@@ -284,8 +284,8 @@ public:
   try_admit_private(const oms::PrivateOrderIngressAttempt&& attempt) = delete;
 
   // --------------------------------------------------------
-  // Copy the executor's ordinary-lane observation for one attempted source fact; reconciliation
-  // completion remains behind its distinct internal oracle and cannot satisfy this query.
+  // Copy the executor's active or terminal ordinary-lane observation for one attempted source
+  // fact. A completed buffer has left the active reserve. Reconciliation uses a distinct oracle.
   [[nodiscard]] std::optional<PrivateAdmissionObservation>
   private_admission_observation(model::AdmissionOrdinal attempt_ordinal) const;
 

@@ -1,6 +1,7 @@
-// Purpose: prove opt-in MarketRuntime ownership, bounded private retention, bootstrap lease
-// lifetime, bounded inventory installation, and detached evidence without economic application.
+// Purpose: prove opt-in MarketRuntime ownership, bounded private retention and gap commits,
+// bootstrap lease lifetime, and detached evidence without applying execution economics.
 
+#include "aegis/recovery/journal_record.hpp"
 #include "aegis/runtime/market_runtime.hpp"
 #include "m4_private_event_fixture.hpp"
 #include "m4_test_authority.hpp"
@@ -15,11 +16,13 @@
 #include <optional>
 #include <stdexcept>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
 
 using namespace aegis;
+using test_support::create_m4_decimal_or_throw;
 using test_support::create_m4_opaque_identity_or_throw;
 using test_support::parse_m4_identifier_or_throw;
 
@@ -154,6 +157,43 @@ create_retention_strategies(const configuration::StartupConfiguration& configura
 }
 
 // --------------------------------------------------------
+// Author a venue execution interval [1, 2) for the real bootstrap submission. Route and metadata
+// come from the same sealed configuration installed in the runtime.
+[[nodiscard]] oms::PrivateOrderIngressAttempt
+create_runtime_gap_attempt_or_throw(const test_support::M4OwnerTestAuthority& authority,
+                                    const model::OrderId& order_id) {
+  const auto request = test_support::create_m4_reference_order_request_or_throw();
+  const auto* const route = authority.configuration.routes().find_route(request.route_id);
+  if (route == nullptr) {
+    throw std::logic_error{"missing private gap runtime route"};
+  }
+  const auto* const metadata =
+      authority.configuration.find_instrument_metadata(route->venue_id, route->instrument_id);
+  auto resolver = runtime::M4ProvenanceResolver::create_m4_provenance_resolver(
+      authority.configuration, authority.m4_policy);
+  auto locator = oms::PrivateOrderLocator::create_private_order_locator(
+      order_id, create_m4_opaque_identity_or_throw<oms::ExchangeOrderId>(0x71U));
+  if (metadata == nullptr || !resolver || !locator) {
+    throw std::logic_error{"invalid private gap runtime source authority"};
+  }
+  runtime::PrivateOrderEventFactory factory{std::move(resolver).value()};
+  auto attempt = factory.create_venue_execution_attempt(
+      oms::VenuePrivateIngressOrigin{
+          oms::VenuePrivateEventKey{
+              route->venue_id, route->logical_account_id,
+              create_m4_opaque_identity_or_throw<oms::PrivateSourceEpochId>(0x51U),
+              create_m4_opaque_identity_or_throw<oms::PrivateEventId>(0x61U)},
+          model::SourceTimestamp{10U}},
+      std::move(locator).value(), create_m4_opaque_identity_or_throw<oms::TradeId>(0x81U),
+      route->instrument_id, metadata->revision(), create_m4_decimal_or_throw<model::Quantity>(1),
+      request.quantity, request.price, std::nullopt);
+  if (!attempt) {
+    throw std::logic_error{"invalid private gap runtime execution"};
+  }
+  return std::move(attempt).value();
+}
+
+// --------------------------------------------------------
 // Construct the opt-in production composition while preserving all borrowed clocks and results.
 [[nodiscard]] std::unique_ptr<runtime::MarketRuntime> create_retention_runtime_or_throw(
     const test_support::M4OwnerTestAuthority& authority, recovery::RecoveryBootstrap&& bootstrap,
@@ -239,6 +279,120 @@ TEST_CASE("private identity runtime installs bounded owner before callback autho
   REQUIRE(recovery.medium->registered_namespace_count());
   CHECK(recovery.medium->registered_namespace_count().value() == 1U);
   CHECK(detached.registered_order_namespace == expected_namespace);
+}
+
+// --------------------------------------------------------
+// Drive a buffer and its exact repeat through the public runtime. Quiescent owner evidence and the
+// closed medium must show one canonical identity set and two independently journaled receipts.
+TEST_CASE("market runtime commits a private gap and an exact repeat through public admission",
+          "[runtime][m4][private-identity-retention-runtime][private-gap-commit]") {
+  auto authority = test_support::create_m4_owner_test_authority_or_throw();
+  auto recovery =
+      test_support::create_m4_recovery_bootstrap_test_authority_or_throw(authority.m4_policy);
+  model::DeterministicClockProvider executor_clock{100U};
+  model::DeterministicClockProvider callback_clock{1'000U};
+  std::optional<execution::SubmitResult> submitted;
+  auto runtime = create_retention_runtime_or_throw(authority, std::move(recovery.bootstrap),
+                                                   executor_clock, callback_clock, submitted);
+  REQUIRE(runtime->bind_to_current_thread());
+  REQUIRE(runtime->execute_next_turn());
+  REQUIRE(submitted);
+  REQUIRE(submitted->order_id());
+  CHECK(submitted->disposition() == execution::SubmitDisposition::WriteInitiated);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // The buffer leaves the active reserve. An exact repeat with a distinct receive time is
+  // terminal in the same ordinary admission lane.
+  const auto attempt = create_runtime_gap_attempt_or_throw(authority, *submitted->order_id());
+  const auto first = runtime->try_admit_private(attempt);
+  REQUIRE(first);
+  REQUIRE(first.value().outcome == runtime::AdmissionOutcome::Accepted);
+  REQUIRE(first.value().receipt);
+  const auto buffered_turn = runtime->execute_next_turn();
+  REQUIRE(buffered_turn);
+  REQUIRE(buffered_turn.value());
+  CHECK(buffered_turn.value()->kind == runtime::TurnKind::PrivateCommand);
+  CHECK_FALSE(runtime->private_admission_observation(first.value().attempt_ordinal));
+
+  REQUIRE(executor_clock.advance_nanoseconds(7U));
+  const auto repeat = runtime->try_admit_private(attempt);
+  REQUIRE(repeat);
+  REQUIRE(repeat.value().outcome == runtime::AdmissionOutcome::Accepted);
+  REQUIRE(repeat.value().receipt);
+  const auto duplicate_turn = runtime->execute_next_turn();
+  REQUIRE(duplicate_turn);
+  REQUIRE(duplicate_turn.value());
+  CHECK(duplicate_turn.value()->kind == runtime::TurnKind::PrivateCommand);
+  const auto duplicate = runtime->private_admission_observation(repeat.value().attempt_ordinal);
+  REQUIRE(duplicate);
+  CHECK(duplicate->state == runtime::CriticalPrivateAdmissionState::EconomicallyConsumed);
+  CHECK(duplicate->disposition == oms::PrivateEventDisposition::ExactEventDuplicate);
+  CHECK_FALSE(duplicate->retention_error);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Check the production owner's cold projection before destruction releases the medium lease.
+  runtime->close();
+  REQUIRE(runtime->release_from_current_thread());
+  const auto evidence = runtime->collect_quiescent_evidence();
+  REQUIRE(evidence);
+  CHECK_FALSE(evidence.value().fault);
+  REQUIRE(evidence.value().submission);
+  REQUIRE(evidence.value().submission->oms_orders.size() == 1U);
+  CHECK(evidence.value().submission->oms_orders.front().state ==
+        oms::OutboundOrderState::WriteInitiated);
+  CHECK(evidence.value().submission->held_reservation_count == 1U);
+  REQUIRE(evidence.value().private_identity_retention);
+  const auto& owner = *evidence.value().private_identity_retention;
+  CHECK(owner.event_identity_record_count == 1U);
+  CHECK(owner.trade_identity_record_count == 1U);
+  CHECK(owner.exchange_order_mapping_count == 1U);
+  CHECK(owner.retained_identity_turn_count == 0U);
+  CHECK(owner.inventory_source_row_count == 0U);
+  runtime.reset();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Each genuine receipt owns a typed journal row and one audit ordinal, while acknowledgement
+  // still ends at namespace registration.
+  const auto published = recovery.medium->published_journal_record_count();
+  REQUIRE(published);
+  CHECK(published.value() == 3U);
+  const auto acknowledged = recovery.medium->acknowledged_journal_record_count();
+  REQUIRE(acknowledged);
+  CHECK(acknowledged.value() == 1U);
+  const auto& first_receipt = *first.value().receipt;
+  const auto& repeat_receipt = *repeat.value().receipt;
+  CHECK(first_receipt.received_at != repeat_receipt.received_at);
+  std::optional<recovery::PrivateEventInputJournalPayload> first_input;
+  std::uint32_t index = 1U;
+  for (const auto* const receipt : {&first_receipt, &repeat_receipt}) {
+    const auto record = recovery.medium->published_journal_record_at(index);
+    REQUIRE(record);
+    CHECK(record.value().kind() == recovery::JournalRecordKind::PrivateEventInput);
+    CHECK(record.value().sequence().value() == index + 1U);
+    CHECK(record.value().runtime_epoch_id() == owner.runtime_epoch_id);
+    REQUIRE(record.value().replay_provenance());
+    CHECK(record.value().replay_provenance()->admission_ordinal == receipt->attempt_ordinal);
+    CHECK(record.value().replay_provenance()->receive_sequence == receipt->receive_sequence);
+    REQUIRE(record.value().audit_span());
+    CHECK(record.value().audit_span()->first_audit_ordinal().value() == index);
+    CHECK(record.value().audit_span()->audit_record_count() == 1U);
+    const auto* const input =
+        std::get_if<recovery::PrivateEventInputJournalPayload>(&record.value().payload());
+    REQUIRE(input != nullptr);
+    CHECK(input->input().receive_time() == receipt->received_at);
+    CHECK(input->input().payload() == attempt.semantic_value().payload());
+    const auto& resolution = input->first_admission_resolution();
+    REQUIRE(resolution.known_resolution() != nullptr);
+    CHECK(resolution.known_resolution()->order_id == *submitted->order_id());
+    if (first_input) {
+      CHECK(first_input->first_admission_resolution() == resolution);
+      CHECK(first_input->input().is_ingress_semantically_equal_to(input->input()));
+    }
+    first_input = *input;
+    ++index;
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
 }
 
 // --------------------------------------------------------

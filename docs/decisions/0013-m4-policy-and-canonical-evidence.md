@@ -62,17 +62,18 @@ private-event and audit slot counts. Every audit slot has a preallocated effect 
 `floor(max_private_audit_records / 3)` entries of `max_order_callbacks_per_turn`. One detached
 preparation copies every supplied fact after validating the entire primary/callback topology and
 all capacity bounds. The complete prospective span includes a reserved terminal position but no
-Delivered or Faulted row. Abandonment consumes no accepted prefix or ordinal. These closed records
-retain optional linkage as candidate values and cannot publish evidence or acknowledge consumption.
+Delivered or Faulted row. Abandonment consumes no accepted prefix or ordinal. The detached lease
+retains optional candidate linkage and confers no publication or acknowledgement authority.
 Currency and error context use bounded inline semantic storage; those bounds assign no ADR-0014
-byte widths. The fake recovery medium remains namespace-only.
+byte widths. A committed callback-free input appends one immutable event/audit pair; its effect
+backing is never reused as scratch.
 
 Journal-backed joint preparations now reserve one slot from that medium's actual fixed journal
 capacity, including the already acknowledged namespace prefix. Their complete typed record and
 actual sequence link every prepared primary and Planned row. One outstanding reservation keeps its
 incarnation lease; failure or abandonment consumes no published prefix, audit position, or callback
-counter. A retained production gap candidate is a copied volatile observation of abandoned
-preflight, so its sequence may recur and is not publication or durability evidence. These types add
+counter. A successful gap or exact repeat publishes the actual reserved input and completes its
+one-row audit span. The journal suffix is volatile and unacknowledged. These types add
 no encoder, digest preimage, or ADR-0014 byte assignment.
 
 The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
@@ -207,8 +208,10 @@ Generic `M4Policy` creation additionally requires:
   `max_private_audit_records * max_transition_effects_per_turn` is u32-representable;
 - initialization-preallocated Planned-callback backing
   `floor(max_private_audit_records / 3) * max_order_callbacks_per_turn` is
-  u32-representable; and
-- every checked product used to preallocate reconciliation or recovery vectors is representable.
+  u32-representable;
+- every checked product used to preallocate reconciliation or recovery vectors is representable; and
+- the outbound OMS row capacity times `max_pending_fill_intervals_per_order` is u32-representable.
+  Failure names `max_pending_fill_intervals_per_order`.
 
 The primary-audit product is checked before the Planned-callback product. Failure names
 `max_transition_effects_per_turn` or `max_order_callbacks_per_turn`, respectively, so a policy that

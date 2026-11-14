@@ -162,7 +162,7 @@ PrivateOrderReconciler::prepare_initial_known_authoritative_business_transaction
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Preflight each canonical registry's exact required insertion while preserving suppression of
-  // candidate mappings on contained or forbidden transitions. These tables still remain empty.
+  // candidate mappings on contained or forbidden transitions. Preparing does not change a prefix.
   if (event_identity_record_count_ >= event_identity_records_.size()) {
     return PreparationResult::create_failure(
         create_business_transaction_error("private_business_transaction.event_capacity",
