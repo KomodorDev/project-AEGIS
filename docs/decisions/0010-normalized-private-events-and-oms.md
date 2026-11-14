@@ -70,6 +70,12 @@ The detached initial preparation remains inspection-only. The owner commits call
 through a separate guarded path, so callers cannot publish a detached preparation. Callback-bearing
 preparations still use prospective values and cannot stand in for the actual dispatcher.
 
+The live execution preparation now verifies the exact buffered prefix against the original
+accepted event, trade, and audit records. It plans each newly contiguous execution in cumulative
+order and records the intermediate OMS, reservation, and inventory projections as proposed audit
+effects. The real journal reservation covers the complete prospective audit span. Actual fill
+application and strategy notification still require the shared owner commit described below.
+
 ## Decision
 
 The following subsections define the accepted private-event vocabulary, correlation, lifecycle,

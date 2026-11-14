@@ -330,8 +330,7 @@ An additional owner-bound initial business query joins genuine correlation, the 
 proposal, and its economic candidate. It requires coherent untouched M3 open-order economics and
 exposes only immutable inspection, with no transferable economic commit authority. Its prospective
 audit span contains one primary row plus two aggregate callback rows when callbacks are proposed;
-these ordinals and storage are not reserved by this query. Batch tests qualify multi-fill economics
-independently; a contiguous input that would drain live gaps is still retained for reconciliation.
+these ordinals and storage are not reserved by this query.
 
 The installed private owner now also owns a source-private business-evidence preparation store.
 Cold construction allocates exactly `max_private_event_records` event slots and
@@ -365,6 +364,16 @@ reservation/inventory generation, containment, identity/preparation history, and
 linkage. It grants no publication or application authority. Economic component validation is now
 separate from its private no-fail write phase; the existing component commit retains its behavior.
 
+The owner can now prepare a known contiguous execution against its actual live pending list.
+For example, with `[1, 2)`, `[2, 3)`, and `[4, 5)` waiting, the missing `[0, 1)` proposes the
+first three applications in cumulative order and leaves `[4, 5)` pending. Each drained fill must
+match its committed event, trade, and original buffered evidence. The preparation links each
+proposed order, reservation, and seven-scope inventory effect to its source and to the actual next
+fake journal position. It reserves one primary audit row and prospective callback per execution,
+an aggregate Planned row, and the terminal audit position. Abandonment returns all capacity, and a
+moved or stale preparation cannot validate. Admitted contiguous executions still enter retention
+until the synchronous strategy dispatch and terminal audit publication are installed.
+
 The fake journal includes its acknowledged namespace row in capacity checks. Committed private
 inputs remain an unacknowledged suffix: cold inspection can see them, and the owner must be closed
 and the suffix explicitly discarded before namespace bootstrap can reopen. A journal or evidence
@@ -373,9 +382,10 @@ or audit ordinal. Business durability acknowledgement and replay remain unimplem
 
 Remaining M4 work includes live application of contiguous fills and gap drains, callback-bearing
 transactions, full cancellation and reconciliation, unattributed inventory, the one-shot reference
-driver, snapshots and catch-up, the 55-point crash matrix, and final exit evidence. The next economic
-commit must validate OMS and economic plans against one unchanged owner before publishing, and
-then apply the prevalidated OMS, reservation, and inventory changes in order. ADR-0014 must accept
+driver, snapshots and catch-up, the 55-point crash matrix, and final exit evidence. Before the
+prepared fill transaction can publish, the runtime needs an order-specific strategy callback,
+shared callback ordinals, and storage for its Planned and terminal audit rows. It can then apply
+the prevalidated OMS, reservation, and inventory changes in order. ADR-0014 must accept
 the exact canonical evidence bytes before implementation of an encoder or byte golden.
 
 ### Outcome
