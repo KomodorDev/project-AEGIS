@@ -1,5 +1,5 @@
 // Purpose: reserve one complete typed private-event journal input against the actual fake-medium
-// lease without publishing a row, advancing a sequence, or granting business mutation authority.
+// lease, and give the genuine owner a no-fail publication step without acknowledgement authority.
 
 #pragma once
 
@@ -34,6 +34,7 @@ struct FakeJournalLeaseControl;
 // One move-only reservation retains a complete prospective PrivateEventInput record and the exact
 // live-incarnation lease. Its source-private factory assigns sequence/predecessor from the medium;
 // inspection grants no append, business commit, acknowledgement, replay, or refresh operation.
+// Only the serialized owner can publish, after validating the complete joint plan.
 // Moves revoke the source, destruction releases the sole reservation, and abandonment consumes no
 // sequence or slot. A detached value keeps cold reopening fenced after owner/medium destruction.
 // Every operation and borrowed-record access requires caller serialization. Normalized venue and
@@ -91,6 +92,13 @@ private:
                                    JournalRecord record) noexcept;
 
   // --------------------------------------------------------
+  // Append the validated record to its reserved slot and revoke this reservation. The genuine
+  // owner must have validated the complete callback-free joint plan in this same serialized turn,
+  // including the slot and the exact audit span. This no-fail phase leaves acknowledgement and
+  // the namespace registry unchanged.
+  void publish_validated_reservation() noexcept;
+
+  // --------------------------------------------------------
   // Clear the exact incarnation's unpublished flag once and revoke local inspection authority.
   void release_reservation() noexcept;
 
@@ -99,7 +107,7 @@ private:
   std::optional<JournalRecord> record_;
 
   // ########################################################################
-  // Only the genuine installed owner can acquire this journal capacity during joint preparation.
+  // Only the genuine installed owner can reserve and publish as part of its serialized commit.
   friend class runtime::PrivateOrderReconciler;
 
   // ########################################################################

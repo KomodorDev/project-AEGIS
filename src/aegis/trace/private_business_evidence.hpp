@@ -190,8 +190,8 @@ struct OrderCallbackAuditValue {
 };
 
 // ########################################################################
-// A closed immutable event observation owns all source facts, equality projections, and proposed
-// linkage. Only the preparation store constructs it; copied values never grant admission,
+// A closed immutable event observation owns all source facts, equality projections, and linkage.
+// Only the policy-sized evidence store constructs it; copied values never grant admission,
 // publication, economic consumption, or durability authority.
 class PrivateEventEvidence final {
 public:
@@ -264,7 +264,7 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return the proposed disposition without proving canonical consumption.
+  // Return the semantic disposition; only membership in the accepted prefix proves consumption.
   [[nodiscard]] oms::PrivateEventDisposition disposition() const noexcept { return disposition_; }
 
   // --------------------------------------------------------
@@ -281,7 +281,7 @@ public:
   reconciliation_epoch_id() const noexcept;
 
   // --------------------------------------------------------
-  // Borrow optional prospective journal linkage; absence does not manufacture a sequence.
+  // Borrow optional journal linkage; preparation alone does not publish that sequence.
   [[nodiscard]] const std::optional<recovery::JournalSequence>& journal_sequence() const noexcept {
     return journal_sequence_;
   }
@@ -326,7 +326,7 @@ private:
   std::optional<recovery::DiagnosticOrdinal> diagnostic_ordinal_;
 
   // ########################################################################
-  // Only the policy-sized source-private store constructs complete proposed evidence.
+  // Only the policy-sized source-private store constructs complete evidence.
   friend class runtime::PrivateBusinessEvidenceStore;
 
   // ########################################################################
@@ -396,9 +396,9 @@ private:
 
 // ########################################################################
 // A closed move-only audit row owns fixed header values and shares immutable cold effect/callback
-// backing. The prepared capability determines whether this is a proposal; this type alone proves
-// neither applied business state nor callback delivery. Views survive owner destruction; the sole
-// prepared lease prevents backing reuse until every proposed row in that capability is destroyed.
+// backing. This type alone proves neither acceptance nor callback delivery. The prepared lease
+// prevents scratch reuse and keeps proposed views alive even after store destruction. Accepted
+// views remain valid while the store lives, and later turns never reuse their effect backing.
 class OrderAuditRecord final {
 public:
 
@@ -417,7 +417,7 @@ public:
   }
 
   // --------------------------------------------------------
-  // Return the row's preassigned position within its proposed contiguous span.
+  // Return the row's position within its preassigned contiguous span.
   [[nodiscard]] recovery::AuditOrdinal audit_ordinal() const noexcept { return audit_ordinal_; }
 
   // --------------------------------------------------------
@@ -451,13 +451,13 @@ public:
   }
 
   // --------------------------------------------------------
-  // Borrow optional prospective journal linkage without claiming input publication.
+  // Borrow optional journal linkage without independently claiming input publication.
   [[nodiscard]] const std::optional<recovery::JournalSequence>& journal_sequence() const noexcept {
     return journal_sequence_;
   }
 
   // --------------------------------------------------------
-  // Primary rows carry their proposed input disposition; callback rows omit it.
+  // Primary rows carry their input disposition; callback rows omit it.
   [[nodiscard]] const std::optional<oms::PrivateEventDisposition>& disposition() const noexcept {
     return disposition_;
   }

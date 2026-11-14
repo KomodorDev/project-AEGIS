@@ -1,5 +1,5 @@
-// Purpose: implement fixed-capacity typed fake-media validation, namespace publication and fake
-// acknowledgement, and exclusive unpublished private-input reservation without canonical bytes.
+// Purpose: implement fixed-capacity typed fake-media validation, acknowledged namespace bootstrap,
+// and unacknowledged private-input publication without canonical bytes or business replay.
 
 #include "aegis/recovery/deterministic_fake_recovery_medium.hpp"
 
@@ -134,6 +134,99 @@ registered_namespace_pointer_at(const detail::FakeRecoveryBacking& backing,
 }
 
 // --------------------------------------------------------
+// Verify authoritative order input and resolved attribution while preserving unchanged source
+// provenance. The runtime epoch must match a reconciliation input's qualified row identity.
+[[nodiscard]] model::Result<void> validate_known_private_journal_source(
+    const model::M4RootProvenance& root_provenance, RuntimeEpochId runtime_epoch_id,
+    const oms::NormalizedPrivateOrderInput& input,
+    const oms::PrivateEventResolution& first_admission_resolution) {
+  const auto* const known = first_admission_resolution.known_resolution();
+  if (input.subject_scope() != oms::PrivateEventSubjectScope::Order ||
+      (input.origin() != oms::PrivateEventOrigin::Venue &&
+       input.origin() != oms::PrivateEventOrigin::Reconciliation) ||
+      known == nullptr || !known->provenance.subject() || !input.provenance().subject()) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_profile"));
+  }
+  if (input.provenance().root() != root_provenance || known->provenance.root() != root_provenance) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_root"));
+  }
+  const auto& known_subject = *known->provenance.subject();
+  const auto& source_subject = *input.provenance().subject();
+  if (known_subject.logical_account_id() != input.logical_account_id() ||
+      known_subject.venue_id() != input.venue_id() ||
+      source_subject.logical_account_id() != input.logical_account_id() ||
+      source_subject.venue_id() != input.venue_id() || !known_subject.firm_id() ||
+      !known_subject.desk_id() || !known_subject.bot_id() || !known_subject.strategy_id() ||
+      !known_subject.route() || !known_subject.instrument() ||
+      (source_subject.firm_id() && source_subject.firm_id() != known_subject.firm_id())) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_subject"));
+  }
+  const auto* const reconciliation =
+      std::get_if<oms::ReconciliationPrivateEventOrigin>(&input.origin_value());
+  if (reconciliation != nullptr &&
+      reconciliation->reconciliation_epoch_id.runtime_epoch_id() != runtime_epoch_id) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reconciliation_epoch"));
+  }
+  return model::Result<void>::create_success();
+}
+
+// --------------------------------------------------------
+// Validate one published private row only as a discardable current-incarnation suffix value.
+// This never infers that its audit row survived or makes the input replayable.
+[[nodiscard]] model::Result<void>
+validate_volatile_private_journal_record(const detail::FakeRecoveryBacking& backing,
+                                         const JournalRecord& record, std::uint32_t index) {
+  if (index < backing.acknowledged_journal_record_count) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.replay_required"));
+  }
+  const auto* const payload = std::get_if<PrivateEventInputJournalPayload>(&record.payload());
+  const auto* const active_namespace =
+      backing.registered_namespace_count == 0U
+          ? nullptr
+          : registered_namespace_pointer_at(backing, backing.registered_namespace_count - 1U);
+  const auto expected_audit =
+      static_cast<std::uint64_t>(index - backing.acknowledged_journal_record_count) + 1U;
+  if (payload == nullptr || active_namespace == nullptr || !record.runtime_epoch_id() ||
+      record.runtime_epoch_id()->order_namespace() != *active_namespace ||
+      record.runtime_epoch_id()->counter() != 1U || !record.replay_provenance() ||
+      !record.audit_span() || record.audit_span()->audit_record_count() != 1U ||
+      record.audit_span()->first_audit_ordinal().value() != expected_audit ||
+      payload->input().kind() != oms::PrivateOrderEventKind::Execution) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_suffix"));
+  }
+  auto valid_source = validate_known_private_journal_source(
+      backing.root_provenance, *record.runtime_epoch_id(), payload->input(),
+      payload->first_admission_resolution());
+  if (!valid_source) {
+    return valid_source;
+  }
+  if (record.subject_provenance() !=
+      payload->first_admission_resolution().known_resolution()->provenance.subject()) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_subject"));
+  }
+  if (index != backing.acknowledged_journal_record_count) {
+    const auto* const previous = published_journal_record_pointer_at(backing, index - 1U);
+    if (previous == nullptr || previous->kind() != JournalRecordKind::PrivateEventInput ||
+        !previous->replay_provenance() ||
+        previous->replay_provenance()->admission_ordinal.value() >=
+            record.replay_provenance()->admission_ordinal.value() ||
+        previous->replay_provenance()->receive_sequence.value() >=
+            record.replay_provenance()->receive_sequence.value()) {
+      return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+          model::DomainErrorCode::InvalidJournalState, "journal.private_input_receipt_order"));
+    }
+  }
+  return model::Result<void>::create_success();
+}
+
+// --------------------------------------------------------
 // Validate one record's causal envelope, presence profile, and complete typed equality projection.
 [[nodiscard]] model::Result<void>
 validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
@@ -172,7 +265,8 @@ validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
   // ++++++++++++++++++++++++++++++++++++++++
   // Namespace registration is lineage-scoped and cannot invent runtime or subject attribution.
   if (record.kind() == JournalRecordKind::NamespaceRegistered) {
-    if (!std::holds_alternative<NamespaceRegisteredJournalPayload>(record.payload()) ||
+    if (index >= backing.acknowledged_journal_record_count ||
+        !std::holds_alternative<NamespaceRegisteredJournalPayload>(record.payload()) ||
         record.runtime_epoch_id() || record.subject_provenance() || record.replay_provenance() ||
         record.audit_span()) {
       return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
@@ -182,7 +276,10 @@ validate_fake_journal_record(const detail::FakeRecoveryBacking& backing,
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Every non-namespace assignment remains unavailable until its complete owner slice exists.
+  // Only the supported volatile business-input profile may follow the acknowledged namespace rows.
+  if (record.kind() == JournalRecordKind::PrivateEventInput) {
+    return validate_volatile_private_journal_record(backing, record, index);
+  }
   return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
       model::DomainErrorCode::InvalidJournalState, "journal.unsupported_record_kind"));
 
@@ -199,7 +296,8 @@ validate_cold_fake_recovery_backing(const detail::FakeRecoveryBacking& backing) 
   // Reject impossible prefix and registry bounds before dereferencing any retained slot.
   if (backing.acknowledged_journal_record_count > backing.published_journal_record_count ||
       backing.published_journal_record_count > backing.journal_slots.size() ||
-      backing.registered_namespace_count > backing.namespace_slots.size()) {
+      backing.registered_namespace_count > backing.namespace_slots.size() ||
+      backing.private_input_reservation_active) {
     return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.prefix_counts"));
   }
@@ -291,8 +389,8 @@ void discard_volatile_journal_suffix(detail::FakeRecoveryBacking& backing) noexc
 }
 
 // --------------------------------------------------------
-// Validate the exact live lease and namespace-only causal prefix before reserving or inspecting
-// an unpublished business candidate. No public capability can advance this prefix in this slice.
+// Validate the exact live lease, acknowledged namespace anchor, and current causal tail before
+// reserving or inspecting a business candidate. Prior private inputs stay unacknowledged.
 [[nodiscard]] model::Result<void> validate_private_journal_reservation_lease(
     const std::shared_ptr<detail::FakeJournalLeaseControl>& lease,
     RuntimeEpochId runtime_epoch_id) {
@@ -305,8 +403,9 @@ void discard_volatile_journal_suffix(detail::FakeRecoveryBacking& backing) noexc
         model::DomainErrorCode::InvalidJournalState, "journal.private_input_lease"));
   }
   const auto& backing = *lease->backing;
-  if (backing.published_journal_record_count == 0U || backing.registered_namespace_count == 0U ||
-      backing.published_journal_record_count != backing.acknowledged_journal_record_count ||
+  if (backing.acknowledged_journal_record_count == 0U ||
+      backing.acknowledged_journal_record_count > backing.published_journal_record_count ||
+      backing.acknowledged_journal_record_count != backing.registered_namespace_count ||
       backing.published_journal_record_count > backing.journal_slots.size() ||
       backing.registered_namespace_count > backing.namespace_slots.size()) {
     return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
@@ -317,23 +416,39 @@ void discard_volatile_journal_suffix(detail::FakeRecoveryBacking& backing) noexc
   // Bind the exact runtime epoch to the latest fake-acknowledged namespace bootstrap record.
   const auto* const registered_namespace =
       registered_namespace_pointer_at(backing, backing.registered_namespace_count - 1U);
-  const auto* const predecessor =
-      published_journal_record_pointer_at(backing, backing.published_journal_record_count - 1U);
-  if (registered_namespace == nullptr || predecessor == nullptr ||
+  const auto* const namespace_record =
+      published_journal_record_pointer_at(backing, backing.acknowledged_journal_record_count - 1U);
+  if (registered_namespace == nullptr || namespace_record == nullptr ||
       runtime_epoch_id.order_namespace() != *registered_namespace ||
       runtime_epoch_id.counter() != 1U ||
-      predecessor->kind() != JournalRecordKind::NamespaceRegistered ||
-      !std::holds_alternative<NamespaceRegisteredJournalPayload>(predecessor->payload())) {
+      namespace_record->kind() != JournalRecordKind::NamespaceRegistered ||
+      !std::holds_alternative<NamespaceRegisteredJournalPayload>(namespace_record->payload())) {
     return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.private_input_runtime_epoch"));
   }
   const auto& namespace_payload =
-      std::get<NamespaceRegisteredJournalPayload>(predecessor->payload());
+      std::get<NamespaceRegisteredJournalPayload>(namespace_record->payload());
   if (namespace_payload.order_namespace != *registered_namespace ||
       namespace_payload.registry_count_after_append != backing.registered_namespace_count ||
+      namespace_record->sequence().value() != backing.acknowledged_journal_record_count ||
+      namespace_record->lineage_id() != backing.lineage_id ||
+      namespace_record->root_provenance() != backing.root_provenance) {
+    return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
+        model::DomainErrorCode::InvalidJournalState, "journal.private_input_namespace_anchor"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Every intervening row was appended by the same serialized owner. Recheck the tail's causal
+  // position and epoch without scanning the entire private prefix on the owner path.
+  const auto* const predecessor =
+      published_journal_record_pointer_at(backing, backing.published_journal_record_count - 1U);
+  if (predecessor == nullptr ||
       predecessor->sequence().value() != backing.published_journal_record_count ||
       predecessor->lineage_id() != backing.lineage_id ||
-      predecessor->root_provenance() != backing.root_provenance) {
+      predecessor->root_provenance() != backing.root_provenance ||
+      (backing.published_journal_record_count != backing.acknowledged_journal_record_count &&
+       (predecessor->kind() != JournalRecordKind::PrivateEventInput ||
+        predecessor->runtime_epoch_id() != runtime_epoch_id))) {
     return model::Result<void>::create_failure(domain_error_from_fake_recovery_field(
         model::DomainErrorCode::InvalidJournalState, "journal.private_input_predecessor"));
   }
@@ -435,6 +550,16 @@ void PreparedPrivateEventJournalInput::release_reservation() noexcept {
 }
 
 // --------------------------------------------------------
+// Publish one previously validated reservation before the owner writes its joint projection.
+void PreparedPrivateEventJournalInput::publish_validated_reservation() noexcept {
+  static_assert(std::is_nothrow_move_constructible_v<JournalRecord>);
+  auto& backing = *lease_->backing;
+  backing.journal_slots[backing.published_journal_record_count].emplace(std::move(*record_));
+  ++backing.published_journal_record_count;
+  release_reservation();
+}
+
+// --------------------------------------------------------
 // Reserve a complete authoritative known-order input only after every envelope and capacity check.
 model::Result<PreparedPrivateEventJournalInput>
 PreparedPrivateEventJournalInput::reserve_private_event_journal_input(
@@ -459,38 +584,13 @@ PreparedPrivateEventJournalInput::reserve_private_event_journal_input(
   // ++++++++++++++++++++++++++++++++++++++++
   // Preserve source-normalized and resolved provenance separately; an instrument disagreement may
   // remain a truthful known-order safety proposal rather than being rewritten or discarded.
-  const auto* const known = first_admission_resolution.known_resolution();
-  if (input.subject_scope() != oms::PrivateEventSubjectScope::Order ||
-      (input.origin() != oms::PrivateEventOrigin::Venue &&
-       input.origin() != oms::PrivateEventOrigin::Reconciliation) ||
-      known == nullptr || !known->provenance.subject() || !input.provenance().subject()) {
-    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
-        model::DomainErrorCode::InvalidJournalState, "journal.private_input_profile"));
+  auto valid_source = validate_known_private_journal_source(
+      backing.root_provenance, runtime_epoch_id, input, first_admission_resolution);
+  if (!valid_source) {
+    return ReservationResult::create_failure(std::move(valid_source).error());
   }
-  if (input.provenance().root() != backing.root_provenance ||
-      known->provenance.root() != backing.root_provenance) {
-    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
-        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_root"));
-  }
-  const auto& known_subject = *known->provenance.subject();
-  const auto& source_subject = *input.provenance().subject();
-  if (known_subject.logical_account_id() != input.logical_account_id() ||
-      known_subject.venue_id() != input.venue_id() ||
-      source_subject.logical_account_id() != input.logical_account_id() ||
-      source_subject.venue_id() != input.venue_id() || !known_subject.firm_id() ||
-      !known_subject.desk_id() || !known_subject.bot_id() || !known_subject.strategy_id() ||
-      !known_subject.route() || !known_subject.instrument() ||
-      (source_subject.firm_id() && source_subject.firm_id() != known_subject.firm_id())) {
-    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
-        model::DomainErrorCode::RecoveryProvenanceMismatch, "journal.private_input_subject"));
-  }
-  const auto* const reconciliation =
-      std::get_if<oms::ReconciliationPrivateEventOrigin>(&input.origin_value());
-  if (reconciliation != nullptr &&
-      reconciliation->reconciliation_epoch_id.runtime_epoch_id() != runtime_epoch_id) {
-    return ReservationResult::create_failure(domain_error_from_fake_recovery_field(
-        model::DomainErrorCode::InvalidJournalState, "journal.private_input_reconciliation_epoch"));
-  }
+  const auto& resolved_subject =
+      first_admission_resolution.known_resolution()->provenance.subject();
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Include every namespace row in remaining physical headroom and derive the next causal sequence
@@ -520,7 +620,7 @@ PreparedPrivateEventJournalInput::reserve_private_event_journal_input(
       runtime_epoch_id,
       JournalRecordKind::PrivateEventInput,
       backing.root_provenance,
-      known->provenance.subject(),
+      resolved_subject,
       replay_provenance,
       JournalPayloadValue{PrivateEventInputJournalPayload{input, first_admission_resolution}},
       audit_span};
