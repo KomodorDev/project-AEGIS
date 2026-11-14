@@ -1,6 +1,7 @@
 // Purpose: independently qualify contiguous fills, bounded pending intervals, terminal-target
-// drains, malformed economics, and arrival-permutation invariance of detached OMS proposals.
+// drains, per-execution audit projections, malformed economics, and arrival-permutation invariance.
 
+#include "aegis/oms/private_execution_projection.hpp"
 #include "private_oms_transition_fixture.hpp"
 
 #include <algorithm>
@@ -168,6 +169,94 @@ TEST_CASE("private OMS gap insertion and multi-fill drain retain exact source id
     CHECK(pending[index].execution == saved_pending[index].execution);
   }
   CHECK(fixture.order().state() == State::PendingEncoding);
+}
+
+// --------------------------------------------------------
+// The proposed audit frames preserve exact pending counts, cumulative endpoints, and uncertainty
+// through each fill. Only a final full fill clears the reconciliation flag.
+TEST_CASE("private OMS execution projections trace each freshly contiguous fill",
+          "[oms][private-oms-transition][private-oms-fill]") {
+  const PrivateOmsTransitionFixture fixture;
+  auto before = fixture.create_detached_projection_or_throw(State::SubmissionUnknown);
+  establish_hypothetical_execution_mapping(before, fixture);
+  before.pending_fill_count = 2U;
+  const std::array pending{create_pending_execution_or_throw(fixture, 1, 2, 2U),
+                           create_pending_execution_or_throw(fixture, 2, 6, 6U)};
+  const auto incoming = fixture.normalize_execution_or_throw(1, 1);
+  const auto proposal = fixture.derive_transition(before, incoming, pending);
+  REQUIRE(proposal);
+  REQUIRE(proposal.value().drained_pending_prefix_count == 2U);
+
+  auto after_incoming = before;
+  after_incoming.state = State::PartiallyFilled;
+  after_incoming.cumulative_filled_quantity =
+      test_support::create_m4_decimal_or_throw<model::Quantity>(1);
+  const auto first =
+      oms::derive_private_execution_projection(proposal.value(), incoming, before, 0U);
+  REQUIRE(first);
+  CHECK(first.value().before == before);
+  CHECK(first.value().after == after_incoming);
+
+  auto after_buffered_partial = after_incoming;
+  after_buffered_partial.cumulative_filled_quantity =
+      test_support::create_m4_decimal_or_throw<model::Quantity>(2);
+  after_buffered_partial.pending_fill_count = 1U;
+  const auto second = oms::derive_private_execution_projection(
+      proposal.value(), pending[0U].execution, first.value().after, 1U);
+  REQUIRE(second);
+  CHECK(second.value().before == after_incoming);
+  CHECK(second.value().after == after_buffered_partial);
+
+  auto after_buffered_full = after_buffered_partial;
+  after_buffered_full.state = State::Filled;
+  after_buffered_full.cumulative_filled_quantity =
+      test_support::create_m4_decimal_or_throw<model::Quantity>(6);
+  after_buffered_full.pending_fill_count = 0U;
+  after_buffered_full.reconciliation_required = false;
+  const auto third = oms::derive_private_execution_projection(
+      proposal.value(), pending[1U].execution, second.value().after, 2U);
+  REQUIRE(third);
+  CHECK(third.value().before == after_buffered_partial);
+  CHECK(third.value().after == after_buffered_full);
+  CHECK(third.value().after == proposal.value().after);
+  CHECK(fixture.order().state() == State::PendingEncoding);
+}
+
+// --------------------------------------------------------
+// A first primary can establish the execution mapping. A forged baseline, source interval, or
+// final projection cannot be used as a valid prefix, including after a genuine planner call.
+TEST_CASE("private OMS execution projection rejects an inconsistent audit chain",
+          "[oms][private-oms-transition][private-oms-fill]") {
+  const PrivateOmsTransitionFixture fixture;
+  const auto before = fixture.create_detached_projection_or_throw();
+  const auto incoming = fixture.normalize_execution_or_throw(2, 2);
+  const auto proposed = fixture.derive_transition(before, incoming);
+  REQUIRE(proposed);
+  const auto valid =
+      oms::derive_private_execution_projection(proposed.value(), incoming, before, 0U);
+  REQUIRE(valid);
+  CHECK(valid.value().after == proposed.value().after);
+  CHECK_FALSE(valid.value().before.exchange_order_id);
+  CHECK(valid.value().after.exchange_order_id == fixture.create_exchange_order_id_or_throw());
+  CHECK(valid.value().after.exchange_mapping_established_by_execution);
+  CHECK_FALSE(valid.value().after.exchange_acknowledged);
+
+  auto wrong_before = before;
+  wrong_before.reconciliation_required = true;
+  const auto wrong_baseline =
+      oms::derive_private_execution_projection(proposed.value(), incoming, wrong_before, 0U);
+  REQUIRE_FALSE(wrong_baseline);
+  CHECK(wrong_baseline.error().code == model::DomainErrorCode::InvalidPrivateOmsState);
+  CHECK_FALSE(oms::derive_private_execution_projection(
+      proposed.value(), fixture.normalize_execution_or_throw(1, 2), before, 0U));
+  CHECK_FALSE(oms::derive_private_execution_projection(proposed.value(), incoming, before, 1U));
+
+  auto wrong_plan = proposed.value();
+  wrong_plan.after.pending_fill_count = 1U;
+  CHECK_FALSE(oms::derive_private_execution_projection(wrong_plan, incoming, before, 0U));
+  wrong_plan = proposed.value();
+  wrong_plan.economics_action = Economics::ApplyExecutionsThenReleaseResidual;
+  CHECK_FALSE(oms::derive_private_execution_projection(wrong_plan, incoming, before, 0U));
 }
 
 // --------------------------------------------------------

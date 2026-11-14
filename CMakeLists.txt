@@ -77,6 +77,7 @@ add_library(
   src/aegis/oms/private_order_event.cpp
   src/aegis/oms/private_order_resolution.cpp
   # Detached lifecycle proposals calculate bounded transitions without publishing live state.
+  src/aegis/oms/private_execution_projection.cpp
   src/aegis/oms/private_oms_transition.cpp
   # Recovery owns the bounded external-lifetime typed fake journal and acknowledged namespace
   # bootstrap; no canonical evidence bytes, filesystem, network, or native venue behavior exists.
@@ -106,6 +107,8 @@ add_library(
   src/aegis/runtime/private_business_evidence_preparation.cpp
   # Joint preparations retain genuine component plans and real unpublished journal reservations.
   src/aegis/runtime/private_business_transaction.cpp
+  src/aegis/runtime/private_execution_drain.cpp
+  src/aegis/runtime/private_execution_drain_evidence.cpp
   src/aegis/runtime/private_gap_commit.cpp
   # Preparations remain separate from canonical identities and economic application.
   src/aegis/runtime/private_identity_preparation.cpp
