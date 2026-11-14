@@ -1,12 +1,17 @@
-// Purpose: implement collision-safe fixed-capacity outbound admission and initialize the complete
-// M3-to-M4 OMS projection without releasing risk state or performing external work.
+// Purpose: retain collision-safe outbound admissions and apply validated private execution gaps
+// to bounded OMS storage without changing risk or performing external work.
 
 #include "aegis/oms/outbound_oms.hpp"
 
+#include "private_oms_transition.hpp"
+
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <new>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace aegis::oms {
@@ -106,6 +111,28 @@ OutboundOms::calculate_probe_start_index(const model::OrderId& order_id) const n
     hash *= prime;
   }
   return static_cast<std::size_t>(hash % static_cast<std::uint64_t>(capacity_));
+}
+
+// --------------------------------------------------------
+// Probe until exact identity or the first never-used slot; rows are never erased, so an empty slot
+// proves the identity cannot occur later in the probe sequence.
+std::optional<std::size_t>
+OutboundOms::find_retained_slot_index(const model::OrderId& order_id) const noexcept {
+  if (!storage_incarnation_) {
+    return std::nullopt;
+  }
+  std::size_t slot_index = calculate_probe_start_index(order_id);
+  for (std::uint32_t probes = 0U; probes < capacity_; ++probes) {
+    const auto& slot = slots_[slot_index];
+    if (!slot) {
+      return std::nullopt;
+    }
+    if (slot->order_id() == order_id) {
+      return slot_index;
+    }
+    slot_index = (slot_index + 1U == slots_.size()) ? 0U : slot_index + 1U;
+  }
+  return std::nullopt;
 }
 
 // --------------------------------------------------------
@@ -299,6 +326,133 @@ bool OutboundOms::has_retained_order_record(const OutboundOrderRecord& record) c
     }
   }
   return false;
+}
+
+// --------------------------------------------------------
+// Reserve the exact per-order bound at cold install; a failed allocation cannot alter the OMS.
+model::Result<OutboundOms::PendingPrivateExecutionStorage>
+OutboundOms::prepare_pending_private_execution_storage(std::uint64_t capacity_per_order) const {
+  using StorageResult = model::Result<PendingPrivateExecutionStorage>;
+  if (capacity_per_order == 0U || !storage_incarnation_ || size_ != 0U ||
+      !pending_private_executions_by_slot_.empty() ||
+      capacity_per_order > std::numeric_limits<std::uint32_t>::max() / capacity_ ||
+      capacity_per_order >
+          std::numeric_limits<std::size_t>::max() / sizeof(PendingPrivateExecution) / capacity_) {
+    return StorageResult::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidM4Policy, "private_oms.pending_storage_capacity"));
+  }
+  try {
+    PendingPrivateExecutionStorage storage(slots_.size());
+    for (auto& pending : storage) {
+      pending.reserve(static_cast<std::size_t>(capacity_per_order));
+    }
+    return StorageResult::create_success(std::move(storage));
+  } catch (const std::bad_alloc&) {
+    return StorageResult::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidM4Policy, "private_oms.pending_storage_allocation"));
+  } catch (const std::length_error&) {
+    return StorageResult::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidM4Policy, "private_oms.pending_storage_allocation"));
+  }
+}
+
+// --------------------------------------------------------
+// Publish the complete preallocation while the coordinator is still pristine.
+void OutboundOms::install_prepared_pending_private_execution_storage(
+    PendingPrivateExecutionStorage storage, std::uint32_t capacity_per_order) noexcept {
+  static_assert(std::is_nothrow_move_assignable_v<PendingPrivateExecutionStorage>);
+  pending_private_executions_by_slot_ = std::move(storage);
+  pending_private_execution_capacity_ = capacity_per_order;
+}
+
+// --------------------------------------------------------
+// Borrow the canonical ordered prefix, or an empty sequence when the row or M4 storage is absent.
+std::span<const PendingPrivateExecution>
+OutboundOms::pending_private_executions(const model::OrderId& order_id) const noexcept {
+  const auto index = find_retained_slot_index(order_id);
+  return index && *index < pending_private_executions_by_slot_.size()
+             ? std::span<const PendingPrivateExecution>{pending_private_executions_by_slot_[*index]}
+             : std::span<const PendingPrivateExecution>{};
+}
+
+// --------------------------------------------------------
+// Confirm exact OMS baseline, closed effect shape, and both logical and physical insertion room.
+model::Result<void>
+OutboundOms::validate_buffered_private_execution(const model::OrderId& order_id,
+                                                 const PrivateOmsTransitionPlan& transition) const {
+  const auto index = find_retained_slot_index(order_id);
+  if (!index || *index >= pending_private_executions_by_slot_.size() ||
+      slots_[*index]->private_projection() != transition.before ||
+      transition.classification != ProposedPrivateOmsClassification::BufferedGap ||
+      transition.economics_action != ProposedPrivateEconomicsAction::None ||
+      transition.reservation_closure_cause || transition.safety_reason ||
+      transition.rejection_code || !transition.gap_insertion || transition.cancel_history_change ||
+      transition.drained_pending_prefix_count != 0U || transition.transition_effect_count != 1U ||
+      transition.order_callback_count != 0U) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidPrivateOmsState, "private_oms.buffered_execution_plan"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Bounded logical capacity still wins if the allocator provided excess reserved storage.
+  const auto& pending = pending_private_executions_by_slot_[*index];
+  if (pending.size() >= pending_private_execution_capacity_ ||
+      pending.size() >= pending.capacity()) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::PrivateEventCapacityExceeded, "private_oms.pending_fill_capacity"));
+  }
+  const auto& input = transition.gap_insertion->execution;
+  const auto* execution = std::get_if<ExecutionPayload>(&input.payload());
+  if (execution == nullptr || pending.size() != transition.before.pending_fill_count) {
+    return model::Result<void>::create_failure(model::DomainError::create_at_field(
+        model::DomainErrorCode::InvalidPrivateOmsState, "private_oms.buffered_execution_fact"));
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Reject every projection field outside the closed gap shape, even for an otherwise valid row.
+  auto expected = transition.before;
+  expected.execution_evidence_observed = true;
+  ++expected.pending_fill_count;
+  if (!expected.exchange_order_id && execution->locator.exchange_order_id()) {
+    expected.exchange_order_id = execution->locator.exchange_order_id();
+    expected.exchange_mapping_established_by_execution = true;
+  }
+  if (transition.after != expected) {
+    return model::Result<void>::create_failure(
+        model::DomainError::create_at_field(model::DomainErrorCode::InvalidPrivateOmsState,
+                                            "private_oms.buffered_execution_projection"));
+  }
+  return model::Result<void>::create_success();
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Retain one complete validated interval in ascending endpoint order, then publish its OMS cache.
+void OutboundOms::apply_validated_buffered_private_execution(
+    const model::OrderId& order_id, const PrivateOmsTransitionPlan& transition) noexcept {
+  static_assert(std::is_nothrow_copy_constructible_v<PendingPrivateExecution>);
+  static_assert(std::is_nothrow_copy_assignable_v<PendingPrivateExecution>);
+  static_assert(std::is_nothrow_move_constructible_v<PendingPrivateExecution>);
+  static_assert(std::is_nothrow_move_assignable_v<PendingPrivateExecution>);
+  const auto index = *find_retained_slot_index(order_id);
+  auto& pending = pending_private_executions_by_slot_[index];
+  const auto& incoming = *transition.gap_insertion;
+  const auto cumulative_end =
+      std::get_if<ExecutionPayload>(&incoming.execution.payload())->cumulative_quantity;
+  const auto insertion = std::lower_bound(
+      pending.begin(), pending.end(), cumulative_end,
+      [](const PendingPrivateExecution& retained, model::Quantity value) noexcept {
+        return std::get_if<ExecutionPayload>(&retained.execution.payload())->cumulative_quantity <
+               value;
+      });
+  pending.insert(insertion, incoming);
+  auto& row = *slots_[index];
+  row.exchange_order_id_ = transition.after.exchange_order_id;
+  row.execution_evidence_observed_ = transition.after.execution_evidence_observed;
+  row.exchange_mapping_established_by_execution_ =
+      transition.after.exchange_mapping_established_by_execution;
+  row.pending_fill_count_ = transition.after.pending_fill_count;
 }
 
 // --------------------------------------------------------

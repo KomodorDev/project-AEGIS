@@ -33,7 +33,25 @@ enum class PrivateIdentityRetentionError : std::size_t {
 };
 
 // ########################################################################
-// One append-only record owns the complete source and receipt plus any completed preparation.
+// The planner has proved this interval's exact local owner and bounds. A later fact can compare
+// against it for conflicts, but the interval cannot satisfy an OMS drain.
+struct RetainedPrivateExecutionInterval {
+  model::OrderId order_id;
+  model::Quantity start;
+  model::Quantity end;
+};
+
+// ########################################################################
+// Preserve verified comparison facts even when joint preflight fails before staging a row.
+// These facts can prevent automatic commitment and cannot establish canonical ownership.
+struct RetainedPrivateExecutionProgress {
+  std::optional<PreparedPrivateTradeRecord> trade;
+  std::optional<PreparedPrivateMappingCandidate> mapping;
+  std::optional<RetainedPrivateExecutionInterval> interval;
+};
+
+// ########################################################################
+// One append-only record owns the complete source, receipt, and established comparison progress.
 // It intentionally contains no PrivateEventDisposition or business-journal acknowledgement.
 struct RetainedPrivateIdentityTurn {
 
@@ -46,9 +64,10 @@ struct RetainedPrivateIdentityTurn {
   std::optional<AdmissionReceipt> receipt;
   std::optional<model::TurnOrdinal> turn_ordinal;
   std::optional<oms::NormalizedPrivateOrderInput> normalized;
+  // Preserve the original resolution even when failure prevented a staged identity insertion.
+  std::optional<oms::PrivateEventResolution> first_admission_resolution;
+  RetainedPrivateExecutionProgress execution_progress;
   std::optional<PrivateIdentityPreparationResult> preparation;
-  // A copied candidate records successful callback-free preflight; it is never a published input.
-  std::optional<recovery::JournalRecord> journal_preflight_candidate;
   std::optional<model::DomainError> planning_error;
   std::optional<risk::AccountSafetyReason> safety_reason;
   PrivateIdentityRetentionError error_kind{PrivateIdentityRetentionError::PendingReducer};

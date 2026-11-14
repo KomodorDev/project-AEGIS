@@ -1,8 +1,7 @@
-// Purpose: retain admitted private identity preparations and monotonic account/global containment
-// with fixed storage, stable completion oracles, and no canonical business consumption.
+// Purpose: route authenticated private turns to bounded gap publication or full-source retention
+// and own the monotonic account and global containment records.
 
 #include "aegis/runtime/serialized_executor.hpp"
-#include "private_business_transaction.hpp"
 #include "private_order_reconciler.hpp"
 #include "submission_coordinator.hpp"
 
@@ -34,9 +33,9 @@ namespace {
       model::DomainError::create_at_field(Code::ExecutionNotPermitted,
                                           "private_identity.global_containment"),
       model::DomainError::create_at_field(Code::JournalCapacityExceeded,
-                                          "private_business.journal_preflight_capacity"),
+                                          "private_business.journal_capacity"),
       model::DomainError::create_at_field(Code::PrivateEvidenceExhausted,
-                                          "private_business.preflight_failure")};
+                                          "private_business.evidence_capacity")};
 }
 
 // --------------------------------------------------------
@@ -167,9 +166,9 @@ PrivateOrderReconciler::commit_private_order_turn(AdmittedPrivateOrderSlot admit
   if (!view || admitted.owner_->private_owner_ != this) {
     return reject_private_retention_authority();
   }
-  return retain_admitted_identity_turn(*admitted.owner_, view.value().ingress_attempt(),
-                                       view.value().admission_receipt(),
-                                       view.value().turn_ordinal());
+  return commit_or_retain_admitted_private_turn(*admitted.owner_, view.value().ingress_attempt(),
+                                                view.value().admission_receipt(),
+                                                view.value().turn_ordinal());
 } catch (...) {
   return reject_private_retention_authority();
 }
@@ -182,9 +181,9 @@ PrivateTurnCompletion PrivateOrderReconciler::commit_reconciliation_event_turn(
   if (!view || admitted.owner_->private_owner_ != this) {
     return reject_private_retention_authority();
   }
-  return retain_admitted_identity_turn(*admitted.owner_, view.value().ingress_attempt(),
-                                       view.value().admission_receipt(),
-                                       view.value().turn_ordinal());
+  return commit_or_retain_admitted_private_turn(*admitted.owner_, view.value().ingress_attempt(),
+                                                view.value().admission_receipt(),
+                                                view.value().turn_ordinal());
 } catch (...) {
   return reject_private_retention_authority();
 }
@@ -205,9 +204,9 @@ bool PrivateOrderReconciler::bind_private_executor(SerializedExecutor& executor)
 }
 
 // --------------------------------------------------------
-// Preserve one complete admitted fact before returning retention; pending identities never become
-// canonical event/trade dispositions or active exchange mappings.
-PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
+// Apply supported admitted facts under the owner guard. Otherwise preserve the complete source,
+// exact failure, and containment before returning its retained completion.
+PrivateTurnCompletion PrivateOrderReconciler::commit_or_retain_admitted_private_turn(
     SerializedExecutor& executor, CriticalPrivateEventAttempt attempt,
     const AdmissionReceipt& receipt, model::TurnOrdinal turn_ordinal) noexcept {
 
@@ -220,23 +219,42 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Reserve complete retained-fact headroom before any preparation table can change. One dedicated
-  // overflow record is followed by a terminal executor fault and can never extend normal capacity.
+  // Route a supported fact through the closed joint commit only when failure can still retain the
+  // complete input. A saturated retention store instead takes its existing fail-stop path.
   const auto count = retention_.published_turn_count.load(std::memory_order_relaxed);
   const bool saturated = count == retention_.turns.size();
-  auto& record = saturated ? retention_.emergency_turn : retention_.turns[count];
   const auto& semantic = private_attempt_semantic_value(attempt);
   auto* account = find_attributable_account(retention_, m4_policy_, semantic);
+  const auto normalized =
+      event_factory_.normalize_private_event_ingress_semantic_value(semantic, receipt.received_at);
+  CallbackFreePrivateCommitResult commit;
+  if (!saturated && account != nullptr && !retention_.globally_blocked &&
+      !owner_->is_runtime_faulted()) {
+    try {
+      commit = commit_callback_free_private_input_if_supported(normalized, receipt);
+    } catch (...) {
+      commit.safety_reason = risk::AccountSafetyReason::ArithmeticOrStateCapacityFailure;
+    }
+    if (commit.disposition) {
+      if (*commit.disposition == oms::PrivateEventDisposition::BufferedGap) {
+        return BufferedPrivateTurn{};
+      }
+      return ConsumedPrivateTurn{*commit.disposition};
+    }
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Preserve failed or unsupported inputs in fixed retention storage. No retained comparison
+  // becomes an active identity, even when its input had a valid canonical order resolution.
+  auto& record = saturated ? retention_.emergency_turn : retention_.turns[count];
   record.receipt = receipt;
   record.turn_ordinal = turn_ordinal;
   record.attempt.emplace(std::move(attempt));
   const auto& retained_semantic = private_attempt_semantic_value(*record.attempt);
-  record.normalized = event_factory_.normalize_private_event_ingress_semantic_value(
-      retained_semantic, receipt.received_at);
+  record.normalized = normalized;
   record.safety_reason = account != nullptr
                              ? std::optional{risk::AccountSafetyReason::IncompleteReconciliation}
                              : std::nullopt;
-  bool has_new_known_preparation = false;
 
   // ++++++++++++++++++++++++++++++++++++++++
   // Repeated event keys reuse their original resolution before any new provenance or correlation
@@ -248,6 +266,26 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
     }
   } else if (retention_.globally_blocked) {
     record.error_kind = PrivateIdentityRetentionError::GlobalContainment;
+  } else if (commit.safety_reason) {
+    record.safety_reason = commit.safety_reason;
+    if (commit.error) {
+      const auto code = commit.error->code;
+      if (code == model::DomainErrorCode::JournalCapacityExceeded) {
+        record.error_kind = PrivateIdentityRetentionError::JournalCapacity;
+      } else if (*commit.safety_reason == risk::AccountSafetyReason::EvidenceCapacityExhausted) {
+        record.error_kind = PrivateIdentityRetentionError::BusinessPreflightFailure;
+      } else if (code == model::DomainErrorCode::PrivateEventCapacityExceeded) {
+        record.error_kind = PrivateIdentityRetentionError::IdentityCapacity;
+      } else if (code == model::DomainErrorCode::PrivateEventConflict ||
+                 *commit.safety_reason == risk::AccountSafetyReason::AuthoritativeContradiction) {
+        record.error_kind = PrivateIdentityRetentionError::IdentityConflict;
+      } else if (code != model::DomainErrorCode::ReconciliationIncomplete) {
+        record.error_kind = PrivateIdentityRetentionError::InternalFailure;
+      }
+      record.planning_error = std::move(commit.error);
+    } else {
+      record.error_kind = PrivateIdentityRetentionError::InternalFailure;
+    }
   } else if (!std::holds_alternative<oms::LocalPrivateIngressOrigin>(retained_semantic.origin())) {
     try {
       const auto key = oms::PrivateEventRegistryKey::from_ingress_semantic_value(retained_semantic);
@@ -262,9 +300,6 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
         auto plan = derive_first_seen_authoritative_identity_plan(retained_semantic);
         if (plan) {
           record.preparation = retention_.preparations.prepare_and_retain_identity(plan.value());
-          has_new_known_preparation = !record.preparation->capacity_exhaustion &&
-                                      !record.preparation->safety_reason &&
-                                      record.preparation->resolution.known_resolution() != nullptr;
         } else {
           record.planning_error = std::move(plan).error();
           record.error_kind =
@@ -302,53 +337,8 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
   }
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Exercise real journal/evidence reservation only for a genuine callback-free initial gap.
-  // Callback-bearing facts await the actual dispatcher reservation, so no invented ordinal enters
-  // this production path. The capsule is validated and abandoned before retained completion.
-  if (has_new_known_preparation && record.normalized &&
-      record.normalized->kind() == oms::PrivateOrderEventKind::Execution) {
-    try {
-      auto proposal = derive_initial_known_authoritative_business_proposal(
-          *record.normalized, business_evidence_store_->next_audit_ordinal());
-      if (proposal && proposal.value().oms_transition().classification ==
-                          oms::ProposedPrivateOmsClassification::BufferedGap) {
-        auto transaction = prepare_initial_known_authoritative_business_transaction(
-            *record.normalized,
-            recovery::JournalReplayProvenance{receipt.attempt_ordinal, receipt.receive_sequence});
-        if (transaction) {
-          auto fresh = validate_prepared_initial_known_business_transaction(transaction.value());
-          if (fresh) {
-            static_assert(std::is_nothrow_copy_constructible_v<recovery::JournalRecord>);
-            record.journal_preflight_candidate.emplace(*transaction.value().journal_record());
-          } else {
-            record.planning_error = std::move(fresh).error();
-          }
-        } else {
-          record.planning_error = std::move(transaction).error();
-        }
-        if (record.planning_error) {
-          const auto code = record.planning_error->code;
-          const bool journal_capacity = code == model::DomainErrorCode::JournalCapacityExceeded;
-          const bool evidence_capacity = journal_capacity ||
-                                         code == model::DomainErrorCode::PrivateEvidenceExhausted ||
-                                         code == model::DomainErrorCode::RecoveryCounterExhausted;
-          record.error_kind = journal_capacity
-                                  ? PrivateIdentityRetentionError::JournalCapacity
-                                  : PrivateIdentityRetentionError::BusinessPreflightFailure;
-          record.safety_reason = evidence_capacity
-                                     ? risk::AccountSafetyReason::EvidenceCapacityExhausted
-                                     : risk::AccountSafetyReason::ArithmeticOrStateCapacityFailure;
-        }
-      }
-    } catch (...) {
-      record.error_kind = PrivateIdentityRetentionError::BusinessPreflightFailure;
-      record.safety_reason = risk::AccountSafetyReason::ArithmeticOrStateCapacityFailure;
-    }
-  }
-
-  // ++++++++++++++++++++++++++++++++++++++++
-  // Containment is conservative while the joint reducer is absent; exact economic effects,
-  // canonical identities, callbacks, and recovery acknowledgements remain untouched.
+  // Containment records the failed or unsupported source without disturbing committed economics,
+  // identities, callbacks, or the recovery acknowledgement watermark.
   if (account != nullptr) {
     retain_account_safety_cause(*account,
                                 PrivateAccountSafetyCause{*record.safety_reason, record.attempt,
@@ -372,15 +362,17 @@ PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn(
   static_assert(std::is_nothrow_move_constructible_v<model::DomainError>);
   static_assert(std::is_nothrow_copy_constructible_v<CriticalPrivateEventAttempt>);
   const auto error_index = static_cast<std::size_t>(record.error_kind);
-  const auto resolution =
-      record.preparation.has_value() ? std::optional{record.preparation->resolution} : std::nullopt;
+  record.first_admission_resolution =
+      record.preparation ? std::optional{record.preparation->resolution} : commit.resolution;
+  record.execution_progress = std::move(commit.execution_progress);
   auto completion =
       account != nullptr
           ? RetainedPrivateTurn::create_retained_private_turn_for_account(
                 std::move(record.completion_errors[error_index]), *record.safety_reason,
-                record.normalized, resolution)
+                record.normalized, record.first_admission_resolution)
           : RetainedPrivateTurn::create_retained_private_turn_for_global_containment(
-                std::move(record.completion_errors[error_index]), record.normalized, resolution);
+                std::move(record.completion_errors[error_index]), record.normalized,
+                record.first_admission_resolution);
   if (saturated) {
     retention_.emergency_turn_published.store(true, std::memory_order_release);
     const auto fault = executor.request_owner_fault(std::move(retention_.saturation_fault));

@@ -11,14 +11,13 @@ namespace aegis::runtime {
 
 // --------------------------------------------------------
 // Reuse the closed first-seen correlation boundary before reading a genuine retained row. The
-// current canonical registries and side tables remain empty, so all proposals describe one input
-// against the live M3 baseline and never advance a shadow lifecycle between calls.
+// initial query rejects live gaps or cancellation history on that row and does not advance it.
 model::Result<oms::PrivateOmsTransitionPlan>
 PrivateOrderReconciler::derive_initial_known_authoritative_oms_transition(
     const oms::NormalizedPrivateOrderInput& input) const {
 
   // ++++++++++++++++++++++++++++++++++++++++
-  // Preserve the existing pristine-state, source-shape, provenance, and correlation precedence.
+  // Preserve source-shape, event identity, provenance, and correlation precedence.
   const auto semantic = oms::PrivateEventIngressSemanticValue::from_normalized_input(input);
   auto identity = derive_first_seen_authoritative_identity_plan(semantic);
   if (!identity) {

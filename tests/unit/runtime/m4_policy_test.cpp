@@ -491,6 +491,54 @@ TEST_CASE("M4 policy checks every reconciliation and recovery product") {
 }
 
 // --------------------------------------------------------
+// Prove the exact aggregate pending interval bound through policy construction alone, without
+// materializing the enormous OMS fixture that this numeric boundary represents.
+TEST_CASE("M4 policy checks the total outbound OMS pending interval product") {
+  const auto sealed = create_policy_authority_or_throw();
+  const auto& baseline = sealed.submission->policy();
+  constexpr std::uint32_t order_capacity = 196'611U;
+  constexpr std::uint64_t exact_pending = 21'845U;
+  auto submission_capacities = baseline.capacities();
+  submission_capacities.maximum_submission_attempts = order_capacity;
+  submission_capacities.oms_order_capacity = order_capacity;
+  submission_capacities.reservation_capacity = order_capacity;
+  auto encoder = aegis::execution::FakeEncoderScript::create_fake_encoder_script(
+      aegis::execution::FakeEncodingAction::Encode, order_capacity, {});
+  auto initiator = aegis::execution::FakeInitiatorScript::create_fake_initiator_script(
+      aegis::execution::FakeInitiationOutcome::AcceptedAndInitiated, order_capacity, {});
+  REQUIRE(encoder);
+  REQUIRE(initiator);
+  const auto submission = aegis::execution::SubmissionPolicy::create_submission_policy(
+      {baseline.capability(), baseline.configuration_fingerprint(),
+       baseline.runtime_policy_fingerprint(), baseline.risk_policy_fingerprint(),
+       baseline.risk_policy_revision(), submission_capacities,
+       baseline.required_encoded_order_bytes(), std::move(encoder).value(),
+       std::move(initiator).value()});
+  REQUIRE(submission);
+
+  auto capacities = create_ordinary_m4_policy_capacities();
+  capacities.max_exchange_order_mappings = order_capacity;
+  capacities.max_inventory_source_rows = order_capacity;
+  capacities.max_pending_fill_intervals_per_order = exact_pending;
+  capacities.max_transition_effects_per_turn = exact_pending + 2U;
+  capacities.max_order_callbacks_per_turn = exact_pending + 2U;
+  capacities.max_private_audit_records = exact_pending + 4U;
+  REQUIRE(order_capacity * exact_pending == std::numeric_limits<std::uint32_t>::max());
+  REQUIRE(aegis::runtime::M4Policy::create_m4_policy(sealed.configuration, sealed.runtime_policy,
+                                                     sealed.submission->reservations().policy(),
+                                                     submission.value(), capacities));
+
+  ++capacities.max_pending_fill_intervals_per_order;
+  const auto result = aegis::runtime::M4Policy::create_m4_policy(
+      sealed.configuration, sealed.runtime_policy, sealed.submission->reservations().policy(),
+      submission.value(), capacities);
+  REQUIRE_FALSE(result);
+  REQUIRE(result.error().code == aegis::model::DomainErrorCode::InvalidM4Policy);
+  REQUIRE(result.error().context.field ==
+          "m4_policy.capacities.max_pending_fill_intervals_per_order");
+}
+
+// --------------------------------------------------------
 // Each disconnected M1-M3 authority fails before policy bytes or root provenance can exist.
 TEST_CASE("M4 policy rejects every mismatched sealed authority") {
   const auto first = create_policy_authority_or_throw();

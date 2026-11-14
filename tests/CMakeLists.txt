@@ -93,6 +93,7 @@ add_executable(
   unit/runtime/private_business_evidence_owner_test.cpp
   # Journal-backed preparations prove owner freshness, complete rollback, and real token preflight.
   unit/runtime/private_business_transaction_test.cpp
+  unit/runtime/private_gap_commit_test.cpp
   # Preparation tests prove bounded all-or-none insertion without canonical publication.
   unit/runtime/private_identity_preparation_test.cpp
   # Retention tests pin concrete owner authority, runtime composition, and submission containment.

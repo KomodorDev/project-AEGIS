@@ -792,6 +792,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/recovery/private_event_journal_reservation.hpp",
             "src/aegis/runtime/private_business_transaction.hpp",
             "src/aegis/runtime/private_business_transaction.cpp",
+            "src/aegis/runtime/private_gap_commit.cpp",
             "src/aegis/runtime/private_business_evidence_preparation.cpp",
             "src/aegis/trace/private_business_evidence.hpp",
             "src/aegis/trace/private_business_evidence.cpp",
@@ -814,6 +815,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "tests/unit/runtime/private_business_evidence_owner_test.cpp",
             "tests/support/private_business_transaction_fixture.hpp",
             "tests/unit/runtime/private_business_transaction_test.cpp",
+            "tests/unit/runtime/private_gap_commit_test.cpp",
             "tests/unit/runtime/reconciliation_private_event_admission_test.cpp",
             "tests/unit/trace/m4_semantic_evidence_test.cpp",
         }
@@ -857,6 +859,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
             "src/aegis/recovery/private_event_journal_reservation.hpp",
             "src/aegis/runtime/private_business_transaction.hpp",
             "src/aegis/runtime/private_business_transaction.cpp",
+            "src/aegis/runtime/private_gap_commit.cpp",
             "src/aegis/runtime/private_business_evidence_preparation.cpp",
             "src/aegis/trace/private_business_evidence.hpp",
             "src/aegis/trace/private_business_evidence.cpp",
@@ -897,6 +900,7 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
                 "src/aegis/recovery/private_event_journal_reservation.hpp",
                 "src/aegis/runtime/private_business_transaction.hpp",
                 "src/aegis/runtime/private_business_transaction.cpp",
+                "src/aegis/runtime/private_gap_commit.cpp",
                 "src/aegis/runtime/private_business_evidence_preparation.cpp",
                 "src/aegis/trace/private_business_evidence.hpp",
                 "src/aegis/trace/private_business_evidence.cpp",
@@ -1055,12 +1059,13 @@ class ForbiddenCapabilitiesTest(unittest.TestCase):
 
         declarations = {
             "src/aegis/runtime/private_order_reconciler.hpp": (
-                "PrivateTurnCompletion retain_admitted_identity_turn("
+                "PrivateTurnCompletion commit_or_retain_admitted_private_turn("
                 "SerializedExecutor& executor, int value);\n"
                 "bool bind_private_executor(SerializedExecutor& executor) noexcept;"
             ),
             "src/aegis/runtime/private_identity_retention.cpp": (
-                "PrivateTurnCompletion PrivateOrderReconciler::retain_admitted_identity_turn("
+                "PrivateTurnCompletion "
+                "PrivateOrderReconciler::commit_or_retain_admitted_private_turn("
                 "SerializedExecutor& executor, int value) {}\n"
                 "bool PrivateOrderReconciler::bind_private_executor("
                 "SerializedExecutor& executor) noexcept {}"

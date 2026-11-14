@@ -824,13 +824,9 @@ PrivateOmsTransitionPlan derive_validated_transition(const PrivateOmsTransitionI
 } // namespace
 
 // --------------------------------------------------------
-// Validate owner-independent snapshots first, then capacity-check the complete detached proposal;
-// neither successful nor failed derivation alters any source object or canonical event registry.
+// Validate the borrowed baseline and derive a detached proposal before bounding its output.
 model::Result<PrivateOmsTransitionPlan>
-derive_private_oms_transition(const PrivateOmsTransitionInputs& inputs) {
-
-  // ++++++++++++++++++++++++++++++++++++++++
-  // Reject inconsistent borrowed snapshots before deriving an incoming business classification.
+derive_private_oms_transition_before_output_capacity(const PrivateOmsTransitionInputs& inputs) {
   auto projection_validation = validate_projection_snapshot(inputs);
   if (!projection_validation) {
     return model::Result<PrivateOmsTransitionPlan>::create_failure(
@@ -847,9 +843,19 @@ derive_private_oms_transition(const PrivateOmsTransitionInputs& inputs) {
         std::move(cancel_validation).error());
   }
 
-  // ++++++++++++++++++++++++++++++++++++++++
-  // Compare every bounded replacement against policy before returning any usable complete proposal.
-  auto plan = derive_validated_transition(inputs);
+  return model::Result<PrivateOmsTransitionPlan>::create_success(
+      derive_validated_transition(inputs));
+}
+
+// --------------------------------------------------------
+// Bound every proposed replacement before returning a complete detached transition to callers.
+model::Result<PrivateOmsTransitionPlan>
+derive_private_oms_transition(const PrivateOmsTransitionInputs& inputs) {
+  auto proposed = derive_private_oms_transition_before_output_capacity(inputs);
+  if (!proposed) {
+    return proposed;
+  }
+  const auto& plan = proposed.value();
   const auto& capacities = inputs.policy.capacities();
   if ((plan.gap_insertion &&
        inputs.pending.size() >= capacities.max_pending_fill_intervals_per_order) ||
@@ -861,9 +867,7 @@ derive_private_oms_transition(const PrivateOmsTransitionInputs& inputs) {
         model::DomainError::create_at_field(model::DomainErrorCode::PrivateEventCapacityExceeded,
                                             "private_oms.transition_capacity"));
   }
-  return model::Result<PrivateOmsTransitionPlan>::create_success(std::move(plan));
-
-  // ++++++++++++++++++++++++++++++++++++++++
+  return proposed;
 }
 
 // --------------------------------------------------------

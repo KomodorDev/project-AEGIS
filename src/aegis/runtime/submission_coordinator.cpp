@@ -372,9 +372,14 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
   // Build one private transaction so every reported authority or allocation failure leaves both
   // coordinator and bootstrap identity streams untouched and reusable.
   auto prepared = PrivateOrderReconciler::prepare_recovery_bound_private_order_reconciler(
-      *this, configuration, policy, recovery_bootstrap);
+      *this, outbound_oms_, configuration, policy, recovery_bootstrap);
   if (!prepared) {
     return model::Result<void>::create_failure(std::move(prepared).error());
+  }
+  const auto pending_capacity = policy.capacities().max_pending_fill_intervals_per_order;
+  auto pending_storage = outbound_oms_.prepare_pending_private_execution_storage(pending_capacity);
+  if (!pending_storage) {
+    return model::Result<void>::create_failure(std::move(pending_storage).error());
   }
   auto inventory = risk::InventoryLedger::install_on_pristine_reservations(ledger_, outbound_oms_,
                                                                            routes_, policy);
@@ -400,6 +405,8 @@ model::Result<void> SubmissionCoordinator::install_recovery_bound_private_order_
   static_assert(std::is_nothrow_move_assignable_v<model::DeterministicOrderIdSource>);
   static_assert(std::is_nothrow_move_assignable_v<std::unique_ptr<PrivateOrderReconciler>>);
   auto prepared_reconciler = std::move(prepared).value();
+  outbound_oms_.install_prepared_pending_private_execution_storage(
+      std::move(pending_storage).value(), static_cast<std::uint32_t>(pending_capacity));
   auto identity_authority =
       PrivateOrderReconciler::consume_recovery_identity_authority(std::move(recovery_bootstrap));
   recovery_identity_lease_ = std::move(identity_authority.recovery_identity_lease);
