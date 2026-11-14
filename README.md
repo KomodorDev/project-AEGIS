@@ -107,11 +107,13 @@ durable external journal.
   correlation-independent fields can be compared without losing the original event identity.
 - Owner-local first-seen correlation and atomic bounded preparation of event/trade comparisons and
   provisional mapping candidates. Repeated event keys preserve their first resolution; candidates
-  cannot establish order ownership, and canonical identity/mapping tables remain empty.
+  cannot establish order ownership. A committed known execution gap installs its canonical identities
+  and any eligible exact exchange mapping.
 - An opt-in `MarketRuntime` composition with a concrete private-admission owner, separate ordinary
   and reconciliation reserves, complete admitted-fact retention, and account/global safety gates.
-  Its private completion is always `RetainedForReconciliation`; it cannot acknowledge economic
-  consumption. Exhausted retained-fact capacity preserves one final fact and stops the executor.
+  Known gaps buffer without changing economics; exact repeats commit separate duplicate evidence.
+  Other inputs remain retained for reconciliation. Exhausted retained-fact capacity preserves one
+  final fact and stops the executor.
 - A bounded known-order inventory component and transactional reservation conversion. Cumulative
   allocation avoids fill-partition rounding drift; confirmed inventory survives reservation-slot
   reuse, and all seven risk scopes read the same confirmed source. The private-retention path
@@ -130,16 +132,17 @@ durable external journal.
   proposals with startup-sized evidence backing. One move-only preparation reserves the full
   prospective span, including an absent callback terminal row, and copies every source fact and
   economic prefix. Abandonment consumes no records or ordinals. The runtime prepares genuine initial
-  orders; no publication, delivery, acknowledgement, or canonical evidence bytes are implemented.
+  orders; callback delivery, business durability acknowledgement, and canonical evidence bytes
+  remain open.
 - A sealed joint preparation retains the genuine identity and economic plans together with that
   evidence and a real fake-medium journal reservation. It derives sequence and predecessor from the
-  acknowledged namespace prefix, rechecks unchanged owner state, and releases every reservation on
-  abandonment. Authentic callback-free gap turns exercise this preflight in both admission lanes;
-  their copied journal candidates remain volatile observations, and completion remains retained.
+  actual published prefix, rechecks unchanged owner state, and releases every reservation on
+  abandonment. Authentic gap and exact-repeat turns publish one typed journal input and one primary
+  audit row each. The fake journal suffix remains unacknowledged and must be discarded before reopen.
 
 The [current M4 implementation boundary](docs/implementation-roadmap.md#current-implementation-boundary)
-explains why canonical identity publication still requires the joint business journal, OMS,
-reservation/inventory, and callback work. None of M4's seven exit conditions is fully proven end to
+explains the joint callback-free commit and the remaining reservation, inventory, callback, and
+recovery work. None of M4's seven exit conditions is fully proven end to
 end. Full lifecycle application, integration of known-order economics, unknown inventory,
 authoritative reconciliation, business recovery, ADR-0014 evidence bytes, the crash matrix, and
 final exit evidence remain open.
