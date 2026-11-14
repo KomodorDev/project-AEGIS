@@ -1,8 +1,9 @@
-// Purpose: qualify genuine owner commits for callback-free execution gaps and exact event repeats,
-// including fixed capacity, immutable disposition publication, and loss of the volatile journal.
+// Purpose: qualify genuine execution-gap commits, exact repeats, and detached drain preparation
+// against the actual installed order, identity, economics, journal, and audit state.
 
 #include "aegis/oms/private_oms_transition.hpp"
 #include "aegis/runtime/private_business_evidence_store.hpp"
+#include "aegis/runtime/private_execution_drain.hpp"
 #include "aegis/runtime/serialized_executor.hpp"
 #include "private_business_transaction_fixture.hpp"
 
@@ -11,10 +12,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -183,6 +186,41 @@ public:
                 model::SourceTimestamp{10U}},
             provenance.logical_account_id, provenance.venue_id, exchange_order, order.order_id(),
             provenance.instrument_id));
+  }
+
+  // --------------------------------------------------------
+  // Attach a prospective receive observation through the trusted normalization factory without
+  // copying the attempt into the executor or advancing its receipt counters.
+  [[nodiscard]] oms::NormalizedPrivateOrderInput
+  normalize_gap_attempt_or_throw(const runtime::CriticalPrivateEventAttempt& attempt,
+                                 model::ReceiveTimestamp receive_time) const {
+    return std::visit(
+        [&](const auto& source) {
+          const auto& semantic = source.semantic_value();
+          const auto& execution = std::get<oms::ExecutionPayload>(semantic.payload());
+          if constexpr (std::is_same_v<std::decay_t<decltype(source)>,
+                                       oms::PrivateOrderIngressAttempt>) {
+            const auto& origin = std::get<oms::VenuePrivateIngressOrigin>(semantic.origin());
+            return extract_evidence_value_or_throw(transaction.factory.normalize_venue_execution(
+                oms::VenuePrivateEventOrigin{origin.event_key, origin.source_time, receive_time},
+                execution.locator, execution.trade_id, execution.instrument_id,
+                execution.metadata_revision, execution.incremental_quantity,
+                execution.cumulative_quantity, execution.execution_price, execution.source_side));
+          } else {
+            const auto& origin =
+                std::get<oms::ReconciliationPrivateIngressOrigin>(semantic.origin());
+            return extract_evidence_value_or_throw(
+                transaction.factory.normalize_reconciliation_execution(
+                    oms::ReconciliationPrivateEventOrigin{
+                        origin.reconciliation_epoch_id, origin.authoritative_cut_id,
+                        origin.row_ordinal, origin.cut_time, receive_time},
+                    semantic.logical_account_id(), semantic.venue_id(), execution.locator,
+                    execution.trade_id, execution.instrument_id, execution.metadata_revision,
+                    execution.incremental_quantity, execution.cumulative_quantity,
+                    execution.execution_price, *execution.source_side));
+          }
+        },
+        attempt);
   }
 
   // --------------------------------------------------------
@@ -653,6 +691,468 @@ TEST_CASE(
   CHECK(extract_evidence_value_or_throw(medium.published_journal_record_count()) == 4U);
   CHECK(extract_evidence_value_or_throw(medium.acknowledged_journal_record_count()) == 1U);
   CHECK_FALSE(medium.published_journal_record_at(4U));
+}
+
+// --------------------------------------------------------
+// Reuse the actual committed gap facts and prove that a prepared prefix chains every OMS,
+// reservation, and inventory effect in execution order without publishing or draining anything.
+TEST_CASE("private execution drain prepares mixed-lane gaps in cumulative order",
+          "[private-execution-drain][private-gap-commit][runtime][m4]") {
+  PrivateGapCommitFixture fixture;
+  const auto& order = fixture.submit_additional_order_or_throw(5);
+  const auto exchange = fixture.transaction.create_exchange_order_id_or_throw();
+  const auto held = capture_gap_economics(fixture, order);
+  const auto high_attempt = fixture.create_execution_attempt_or_throw(
+      GapAdmissionLane::Venue, order, exchange, GapSourceExecution{11U, 21U, 3});
+  const auto tail_attempt = fixture.create_execution_attempt_or_throw(
+      GapAdmissionLane::Reconciliation, order, exchange, GapSourceExecution{12U, 22U, 5});
+  const auto low_attempt = fixture.create_execution_attempt_or_throw(
+      GapAdmissionLane::Reconciliation, order, exchange, GapSourceExecution{13U, 23U, 2});
+  const auto high = fixture.admit_or_throw(high_attempt);
+  const auto tail = fixture.admit_or_throw(tail_attempt);
+  const auto low = fixture.admit_or_throw(low_attempt);
+  fixture.execute_admitted_turns_or_throw();
+  check_gap_completion(fixture, GapAdmissionLane::Venue, high,
+                       oms::PrivateEventDisposition::BufferedGap);
+  check_gap_completion(fixture, GapAdmissionLane::Reconciliation, tail,
+                       oms::PrivateEventDisposition::BufferedGap);
+  check_gap_completion(fixture, GapAdmissionLane::Reconciliation, low,
+                       oms::PrivateEventDisposition::BufferedGap);
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Pin the immutable accepted rows and exact pending order before building a separate proposal.
+  const auto& store = fixture.owner().business_evidence_store();
+  REQUIRE(store.accepted_private_event_record_count() == 3U);
+  REQUIRE(store.accepted_private_audit_record_count() == 3U);
+  const auto* const high_buffered = store.accepted_private_event_record_at(0U);
+  const auto* const tail_buffered = store.accepted_private_event_record_at(1U);
+  const auto* const low_buffered = store.accepted_private_event_record_at(2U);
+  REQUIRE(high_buffered != nullptr);
+  REQUIRE(tail_buffered != nullptr);
+  REQUIRE(low_buffered != nullptr);
+  const auto* const low_buffer_audit = store.accepted_private_audit_record_at(2U);
+  const auto* const high_buffer_audit = store.accepted_private_audit_record_at(0U);
+  REQUIRE(low_buffer_audit != nullptr);
+  REQUIRE(high_buffer_audit != nullptr);
+  REQUIRE(low_buffer_audit->effect_at(0U) != nullptr);
+  REQUIRE(high_buffer_audit->effect_at(0U) != nullptr);
+  const auto original_low_effect = *low_buffer_audit->effect_at(0U);
+  const auto original_high_effect = *high_buffer_audit->effect_at(0U);
+  const auto before = order.private_projection();
+  REQUIRE(before.pending_fill_count == 3U);
+  REQUIRE(before.cumulative_filled_quantity == create_m4_decimal_or_throw<model::Quantity>(0));
+  const auto incoming_attempt = fixture.create_execution_attempt_or_throw(
+      GapAdmissionLane::Venue, order, exchange, GapSourceExecution{14U, 24U, 1, 1, false});
+  const auto incoming =
+      fixture.normalize_gap_attempt_or_throw(incoming_attempt, model::ReceiveTimestamp{1'000U});
+  const auto prospective = recovery::JournalReplayProvenance{
+      extract_evidence_value_or_throw(low.attempt_ordinal.derive_next_ordinal()),
+      extract_evidence_value_or_throw(low.receive_sequence.derive_next_ordinal())};
+  const auto first_callback = create_m4_ordinal_or_throw<model::CallbackOrdinal>(17U);
+  {
+    auto result = fixture.owner().prepare_known_private_execution_drain(incoming, prospective,
+                                                                        first_callback);
+    if (!result) {
+      INFO(result.error().context.field);
+    }
+    REQUIRE(result);
+    auto prepared = std::move(result).value();
+    REQUIRE(prepared.has_preparation());
+    REQUIRE(fixture.owner().validate_prepared_private_execution_drain(prepared));
+    {
+      PrivateGapCommitFixture foreign_owner;
+      CHECK_FALSE(foreign_owner.owner().validate_prepared_private_execution_drain(prepared));
+    }
+    const auto* const transition = prepared.oms_transition();
+    const auto* const economics = prepared.economics_plan();
+    const auto* const evidence = prepared.business_evidence();
+    const auto* const journal = prepared.journal_record();
+    REQUIRE(prepared.identity_plan() != nullptr);
+    REQUIRE(transition != nullptr);
+    REQUIRE(economics != nullptr);
+    REQUIRE(evidence != nullptr);
+    REQUIRE(journal != nullptr);
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // A gap at [4, 5) must remain pending because [3, 4) is still missing. The journal reserves
+    // one input for [0, 1), followed by three application rows, Planned, and a terminal slot.
+    auto after = before;
+    after.state = oms::OutboundOrderState::PartiallyFilled;
+    after.cumulative_filled_quantity = create_m4_decimal_or_throw<model::Quantity>(3);
+    after.pending_fill_count = 1U;
+    CHECK(transition->before == before);
+    CHECK(transition->after == after);
+    CHECK(transition->drained_pending_prefix_count == 2U);
+    CHECK(transition->transition_effect_count == 3U);
+    CHECK(transition->order_callback_count == 3U);
+    CHECK(economics->execution_effect_count() == 3U);
+    CHECK(economics->reservation_before() == held.reservation);
+    CHECK(economics->reservation_after().remaining_exposure.quantity ==
+          create_m4_decimal_or_throw<model::Quantity>(2));
+    CHECK(economics->reservation_after().cumulative_confirmed_exposure.quantity ==
+          after.cumulative_filled_quantity);
+    CHECK(economics->reservation_after().state == risk::ReservationState::Held);
+    REQUIRE(economics->source_after());
+    CHECK(economics->source_after()->latest_execution == high_buffered->input());
+    CHECK(economics->source_after()->latest_audit_ordinal.value() == 6U);
+    CHECK(journal->sequence().value() == 5U);
+    REQUIRE(journal->predecessor());
+    CHECK(journal->predecessor()->value() == 4U);
+    CHECK(journal->kind() == recovery::JournalRecordKind::PrivateEventInput);
+    CHECK(journal->runtime_epoch_id() == fixture.owner().runtime_epoch_id());
+    CHECK(journal->replay_provenance() == prospective);
+    REQUIRE(journal->audit_span());
+    CHECK(journal->audit_span()->first_audit_ordinal().value() == 4U);
+    CHECK(journal->audit_span()->last_audit_ordinal().value() == 8U);
+    CHECK(journal->audit_span()->audit_record_count() == 5U);
+    REQUIRE(evidence->audit_span() != nullptr);
+    CHECK(*evidence->audit_span() == *journal->audit_span());
+    REQUIRE(evidence->journal_payload() != nullptr);
+    CHECK(std::get<recovery::PrivateEventInputJournalPayload>(journal->payload()) ==
+          *evidence->journal_payload());
+    REQUIRE(evidence->private_event_evidence() != nullptr);
+    CHECK(evidence->private_event_evidence()->input() == incoming);
+    CHECK(evidence->private_event_evidence()->disposition() ==
+          oms::PrivateEventDisposition::Applied);
+    CHECK(evidence->private_event_evidence()->first_admission_resolution() ==
+          low_buffered->first_admission_resolution());
+    CHECK(evidence->private_event_evidence()->journal_sequence() == journal->sequence());
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // Each primary belongs to its original source identity, the actual incoming journal
+    // sequence, and the exact prior OMS and seven-scope economic result.
+    const std::array<const oms::NormalizedPrivateOrderInput*, 3U> sources{
+        &incoming, &low_buffered->input(), &high_buffered->input()};
+    const std::array<std::uint32_t, 3U> pending_after{3U, 2U, 1U};
+    const auto* const planned = evidence->planned_callback_record();
+    REQUIRE(planned != nullptr);
+    CHECK(planned->callback_decision() == trace::CallbackDecision::Planned);
+    CHECK(planned->journal_sequence() == journal->sequence());
+    CHECK(planned->audit_ordinal().value() == 7U);
+    CHECK(planned->callback_count() == sources.size());
+    REQUIRE(planned->callback_range());
+    CHECK(planned->callback_range()->first_callback_ordinal() == first_callback);
+    CHECK(planned->callback_range()->last_callback_ordinal().value() == 19U);
+    CHECK(evidence->reserved_terminal_audit_ordinal() ==
+          journal->audit_span()->last_audit_ordinal());
+    REQUIRE(evidence->primary_audit_record_count() == sources.size());
+    const trace::PrivateOrderAuditEffect* previous = nullptr;
+    for (std::uint32_t index = 0U; index < sources.size(); ++index) {
+      CAPTURE(index);
+      const auto& source = *sources[index];
+      const auto& execution = std::get<oms::ExecutionPayload>(source.payload());
+      const auto* const row = evidence->primary_audit_record_at(index);
+      const auto* const economic_effect = economics->execution_effect_at(index);
+      const auto* const callback = planned->callback_at(index);
+      REQUIRE(row != nullptr);
+      REQUIRE(economic_effect != nullptr);
+      REQUIRE(callback != nullptr);
+      CHECK(row->kind() == trace::M4AuditKind::EventDisposition);
+      CHECK(row->audit_ordinal().value() == 4U + index);
+      CHECK(row->journal_sequence() == journal->sequence());
+      CHECK(row->disposition() == (index == 0U ? oms::PrivateEventDisposition::Applied
+                                               : oms::PrivateEventDisposition::AppliedFromBuffer));
+      CHECK(row->callback_decision() == trace::CallbackDecision::None);
+      CHECK(row->source_input() == source);
+      CHECK(economic_effect->execution == source);
+      CHECK(economic_effect->audit_ordinal == row->audit_ordinal());
+      CHECK(callback->originating_event == row->originating_event());
+      CHECK(callback->trade_id == execution.trade_id);
+      CHECK(callback->applied_cumulative_quantity == execution.cumulative_quantity);
+      CHECK(callback->order_id == order.order_id());
+      REQUIRE(row->effect_count() == 1U);
+      const auto* const effect = row->effect_at(0U);
+      REQUIRE(effect != nullptr);
+      CHECK(effect->oms_before == (previous == nullptr ? before : previous->oms_after));
+      CHECK(effect->oms_after.pending_fill_count == pending_after[index]);
+      CHECK(effect->oms_after.state == oms::OutboundOrderState::PartiallyFilled);
+      CHECK(effect->oms_after.cumulative_filled_quantity == execution.cumulative_quantity);
+      CHECK(effect->reservation_before == economic_effect->reservation_before);
+      CHECK(effect->reservation_after == economic_effect->reservation_after);
+      if (previous != nullptr) {
+        CHECK(effect->reservation_before == previous->reservation_after);
+      }
+      REQUIRE(effect->inventory_effects);
+      for (std::size_t scope = 0U; scope < effect->inventory_effects->size(); ++scope) {
+        const auto& row_scope = (*effect->inventory_effects)[scope];
+        CHECK(row_scope.signed_quantity_delta == create_m4_decimal_or_throw<model::Quantity>(1));
+        CHECK(row_scope.signed_notional_delta == create_m4_decimal_or_throw<model::Notional>(10));
+        CHECK(row_scope.after.confirmed_quantity ==
+              create_m4_decimal_or_throw<model::Quantity>(static_cast<std::int64_t>(index) + 1));
+        if (previous != nullptr) {
+          REQUIRE(previous->inventory_effects);
+          CHECK(row_scope.before == (*previous->inventory_effects)[scope].after);
+        }
+      }
+      previous = effect;
+    }
+    REQUIRE(previous != nullptr);
+    CHECK(previous->oms_after == after);
+    CHECK(evidence->primary_audit_record_at(3U) == nullptr);
+    CHECK(low_buffer_audit->disposition() == oms::PrivateEventDisposition::BufferedGap);
+    CHECK(high_buffer_audit->disposition() == oms::PrivateEventDisposition::BufferedGap);
+    CHECK(*low_buffer_audit->effect_at(0U) == original_low_effect);
+    CHECK(*high_buffer_audit->effect_at(0U) == original_high_effect);
+
+    // ++++++++++++++++++++++++++++++++++++++++
+    // The exclusive preparation survives a move. A competing request cannot overwrite it.
+    const auto busy = fixture.owner().prepare_known_private_execution_drain(incoming, prospective,
+                                                                            first_callback);
+    REQUIRE_FALSE(busy);
+    auto moved = std::move(prepared);
+    CHECK_FALSE(prepared.has_preparation());
+    CHECK(prepared.business_evidence() == nullptr);
+    CHECK_FALSE(fixture.owner().validate_prepared_private_execution_drain(prepared));
+    REQUIRE(fixture.owner().validate_prepared_private_execution_drain(moved));
+    CHECK(moved.journal_record()->sequence().value() == 5U);
+    CHECK(store.has_outstanding_preparation());
+    CHECK(store.accepted_private_audit_record_at(3U) == nullptr);
+    CHECK_FALSE(fixture.executor->private_admission_observation(prospective.admission_ordinal));
+
+    // ++++++++++++++++++++++++++++++++++++++++
+  }
+
+  // ++++++++++++++++++++++++++++++++++++++++
+  // Abandoning the entire preparation permits the same causal positions to be reserved again.
+  // Every active gap and each separate ordinary/reconciliation completion remains untouched.
+  CHECK_FALSE(store.has_outstanding_preparation());
+  {
+    const auto retried = fixture.owner().prepare_known_private_execution_drain(
+        incoming, prospective, first_callback);
+    REQUIRE(retried);
+    CHECK(retried.value().journal_record()->sequence().value() == 5U);
+    CHECK(retried.value().business_evidence()->audit_span()->first_audit_ordinal().value() == 4U);
+  }
+  CHECK(order.private_projection() == before);
+  const auto pending = fixture.owner().pending_private_executions(order.order_id());
+  REQUIRE(pending.size() == 3U);
+  CHECK(pending[0U].execution == low_buffered->input());
+  CHECK(pending[1U].execution == high_buffered->input());
+  CHECK(pending[2U].execution == tail_buffered->input());
+  CHECK(fixture.owner().event_identity_record_count() == 3U);
+  CHECK(fixture.owner().trade_identity_record_count() == 3U);
+  CHECK(fixture.owner().exchange_order_mapping_count() == 1U);
+  CHECK(fixture.owner().retained_identity_turn_count() == 0U);
+  CHECK(fixture.owner().account_safety_state(order.provenance().logical_account_id) ==
+        risk::AccountSafetyState::Synchronized);
+  CHECK(store.accepted_private_event_record_count() == 3U);
+  CHECK(store.accepted_private_audit_record_count() == 3U);
+  CHECK(store.next_audit_ordinal().value() == 4U);
+  check_gap_economics_unchanged(fixture, order, held);
+  auto& medium = *fixture.transaction.medium;
+  fixture.end_incarnation();
+  CHECK(extract_evidence_value_or_throw(medium.published_journal_record_count()) == 4U);
+  CHECK(extract_evidence_value_or_throw(medium.acknowledged_journal_record_count()) == 1U);
+  CHECK_FALSE(medium.published_journal_record_at(4U));
+
+  // ++++++++++++++++++++++++++++++++++++++++
+}
+
+// --------------------------------------------------------
+// Independently exhaust the journal or leave room for the drain's primary and Planned rows but
+// not its terminal row. A failed preparation cannot consume the already recorded gap.
+TEST_CASE("private execution drain releases its reservations on bounded preflight failure",
+          "[private-execution-drain][private-gap-commit][runtime][m4][capacity]") {
+  for (const bool journal_full : {false, true}) {
+    CAPTURE(journal_full);
+    auto capacities = test_support::create_ordinary_m4_policy_capacities();
+    capacities.max_pending_fill_intervals_per_order = 1U;
+    if (journal_full) {
+      capacities.max_journal_records = 2U;
+    } else {
+      capacities.max_private_audit_records = 4U;
+    }
+    PrivateGapCommitFixture fixture{execution::OrderSide::Buy, capacities};
+    const auto& order = fixture.transaction.order();
+    const auto held = capture_gap_economics(fixture, order);
+    const auto exchange = fixture.transaction.create_exchange_order_id_or_throw();
+    const auto gap_attempt = fixture.create_execution_attempt_or_throw(
+        GapAdmissionLane::Venue, order, exchange, GapSourceExecution{11U, 21U, 2});
+    const auto gap = fixture.admit_or_throw(gap_attempt);
+    fixture.execute_admitted_turns_or_throw();
+    check_gap_completion(fixture, GapAdmissionLane::Venue, gap,
+                         oms::PrivateEventDisposition::BufferedGap);
+    const auto before = order.private_projection();
+    const auto& store = fixture.owner().business_evidence_store();
+    const auto* const accepted = store.accepted_private_event_record_at(0U);
+    REQUIRE(accepted != nullptr);
+    const auto original_gap = *accepted;
+    const auto incoming = fixture.normalize_gap_attempt_or_throw(
+        fixture.create_execution_attempt_or_throw(GapAdmissionLane::Reconciliation, order, exchange,
+                                                  GapSourceExecution{12U, 22U, 1}),
+        model::ReceiveTimestamp{1'000U});
+    const auto prospective = recovery::JournalReplayProvenance{
+        extract_evidence_value_or_throw(gap.attempt_ordinal.derive_next_ordinal()),
+        extract_evidence_value_or_throw(gap.receive_sequence.derive_next_ordinal())};
+    const auto result = fixture.owner().prepare_known_private_execution_drain(
+        incoming, prospective, model::CallbackOrdinal::create_initial());
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == (journal_full ? model::DomainErrorCode::JournalCapacityExceeded
+                                               : model::DomainErrorCode::PrivateEvidenceExhausted));
+    CHECK_FALSE(store.has_outstanding_preparation());
+    CHECK(store.accepted_private_event_record_count() == 1U);
+    CHECK(store.accepted_private_audit_record_count() == 1U);
+    CHECK(store.next_audit_ordinal().value() == 2U);
+    CHECK(*accepted == original_gap);
+    CHECK(order.private_projection() == before);
+    const auto pending = fixture.owner().pending_private_executions(order.order_id());
+    REQUIRE(pending.size() == 1U);
+    CHECK(pending.front().execution == original_gap.input());
+    CHECK(fixture.owner().event_identity_record_count() == 1U);
+    CHECK(fixture.owner().trade_identity_record_count() == 1U);
+    CHECK(fixture.owner().retained_identity_turn_count() == 0U);
+    check_gap_economics_unchanged(fixture, order, held);
+
+    // A repeated preflight sees the same limit, proving neither the economic nor the journal
+    // scratch stayed leased during the original rollback.
+    const auto retry = fixture.owner().prepare_known_private_execution_drain(
+        incoming, prospective, model::CallbackOrdinal::create_initial());
+    REQUIRE_FALSE(retry);
+    CHECK(retry.error() == result.error());
+    auto& medium = *fixture.transaction.medium;
+    fixture.end_incarnation();
+    CHECK(extract_evidence_value_or_throw(medium.published_journal_record_count()) == 2U);
+    CHECK_FALSE(medium.published_journal_record_at(2U));
+  }
+}
+
+// --------------------------------------------------------
+// The complete applied prefix reaches original quantity only at its final buffered execution.
+// The projected reservation is closed once; range overflow still abandons every reservation.
+TEST_CASE("private execution drain preflights full fill and checked callback range",
+          "[private-execution-drain][private-gap-commit][runtime][m4][capacity]") {
+  PrivateGapCommitFixture fixture{execution::OrderSide::Sell};
+  const auto& order = fixture.transaction.order();
+  const auto held = capture_gap_economics(fixture, order);
+  const auto exchange = fixture.transaction.create_exchange_order_id_or_throw();
+  const auto gap_attempt = fixture.create_execution_attempt_or_throw(
+      GapAdmissionLane::Venue, order, exchange, GapSourceExecution{11U, 21U, 2});
+  const auto gap = fixture.admit_or_throw(gap_attempt);
+  fixture.execute_admitted_turns_or_throw();
+  check_gap_completion(fixture, GapAdmissionLane::Venue, gap,
+                       oms::PrivateEventDisposition::BufferedGap);
+  const auto initial_projection = order.private_projection();
+  const auto incoming = fixture.normalize_gap_attempt_or_throw(
+      fixture.create_execution_attempt_or_throw(GapAdmissionLane::Reconciliation, order, exchange,
+                                                GapSourceExecution{12U, 22U, 1}),
+      model::ReceiveTimestamp{1'000U});
+  const auto prospective = recovery::JournalReplayProvenance{
+      extract_evidence_value_or_throw(gap.attempt_ordinal.derive_next_ordinal()),
+      extract_evidence_value_or_throw(gap.receive_sequence.derive_next_ordinal())};
+  const std::array stale_receipts{
+      recovery::JournalReplayProvenance{gap.attempt_ordinal, prospective.receive_sequence},
+      recovery::JournalReplayProvenance{prospective.admission_ordinal, gap.receive_sequence}};
+  for (const auto& stale : stale_receipts) {
+    const auto rejected = fixture.owner().prepare_known_private_execution_drain(
+        incoming, stale, model::CallbackOrdinal::create_initial());
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == model::DomainErrorCode::InvalidJournalState);
+    CHECK(rejected.error().context.field == "private_execution_drain.receipt_order");
+    CHECK_FALSE(fixture.owner().business_evidence_store().has_outstanding_preparation());
+  }
+
+  const auto maximum = std::numeric_limits<std::uint64_t>::max();
+  const auto exhausted = fixture.owner().prepare_known_private_execution_drain(
+      incoming, prospective, create_m4_ordinal_or_throw<model::CallbackOrdinal>(maximum));
+  REQUIRE_FALSE(exhausted);
+  CHECK(exhausted.error().code == model::DomainErrorCode::CallbackCounterExhausted);
+  REQUIRE_FALSE(fixture.owner().business_evidence_store().has_outstanding_preparation());
+  {
+    const auto prepared = fixture.owner().prepare_known_private_execution_drain(
+        incoming, prospective, model::CallbackOrdinal::create_initial());
+    if (!prepared) {
+      INFO(prepared.error().context.field);
+    }
+    REQUIRE(prepared);
+    REQUIRE(fixture.owner().validate_prepared_private_execution_drain(prepared.value()));
+    REQUIRE(prepared.value().oms_transition() != nullptr);
+    REQUIRE(prepared.value().economics_plan() != nullptr);
+    REQUIRE(prepared.value().business_evidence() != nullptr);
+    const auto& transition = *prepared.value().oms_transition();
+    const auto& economics = *prepared.value().economics_plan();
+    const auto& evidence = *prepared.value().business_evidence();
+    CHECK(transition.drained_pending_prefix_count == 1U);
+    CHECK(transition.after.state == oms::OutboundOrderState::Filled);
+    CHECK(transition.after.pending_fill_count == 0U);
+    CHECK(transition.after.cumulative_filled_quantity == order.economics().quantity);
+    CHECK(economics.reservation_after().state == risk::ReservationState::ConsumedByFill);
+    CHECK(economics.reservation_after().closure_cause == risk::ReservationClosureCause::FullFill);
+    CHECK(economics.reservation_after().remaining_exposure.quantity.coefficient() == 0);
+    CHECK(economics.reservation_after().remaining_exposure.quote_notional.coefficient() == 0);
+    CHECK(economics.reservation_after().cumulative_confirmed_exposure == held.reservation.exposure);
+    REQUIRE(economics.source_after());
+    CHECK(economics.source_after()->confirmed_quantity ==
+          create_m4_decimal_or_throw<model::Quantity>(-2));
+    CHECK(economics.source_after()->confirmed_quote_notional ==
+          create_m4_decimal_or_throw<model::Notional>(-20));
+    REQUIRE(evidence.primary_audit_record_at(0U) != nullptr);
+    REQUIRE(evidence.primary_audit_record_at(1U) != nullptr);
+    REQUIRE(evidence.primary_audit_record_at(0U)->effect_at(0U) != nullptr);
+    REQUIRE(evidence.primary_audit_record_at(1U)->effect_at(0U) != nullptr);
+    CHECK(evidence.primary_audit_record_at(0U)->effect_at(0U)->reservation_after.state ==
+          risk::ReservationState::Held);
+    CHECK(evidence.primary_audit_record_at(1U)->effect_at(0U)->reservation_after ==
+          economics.reservation_after());
+    REQUIRE(prepared.value().journal_record() != nullptr);
+    CHECK(prepared.value().journal_record()->sequence().value() == 3U);
+  }
+  CHECK(order.private_projection() == initial_projection);
+  CHECK(fixture.owner().pending_private_executions(order.order_id()).size() == 1U);
+  CHECK(fixture.owner().business_evidence_store().accepted_private_audit_record_count() == 1U);
+  check_gap_economics_unchanged(fixture, order, held);
+}
+
+// --------------------------------------------------------
+// A contiguous fill without a buffered prefix can establish its own proposed mapping. A later
+// genuine submission invalidates the economic baseline even though the original order is stable.
+TEST_CASE("private execution drain detects stale economics for a single contiguous fill",
+          "[private-execution-drain][private-gap-commit][runtime][m4][authority]") {
+  PrivateGapCommitFixture fixture;
+  const auto& order = fixture.transaction.order();
+  const auto initial_projection = order.private_projection();
+  const auto incoming = fixture.transaction.normalize_input_or_throw(
+      test_support::BusinessEvidenceInput::PartialFill, true);
+  const auto prospective = recovery::JournalReplayProvenance{
+      model::AdmissionOrdinal::create_initial(), model::ReceiveSequence::create_initial()};
+  auto result = fixture.owner().prepare_known_private_execution_drain(
+      incoming, prospective, model::CallbackOrdinal::create_initial());
+  if (!result) {
+    INFO(result.error().context.field);
+  }
+  REQUIRE(result);
+  const auto& prepared = result.value();
+  REQUIRE(fixture.owner().validate_prepared_private_execution_drain(prepared));
+  REQUIRE(prepared.oms_transition() != nullptr);
+  CHECK(prepared.oms_transition()->drained_pending_prefix_count == 0U);
+  CHECK(prepared.oms_transition()->transition_effect_count == 1U);
+  CHECK(prepared.oms_transition()->order_callback_count == 1U);
+  CHECK(prepared.oms_transition()->after.exchange_order_id ==
+        fixture.transaction.create_exchange_order_id_or_throw());
+  CHECK(prepared.oms_transition()->after.exchange_mapping_established_by_execution);
+  REQUIRE(prepared.business_evidence() != nullptr);
+  CHECK(prepared.business_evidence()->primary_audit_record_count() == 1U);
+  const auto terminal = prepared.business_evidence()->reserved_terminal_audit_ordinal();
+  REQUIRE(terminal);
+  CHECK(terminal->value() == 3U);
+  REQUIRE(prepared.journal_record() != nullptr);
+  REQUIRE(prepared.business_evidence()->primary_audit_record_at(0U) != nullptr);
+  REQUIRE(prepared.business_evidence()->primary_audit_record_at(0U)->effect_at(0U) != nullptr);
+  const auto original_journal = *prepared.journal_record();
+  const auto original_effect =
+      *prepared.business_evidence()->primary_audit_record_at(0U)->effect_at(0U);
+
+  static_cast<void>(fixture.submit_additional_order_or_throw(2));
+  CHECK(order.private_projection() == initial_projection);
+  CHECK_FALSE(fixture.owner().validate_prepared_private_execution_drain(prepared));
+  CHECK(prepared.has_preparation());
+  CHECK(*prepared.journal_record() == original_journal);
+  CHECK(*prepared.business_evidence()->primary_audit_record_at(0U)->effect_at(0U) ==
+        original_effect);
+  CHECK(fixture.owner().event_identity_record_count() == 0U);
+  CHECK(fixture.owner().trade_identity_record_count() == 0U);
+  CHECK(fixture.owner().exchange_order_mapping_count() == 0U);
+  CHECK(fixture.owner().business_evidence_store().accepted_private_event_record_count() == 0U);
+  CHECK(fixture.owner().business_evidence_store().accepted_private_audit_record_count() == 0U);
 }
 
 // --------------------------------------------------------

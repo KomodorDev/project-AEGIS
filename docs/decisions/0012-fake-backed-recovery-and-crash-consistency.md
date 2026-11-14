@@ -37,6 +37,11 @@ records for callback-free execution gaps and exact event repeats, using the next
 actual published tail. Each record links the matching primary audit row and preserves the original
 normalized source independently from resolved subject provenance.
 
+The live execution-drain preparation can reserve the next actual record with a multi-row audit
+span. It includes one primary per execution, the aggregate Planned callback row, and the reserved
+terminal position. Abandoning the preparation releases the reservation without advancing either
+the published journal or the audit prefix.
+
 Business records remain unacknowledged. A closed incarnation's published suffix can be inspected or
 explicitly discarded; namespace bootstrap rejects an undiscarded suffix. Discard preserves the
 acknowledged namespace prefix and never infers replay from a volatile audit reference. Original

@@ -14,6 +14,7 @@
 #include "aegis/runtime/m4_policy.hpp"
 #include "private_business_evidence_store.hpp"
 #include "private_business_proposal.hpp"
+#include "private_execution_drain_evidence.hpp"
 #include "private_identity_retention.hpp"
 #include "private_order_event_factory.hpp"
 
@@ -39,6 +40,10 @@ struct PrivateBusinessTransactionIncarnation;
 // ########################################################################
 // A sealed detached transaction retains genuine component and journal reservations together.
 class PreparedInitialKnownPrivateBusinessTransaction;
+
+// ########################################################################
+// A detached fill/drain preparation owns the real journal and copied economic evidence leases.
+class PreparedKnownPrivateExecutionDrain;
 
 // ########################################################################
 // The coordinator installs the child only while pristine, then owns and destroys it at one stable
@@ -499,6 +504,22 @@ public:
       const PreparedInitialKnownPrivateBusinessTransaction& transaction) const;
 
   // --------------------------------------------------------
+  // Prepare an incoming contiguous execution and the actual pending prefix it would drain.
+  // The caller supplies prospective receipt and callback identities. Preparation, inspection,
+  // moves, and release require owner serialization or quiescence while the owner is live.
+  // Failure releases every lease. Success grants only immutable inspection.
+  [[nodiscard]] model::Result<PreparedKnownPrivateExecutionDrain>
+  prepare_known_private_execution_drain(const oms::NormalizedPrivateOrderInput& input,
+                                        recovery::JournalReplayProvenance replay_provenance,
+                                        model::CallbackOrdinal first_callback_ordinal) const;
+
+  // --------------------------------------------------------
+  // Recheck the exact owner incarnation, original pending facts, and all live reservations.
+  // A moved or stale preparation fails without refreshing state or authorizing a write.
+  [[nodiscard]] model::Result<void> validate_prepared_private_execution_drain(
+      const PreparedKnownPrivateExecutionDrain& preparation) const;
+
+  // --------------------------------------------------------
   // Inspect fixed preparation capacities and prospective counters without mutation rights.
   [[nodiscard]] const PrivateBusinessEvidenceStore& business_evidence_store() const noexcept {
     return *business_evidence_store_;
@@ -653,6 +674,20 @@ private:
   find_committed_exchange_mapping_for_order(const model::OrderId& order_id) const noexcept;
 
   // --------------------------------------------------------
+  // Reject an already compared incoming execution or a conflict with retained execution facts.
+  [[nodiscard]] model::Result<void> validate_first_seen_private_execution_drain_identity(
+      const FirstSeenAuthoritativePrivateIdentityPlan& identity,
+      const KnownFirstSeenPrivateCorrelationPlan& correlation,
+      const FirstSeenPrivateTradeIdentityPlan& trade, const oms::ExecutionPayload& execution) const;
+
+  // --------------------------------------------------------
+  // Verify immutable original BufferedGap evidence together with both active registry rows.
+  // Borrowed identities are valid only within the serialized preparation call.
+  [[nodiscard]] model::Result<PrivateExecutionDrainIdentity>
+  verify_buffered_private_execution_identity(const oms::NormalizedPrivateOrderInput& input,
+                                             const oms::KnownPrivateEventResolution& owner) const;
+
+  // --------------------------------------------------------
   // Check canonical event/trade/mapping insertion and the genuine OMS gap before publication.
   // Failure leaves every row unchanged. Callers serialize validation through application.
   [[nodiscard]] model::Result<void>
@@ -682,6 +717,10 @@ private:
   std::uint32_t trade_identity_record_count_{0U};
   std::uint32_t exchange_order_mapping_count_{0U};
   std::unique_ptr<PrivateBusinessEvidenceStore> business_evidence_store_;
+  mutable PrivateExecutionDrainEvidenceScratch execution_drain_evidence_scratch_;
+  // Cold capacity is the same one-plus-pending width used by the economic batch.
+  mutable std::vector<risk::ReservationInventoryExecutionInput> execution_drain_inputs_;
+  mutable std::vector<PrivateExecutionDrainIdentity> execution_drain_identities_;
   std::shared_ptr<const detail::PrivateBusinessTransactionIncarnation> business_incarnation_;
   std::shared_ptr<recovery::detail::FakeJournalLeaseControl> recovery_lease_;
   PrivateIdentityRetentionState retention_;

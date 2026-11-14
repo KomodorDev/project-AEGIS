@@ -76,6 +76,13 @@ counter. A successful gap or exact repeat publishes the actual reserved input an
 one-row audit span. The journal suffix is volatile and unacknowledged. These types add
 no encoder, digest preimage, or ADR-0014 byte assignment.
 
+Live execution-drain preparation uses cold scratch sized to
+`1 + max_pending_fill_intervals_per_order`. The proposed audit span contains one primary per
+applied execution, then one aggregate Planned row and a reserved terminal position. The incoming
+execution owns the prospective journal record. Each drained primary retains its original source and
+first-admission resolution, and its proposed application links to the incoming journal sequence.
+An abandoned or failed preparation consumes no journal, audit, or callback position.
+
 The source-private OMS transition planner also checks pending-fill and global cancel-attempt bounds
 against the installed policy and reports exact proposed effect/callback counts. Its result contains
 fixed value fields, at most one new gap or cancel-history replacement, and the count of the canonical

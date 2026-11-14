@@ -671,11 +671,18 @@ PrivateOrderReconciler::PrivateOrderReconciler(
       trade_identity_records_{std::move(trade_identity_records)},
       exchange_order_mappings_{std::move(exchange_order_mappings)},
       business_evidence_store_{std::move(business_evidence_store)},
+      execution_drain_evidence_scratch_{
+          static_cast<std::uint32_t>(m4_policy_.capacities().max_pending_fill_intervals_per_order) +
+          1U},
       business_incarnation_{std::move(business_incarnation)},
       recovery_lease_{std::move(recovery_lease)}, retention_{configuration, m4_policy_} {
   if (!recovery_lease_ || !business_evidence_store_ || !business_incarnation_) {
     std::terminate();
   }
+  const auto drain_width =
+      static_cast<std::uint32_t>(m4_policy_.capacities().max_pending_fill_intervals_per_order) + 1U;
+  execution_drain_inputs_.reserve(drain_width);
+  execution_drain_identities_.reserve(drain_width);
 }
 
 // --------------------------------------------------------

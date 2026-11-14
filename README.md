@@ -139,6 +139,9 @@ durable external journal.
   actual published prefix, rechecks unchanged owner state, and releases every reservation on
   abandonment. Authentic gap and exact-repeat turns publish one typed journal input and one primary
   audit row each. The fake journal suffix remains unacknowledged and must be discarded before reopen.
+- A live-order preparation reads the actual pending fills, verifies their original identities, and
+  reserves one unpublished journal record and the full audit span. Its proposal describes each
+  order, reservation, and inventory update in cumulative order, with one proposed callback per fill.
 
 The [current M4 implementation boundary](docs/implementation-roadmap.md#current-implementation-boundary)
 explains the joint callback-free commit and the remaining reservation, inventory, callback, and
